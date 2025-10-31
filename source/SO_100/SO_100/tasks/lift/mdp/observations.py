@@ -21,16 +21,26 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 
-def object_position_in_robot_root_frame(
+def object_pos_in_arm_frame(
     env: ManagerBasedRLEnv,
-    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    arm_cfg: SceneEntityCfg,
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
 ) -> torch.Tensor:
-    """The position of the object in the robot's root frame."""
-    robot: RigidObject = env.scene[robot_cfg.name]
-    object: RigidObject = env.scene[object_cfg.name]
-    object_pos_w = object.data.root_pos_w[:, :3]
-    object_pos_b, _ = subtract_frame_transforms(
-        robot.data.root_state_w[:, :3], robot.data.root_state_w[:, 3:7], object_pos_w
+    """Return the object's position expressed in the given arm's root frame.
+    
+    arm_cfg: which arm to use as reference, e.g. SceneEntityCfg("right_arm") or ("left_arm")
+    Output shape: (num_envs, 3)
+    """
+    arm: RigidObject = env.scene[arm_cfg.name]
+    obj: RigidObject = env.scene[object_cfg.name]
+
+    obj_pos_w = obj.data.root_pos_w[:, :3]  # (num_envs, 3)
+
+    # subtract_frame_transforms(world_arm_pos, world_arm_quat, world_point)
+    # -> point expressed in arm local frame
+    obj_pos_in_arm, _ = subtract_frame_transforms(
+        arm.data.root_state_w[:, :3],
+        arm.data.root_state_w[:, 3:7],
+        obj_pos_w,
     )
-    return object_pos_b
+    return obj_pos_in_arm  # (num_envs, 3)
