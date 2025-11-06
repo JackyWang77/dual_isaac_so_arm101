@@ -36,3 +36,63 @@ gym.register(
     },
     disable_env_checker=True,
 )
+
+gym.register(
+    id="SO-ARM100-Dual-Lift-Cube-IK-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.ik_rel_env_cfg:DualSoArm100LiftCube_IK_EnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:LiftCubePPORunnerCfg",
+    },
+    disable_env_checker=True,
+)
+
+gym.register(
+    id="SO-ARM100-Dual-Lift-Cube-IK-Play-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.ik_rel_env_cfg:DualSoArm100LiftCubeIK_EnvCfg_PLAY",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:LiftCubePPORunnerCfg",
+    },
+    disable_env_checker=True,
+)
+
+gym.register(
+    id="SO-ARM100-Dual-Lift-Cube-IK-Recurrent-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.ik_rel_env_cfg:DualSoArm100LiftCube_IK_EnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:LiftCubePPORecurrentRunnerCfg",
+    },
+    disable_env_checker=True,
+)
+
+gym.register(
+    id="SO-ARM100-Dual-Lift-Cube-IK-Recurrent-Play-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.ik_rel_env_cfg:DualSoArm100LiftCubeIK_EnvCfg_PLAY",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:LiftCubePPORecurrentRunnerCfg",
+    },
+    disable_env_checker=True,
+)
+
+gym.register(
+    id="SO-ARM100-Single-Lift-Cube-IK-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.single_ik_rel_env_cfg:SoArm100LiftCube_IK_EnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:LiftCubePPORunnerCfg",
+    },
+    disable_env_checker=True,
+)
+
+gym.register(
+    id="SO-ARM100-Single-Lift-Cube-IK-Play-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.single_ik_rel_env_cfg:SoArm100LiftCubeIK_EnvCfg_PLAY",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:LiftCubePPORunnerCfg",
+    },
+    disable_env_checker=True,
+)

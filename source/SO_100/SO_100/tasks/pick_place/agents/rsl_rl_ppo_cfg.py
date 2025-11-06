@@ -19,7 +19,7 @@ from isaaclab_rl.rsl_rl import (
 
 @configclass
 class LiftCubePPORunnerCfg(RslRlOnPolicyRunnerCfg):
-    num_steps_per_env = 24  # default number of steps per environment
+    num_steps_per_env = 24
     save_interval = 600
     experiment_name = "lift"
     empirical_normalization = False
@@ -48,11 +48,11 @@ class LiftCubePPORunnerCfg(RslRlOnPolicyRunnerCfg):
 
 @configclass
 class LiftCubePPORecurrentRunnerCfg(RslRlOnPolicyRunnerCfg):
-    num_steps_per_env = 24  # default number of steps per environment
-    save_interval = 100
+    num_steps_per_env = 24
+    save_interval = 600
     experiment_name = "lift"
     empirical_normalization = False
-    max_iterations = 1000  # default training iterations
+    max_iterations = 6000  # default training iterations
     policy = RslRlPpoActorCriticRecurrentCfg(
         init_noise_std=1.0,
         actor_hidden_dims=[256, 128, 64],
