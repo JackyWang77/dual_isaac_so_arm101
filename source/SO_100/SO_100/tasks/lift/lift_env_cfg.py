@@ -81,41 +81,42 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
         spawn=sim_utils.DomeLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0),
     )
 
-    camera_top = CameraCfg(
-        prim_path="{ENV_REGEX_NS}/camera_top",
-        update_period=0.1,
-        height=480,
-        width=640,
-        data_types=["rgb", "distance_to_image_plane"],
-        spawn=sim_utils.PinholeCameraCfg(
-            focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 1.0e5)
-        ),
-        offset=CameraCfg.OffsetCfg(pos=(0.510, 0.0, 0.015), rot=(0.5, -0.5, 0.5, -0.5), convention="ros"),
-    )
+    # Cameras disabled for faster training (uncomment if you need camera observations)
+    # camera_top = CameraCfg(
+    #     prim_path="{ENV_REGEX_NS}/camera_top",
+    #     update_period=0.1,
+    #     height=480,
+    #     width=640,
+    #     data_types=["rgb", "distance_to_image_plane"],
+    #     spawn=sim_utils.PinholeCameraCfg(
+    #         focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 1.0e5)
+    #     ),
+    #     offset=CameraCfg.OffsetCfg(pos=(0.510, 0.0, 0.015), rot=(0.5, -0.5, 0.5, -0.5), convention="ros"),
+    # )
 
-    camera_left_wrist = CameraCfg(
-        prim_path="{ENV_REGEX_NS}/camera_left_wrist",
-        update_period=0.1,
-        height=480,
-        width=640,
-        data_types=["rgb"],
-        spawn=sim_utils.PinholeCameraCfg(
-            focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 1.0e5)
-        ),
-        offset=CameraCfg.OffsetCfg(pos=(0.510, 0.0, 0.015), rot=(0.5, -0.5, 0.5, -0.5), convention="ros"),
-    )
+    # camera_left_wrist = CameraCfg(
+    #     prim_path="{ENV_REGEX_NS}/camera_left_wrist",
+    #     update_period=0.1,
+    #     height=480,
+    #     width=640,
+    #     data_types=["rgb"],
+    #     spawn=sim_utils.PinholeCameraCfg(
+    #         focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 1.0e5)
+    #     ),
+    #     offset=CameraCfg.OffsetCfg(pos=(0.510, 0.0, 0.015), rot=(0.5, -0.5, 0.5, -0.5), convention="ros"),
+    # )
 
-    camera_right_wrist = CameraCfg(
-        prim_path="{ENV_REGEX_NS}/camera_right_wrist",
-        update_period=0.1,
-        height=480,
-        width=640,
-        data_types=["rgb"],
-        spawn=sim_utils.PinholeCameraCfg(
-            focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 1.0e5)
-        ),
-        offset=CameraCfg.OffsetCfg(pos=(0.510, 0.0, 0.015), rot=(0.5, -0.5, 0.5, -0.5), convention="ros"),
-    )
+    # camera_right_wrist = CameraCfg(
+    #     prim_path="{ENV_REGEX_NS}/camera_right_wrist",
+    #     update_period=0.1,
+    #     height=480,
+    #     width=640,
+    #     data_types=["rgb"],
+    #     spawn=sim_utils.PinholeCameraCfg(
+    #         focal_length=24.0, focus_distance=400.0, horizontal_aperture=20.955, clipping_range=(0.1, 1.0e5)
+    #     ),
+    #     offset=CameraCfg.OffsetCfg(pos=(0.510, 0.0, 0.015), rot=(0.5, -0.5, 0.5, -0.5), convention="ros"),
+    # )
 
 ##
 # MDP settings
@@ -264,7 +265,10 @@ class EventCfg:
         func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
-            "pose_range": {"x": (-0.1, 0.1), "y": (-0.2, 0.2), "z": (0.0, 0.0)},
+            # Increased Y range to ensure equal exposure to both arms
+            # Y range: (-0.3, 0.3) covers both arms symmetrically
+            # Right arm at y=-0.25, Left arm at y=0.25
+            "pose_range": {"x": (-0.1, 0.1), "y": (-0.3, 0.3), "z": (0.0, 0.0)},
             "velocity_range": {},
             "asset_cfg": SceneEntityCfg("object", body_names="Object"),
         },
@@ -275,15 +279,47 @@ class EventCfg:
 class DualRewardsCfg:
     """Reward terms for the MDP (dual-arm IK version)."""
 
-    reaching_object = RewTerm(
-        func=mdp.object_ee_distance,
+    # Smart reaching: only the closer arm reaches, the farther one stays still
+    # Significantly increased weight to strongly encourage arm selection based on proximity
+    closer_arm_reaches = RewTerm(
+        func=mdp.closer_arm_reaches_object,
         params={
             "std": 0.05,
             "ee_right_cfg": SceneEntityCfg("ee_right"),
             "ee_left_cfg": SceneEntityCfg("ee_left"),
         },
-        weight=1.0
+        weight=10.0  # Much higher weight to enforce smart arm selection
     )
+    
+    farther_arm_stays_still = RewTerm(
+        func=mdp.farther_arm_stays_still,
+        params={
+            "ee_right_cfg": SceneEntityCfg("ee_right"),
+            "ee_left_cfg": SceneEntityCfg("ee_left"),
+            "right_arm_cfg": SceneEntityCfg("right_arm"),
+            "left_arm_cfg": SceneEntityCfg("left_arm"),
+        },
+        weight=2.0  # Increased to strongly penalize unnecessary motion
+    )
+    
+    # Original separate rewards (commented out, can be enabled if needed)
+    # reaching_object_right = RewTerm(
+    #     func=mdp.object_ee_distance,
+    #     params={
+    #         "std": 0.05,
+    #         "ee_frame_cfg": SceneEntityCfg("ee_right"),
+    #     },
+    #     weight=1.0
+    # )
+    # 
+    # reaching_object_left = RewTerm(
+    #     func=mdp.object_ee_distance,
+    #     params={
+    #         "std": 0.05,
+    #         "ee_frame_cfg": SceneEntityCfg("ee_left"),
+    #     },
+    #     weight=1.0
+    # )
 
     lifting_object_right = RewTerm(
         func=mdp.object_is_lifted,

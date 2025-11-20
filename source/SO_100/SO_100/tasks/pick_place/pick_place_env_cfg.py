@@ -1,9 +1,4 @@
-# Copyright (c) 2024-2025, Muammer Bay (LycheeAI), Louis Le Lay
-# All rights reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
-#
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers.
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -11,20 +6,11 @@
 from dataclasses import MISSING
 
 import isaaclab.sim as sim_utils
-
-from . import mdp
-from isaaclab.assets import (
-    ArticulationCfg,
-    AssetBaseCfg,
-    DeformableObjectCfg,
-    RigidObjectCfg,
-)
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg
+from isaaclab.devices.openxr import XrCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
-from isaaclab.managers import CurriculumTermCfg as CurrTerm
-from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
-from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
@@ -33,17 +19,12 @@ from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdF
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
-# from isaaclab.utils.offset import OffsetCfg
-# from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
-# from isaaclab.utils.visualizer import FRAME_MARKER_CFG
-# from isaaclab.utils.assets import RigidBodyPropertiesCfg
+from . import mdp
 
 
 ##
 # Scene definition
 ##
-
-
 @configclass
 class ObjectTableSceneCfg(InteractiveSceneCfg):
     """Configuration for the lift scene with a robot and a object.
@@ -52,13 +33,9 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     """
 
     # robots: will be populated by agent env cfg
-    left_arm: ArticulationCfg = MISSING
-    right_arm: ArticulationCfg = MISSING
+    robot: ArticulationCfg = MISSING
     # end-effector sensor: will be populated by agent env cfg
-    ee_right: FrameTransformerCfg = MISSING
-    ee_left: FrameTransformerCfg = MISSING
-    # target object: will be populated by agent env cfg
-    object: RigidObjectCfg | DeformableObjectCfg = MISSING
+    ee_frame: FrameTransformerCfg = MISSING
 
     # Table
     table = AssetBaseCfg(
@@ -84,242 +61,122 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
 ##
 # MDP settings
 ##
-
-
-@configclass
-class CommandsCfg:
-    """Command terms for the MDP."""
-
-    object_pose_right = mdp.UniformPoseCommandCfg(
-        asset_name="right_arm",
-        body_name=MISSING,  # will be set by agent env cfg
-        resampling_time_range=(5.0, 5.0),
-        debug_vis=True,
-        ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(-0.1, 0.1),
-            pos_y=(-0.3, -0.1),
-            pos_z=(0.2, 0.35),
-            roll=(0.0, 0.0),
-            pitch=(0.0, 0.0),
-            yaw=(0.0, 0.0),
-        ),
-    )
-    object_pose_left = mdp.UniformPoseCommandCfg(
-        asset_name="left_arm",
-        body_name=MISSING,  # will be set by agent env cfg
-        resampling_time_range=(5.0, 5.0),
-        debug_vis=True,
-        ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(-0.1, 0.1),
-            pos_y=(0.1, 0.3),
-            pos_z=(0.2, 0.35),
-            roll=(0.0, 0.0),
-            pitch=(0.0, 0.0),
-            yaw=(0.0, 0.0),
-        ),
-    )
-
-
 @configclass
 class ActionsCfg:
-    """Action specifications for the dual-arm MDP.
+    """Action specifications for the MDP."""
 
-    We explicitly expose separate actions for the right and left arm.
-    Each arm has:
-    - a joint position (or IK) action head
-    - a gripper (binary open/close) action head
-
-    We intentionally REMOVE the legacy single-arm fields `arm_action` and
-    `gripper_action`, because we want the agent to conceptually be
-    a dual-arm controller, not "main arm + maybe second arm".
-    """
-
-    # right arm joint control (must be filled in env __post_init__)
-    right_arm_action: mdp.JointPositionActionCfg | mdp.DifferentialInverseKinematicsActionCfg = MISSING
-
-    # right gripper open/close
-    right_gripper_action: mdp.BinaryJointPositionActionCfg = MISSING
-
-    # left arm joint control
-    left_arm_action: mdp.JointPositionActionCfg | mdp.DifferentialInverseKinematicsActionCfg = MISSING
-
-    # left gripper open/close
-    left_gripper_action: mdp.BinaryJointPositionActionCfg = MISSING
+    # will be set by agent env cfg
+    arm_action: mdp.JointPositionActionCfg = MISSING
+    gripper_action: mdp.BinaryJointPositionActionCfg = MISSING
 
 
 @configclass
 class ObservationsCfg:
+    """Observation specifications for the MDP."""
+
     @configclass
     class PolicyCfg(ObsGroup):
-        # --------------------------
-        # Left arm proprioception
-        # --------------------------
-        left_joint_pos = ObsTerm(
-            func=mdp.joint_pos_rel,
-            params={"asset_cfg": SceneEntityCfg("left_arm")},
-        )
-        left_joint_vel = ObsTerm(
-            func=mdp.joint_vel_rel,
-            params={"asset_cfg": SceneEntityCfg("left_arm")},
-        )
+        """Observations for policy group with state values."""
 
-        # Object position in LEFT arm coordinates
-        left_obj_rel = ObsTerm(
-            func=mdp.object_pos_in_arm_frame,    # <<< changed name
-            params={"arm_cfg": SceneEntityCfg("left_arm")},
-        )
+        actions = ObsTerm(func=mdp.last_action)
+        joint_pos = ObsTerm(func=mdp.joint_pos_rel)
+        joint_vel = ObsTerm(func=mdp.joint_vel_rel)
+        object = ObsTerm(func=mdp.object_obs)
+        object_positions = ObsTerm(func=mdp.object_positions_in_world_frame)
+        object_orientations = ObsTerm(func=mdp.object_orientations_in_world_frame)
+        eef_pos = ObsTerm(func=mdp.ee_frame_pos)
+        eef_quat = ObsTerm(func=mdp.ee_frame_quat)
+        gripper_pos = ObsTerm(func=mdp.gripper_pos)
 
-        # --------------------------
-        # Right arm proprioception
-        # --------------------------
-        right_joint_pos = ObsTerm(
-            func=mdp.joint_pos_rel,
-            params={"asset_cfg": SceneEntityCfg("right_arm")},
-        )
-        right_joint_vel = ObsTerm(
-            func=mdp.joint_vel_rel,
-            params={"asset_cfg": SceneEntityCfg("right_arm")},
-        )
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = False
 
-        # Object position in RIGHT arm coordinates
-        right_obj_rel = ObsTerm(
-            func=mdp.object_pos_in_arm_frame,    # <<< changed name
-            params={"arm_cfg": SceneEntityCfg("right_arm")},
-        )
+    @configclass
+    class RGBCameraPolicyCfg(ObsGroup):
+        """Observations for policy group with RGB images."""
 
-        # --------------------------
-        # Task commands / targets
-        # --------------------------
-        # Goal pose sampled for the right arm
-        target_right = ObsTerm(
-            func=mdp.generated_commands,
-            params={"command_name": "object_pose_right"},
-        )
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = False
 
-        # Goal pose sampled for the left arm
-        target_left = ObsTerm(
-            func=mdp.generated_commands,
-            params={"command_name": "object_pose_left"},
-        )
+    @configclass
+    class SubtaskCfg(ObsGroup):
+        """Observations for subtask group."""
 
-        # --------------------------
-        # Previous action (for smoothness / stabilization)
-        # --------------------------
-        last_action_all = ObsTerm(
-            func=mdp.last_action,
+        pick_plate = ObsTerm(
+            func=mdp.object_grasped,
+            params={
+                "robot_cfg": SceneEntityCfg("robot"),
+                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+                "object_cfg": SceneEntityCfg("plate"),
+            },
+        )
+        place_plate = ObsTerm(
+            func=mdp.object_placed,
+            params={
+                "robot_cfg": SceneEntityCfg("robot"),
+                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+                "object_cfg": SceneEntityCfg("plate"),
+                "target_cfg": SceneEntityCfg("object"),
+                "planar_offset": (0.0, 0.0),
+                "planar_tolerance": 0.03,
+                "height_target": 0.02,
+                "height_tolerance": 0.02,
+            },
+        )
+        pick_fork = ObsTerm(
+            func=mdp.object_grasped,
+            params={
+                "robot_cfg": SceneEntityCfg("robot"),
+                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+                "object_cfg": SceneEntityCfg("fork"),
+            },
+        )
+        place_fork = ObsTerm(
+            func=mdp.object_placed,
+            params={
+                "robot_cfg": SceneEntityCfg("robot"),
+                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+                "object_cfg": SceneEntityCfg("fork"),
+                "target_cfg": SceneEntityCfg("object"),
+                "planar_offset": (0.0, 0.08),
+                "planar_tolerance": 0.03,
+                "height_target": 0.02,
+                "height_tolerance": 0.02,
+            },
+        )
+        pick_knife = ObsTerm(
+            func=mdp.object_grasped,
+            params={
+                "robot_cfg": SceneEntityCfg("robot"),
+                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+                "object_cfg": SceneEntityCfg("knife"),
+            },
+        )
+        place_knife = ObsTerm(
+            func=mdp.object_placed,
+            params={
+                "robot_cfg": SceneEntityCfg("robot"),
+                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+                "object_cfg": SceneEntityCfg("knife"),
+                "target_cfg": SceneEntityCfg("object"),
+                "planar_offset": (0.0, -0.08),
+                "planar_tolerance": 0.03,
+                "height_target": 0.02,
+                "height_tolerance": 0.02,
+            },
         )
 
         def __post_init__(self):
-            # add noise/corruption, and concat all ObsTerm into single vector
-            self.enable_corruption = True
-            self.concatenate_terms = True
+            self.enable_corruption = False
+            self.concatenate_terms = False
 
-    # top level group
+
+    # observation groups
     policy: PolicyCfg = PolicyCfg()
-
-
-@configclass
-class EventCfg:
-    """Configuration for events."""
-
-    reset_all = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
-
-    reset_object_position = EventTerm(
-        func=mdp.reset_root_state_uniform,
-        mode="reset",
-        params={
-            "pose_range": {"x": (-0.1, 0.1), "y": (-0.2, 0.2), "z": (0.0, 0.0)},
-            "velocity_range": {},
-            "asset_cfg": SceneEntityCfg("object", body_names="Object"),
-        },
-    )
-
-
-@configclass
-class DualRewardsCfg:
-    """Reward terms for the MDP (dual-arm IK version)."""
-
-    reaching_object = RewTerm(
-        func=mdp.object_ee_distance,
-        params={
-            "std": 0.05,
-            "ee_right_cfg": SceneEntityCfg("ee_right"),
-            "ee_left_cfg": SceneEntityCfg("ee_left"),
-        },
-        weight=1.0
-    )
-
-    lifting_object_right = RewTerm(
-        func=mdp.object_is_lifted,
-        params={"minimal_height": 0.04},
-        weight=15.0
-    )
-    lifting_object_left = RewTerm(
-        func=mdp.object_is_lifted,
-        params={"minimal_height": 0.04},
-        weight=15.0
-    )
-
-    # object goal tracking reward for right arm
-    object_goal_tracking_right = RewTerm(
-        func=mdp.object_goal_distance,
-        params={
-            "std": 0.3,
-            "minimal_height": 0.04,
-            "command_name": "object_pose_right",
-            "robot_cfg": SceneEntityCfg("right_arm"),
-        },
-        weight=16.0,
-    )
-    object_goal_tracking_left = RewTerm(
-        func=mdp.object_goal_distance,
-        params={"std": 0.3,
-                "minimal_height": 0.04,
-                "command_name": "object_pose_left",
-                "robot_cfg": SceneEntityCfg("left_arm")
-        },
-        weight=16.0,
-    )
-    # object goal tracking reward for right arm (fine-grained)
-    object_goal_tracking_fine_grained_right = RewTerm(
-        func=mdp.object_goal_distance,
-        params={
-            "std": 0.05,
-            "minimal_height": 0.04,
-            "command_name": "object_pose_right",
-            "robot_cfg": SceneEntityCfg("right_arm"),
-        },
-        weight=5.0,
-    )
-
-    # object goal tracking reward for left arm (fine-grained)
-    object_goal_tracking_fine_grained_left = RewTerm(
-        func=mdp.object_goal_distance,
-        params={
-            "std": 0.05,
-            "minimal_height": 0.04,
-            "command_name": "object_pose_left",
-            "robot_cfg": SceneEntityCfg("left_arm"),
-        },
-        weight=5.0,
-    )
-
-    # action penalty for right arm
-    action_rate_right = RewTerm(func=mdp.action_rate_l2, weight=-1e-4)
-    action_rate_left = RewTerm(func=mdp.action_rate_l2, weight=-1e-4)
-
-    # joint velocity penalty for right arm
-    joint_vel_right = RewTerm(
-        func=mdp.joint_vel_l2,
-        weight=-1e-4,
-        params={"asset_cfg": SceneEntityCfg("right_arm")},
-    )
-    joint_vel_left = RewTerm(
-        func=mdp.joint_vel_l2,
-        weight=-1e-4,
-        params={"asset_cfg": SceneEntityCfg("left_arm")},
-    )
-
+    rgb_camera: RGBCameraPolicyCfg = RGBCameraPolicyCfg()
+    subtask_terms: SubtaskCfg = SubtaskCfg()
 
 
 @configclass
@@ -328,90 +185,57 @@ class TerminationsCfg:
 
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
 
-    object_dropping = DoneTerm(
-        func=mdp.root_height_below_minimum, params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("object")}
-    )
+    # DISABLED: Dropping detection causes issues with physics engine settling
+    # Objects may temporarily dip below threshold during initialization/contact
+    # Can be re-enabled later if needed, but not critical for demo recording
+    # plate_dropping = DoneTerm(
+    #     func=mdp.root_height_below_minimum,
+    #     params={"minimum_height": 0.03, "asset_cfg": SceneEntityCfg("plate")}
+    # )
+    # fork_dropping = DoneTerm(
+    #     func=mdp.root_height_below_minimum,
+    #     params={"minimum_height": 0.03, "asset_cfg": SceneEntityCfg("fork")}
+    # )
+    # knife_dropping = DoneTerm(
+    #     func=mdp.root_height_below_minimum,
+    #     params={"minimum_height": 0.03, "asset_cfg": SceneEntityCfg("knife")}
+    # )
+
+    # Success condition: all objects correctly placed on tray with gripper open
+    success = DoneTerm(func=mdp.objects_picked_and_placed)
 
 
 @configclass
-class CurriculumCfg:
-    """Curriculum terms for the dual-arm MDP.
-
-    We gradually increase penalties on unnecessary motion and jitter.
-    This encourages both arms to move smoothly and stay stable,
-    especially the support arm.
-    """
-
-    # Gradually ramp up the global "action smoothness" penalty.
-    # This corresponds to the reward term "action_rate_all"
-    # in DualRewardsCfg, which punishes large action deltas.
-    action_rate_right = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            # must match the key in DualRewardsCfg
-            "term_name": "action_rate_right",
-            # final target weight after curriculum:
-            # more negative => stronger penalty for jerky actions
-            "weight": -1e-1,
-            # number of steps over which we anneal from original weight
-            "num_steps": 10000,
-        },
-    )
-    action_rate_left = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "action_rate_left",
-            "weight": -1e-1,
-            "num_steps": 10000,
-        },
-    )
-    # Gradually increase velocity penalty for the right arm.
-    # This aligns with the reward term "joint_vel_right"
-    # in DualRewardsCfg, which penalizes high joint speeds.
-    joint_vel_right = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "joint_vel_right",
-            "weight": -1e-1,
-            "num_steps": 10000,
-        },
-    )
-
-    # Same idea, but for the left arm.
-    joint_vel_left = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "joint_vel_left",
-            "weight": -1e-1,
-            "num_steps": 10000,
-        },
-    )
-
-
-@configclass
-class LiftEnvCfg(ManagerBasedRLEnvCfg):
-    """Configuration for the lifting environment."""
+class PickPlaceEnvCfg(ManagerBasedRLEnvCfg):
+    """Configuration for the pick and place environment."""
 
     # Scene settings
-    scene: ObjectTableSceneCfg = ObjectTableSceneCfg(num_envs=1024, env_spacing=2.5)
+    scene: ObjectTableSceneCfg = ObjectTableSceneCfg(num_envs=4096, env_spacing=2.5, replicate_physics=False)
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
-    commands: CommandsCfg = CommandsCfg()
     # MDP settings
-    rewards: DualRewardsCfg = DualRewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
-    events: EventCfg = EventCfg()
-    curriculum: CurriculumCfg = CurriculumCfg()
+
+    # Unused managers
+    commands = None
+    rewards = None
+    events = None
+    curriculum = None
+
+    xr: XrCfg = XrCfg(
+        anchor_pos=(-0.1, -0.5, -1.05),
+        anchor_rot=(0.866, 0, 0, -0.5),
+    )
 
     def __post_init__(self):
         """Post initialization."""
         # general settings
-        self.decimation = 2
-        self.episode_length_s = 5.0
-        self.viewer.eye = (2.5, 2.5, 1.5)
+        self.decimation = 5
+        self.episode_length_s = 30.0
         # simulation settings
         self.sim.dt = 0.01  # 100Hz
+        # Render interval should match decimation to avoid rendering intermediate physics steps
         self.sim.render_interval = self.decimation
 
         self.sim.physx.bounce_threshold_velocity = 0.2
@@ -419,6 +243,3 @@ class LiftEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physx.gpu_found_lost_aggregate_pairs_capacity = 1024 * 1024 * 4
         self.sim.physx.gpu_total_aggregate_pairs_capacity = 16 * 1024
         self.sim.physx.friction_correlation_distance = 0.00625
-        self.sim.physx.use_gpu = True
-        self.sim.physx.gpu_max_rigid_contact_count = 65536
-        self.sim.physx.gpu_max_rigid_patch_count = 32768

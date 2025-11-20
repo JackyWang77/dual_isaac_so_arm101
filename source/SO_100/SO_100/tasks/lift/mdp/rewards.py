@@ -86,3 +86,85 @@ def object_ee_distance_and_lifted(
     lift_reward = object_is_lifted(env, minimal_height, object_cfg)
     # Combine rewards multiplicatively
     return reach_reward * lift_reward
+
+
+def closer_arm_reaches_object(
+    env: ManagerBasedRLEnv,
+    std: float,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    ee_right_cfg: SceneEntityCfg = SceneEntityCfg("ee_right"),
+    ee_left_cfg: SceneEntityCfg = SceneEntityCfg("ee_left"),
+) -> torch.Tensor:
+    """Reward only the closer arm for reaching the object.
+    
+    This encourages the closer arm to reach while the farther arm stays still.
+    """
+    object: RigidObject = env.scene[object_cfg.name]
+    ee_right: FrameTransformer = env.scene[ee_right_cfg.name]
+    ee_left: FrameTransformer = env.scene[ee_left_cfg.name]
+    
+    # Object position
+    obj_pos = object.data.root_pos_w
+    
+    # End-effector positions
+    ee_right_pos = ee_right.data.target_pos_w[..., 0, :]
+    ee_left_pos = ee_left.data.target_pos_w[..., 0, :]
+    
+    # Calculate distances
+    dist_right = torch.norm(obj_pos - ee_right_pos, dim=1)
+    dist_left = torch.norm(obj_pos - ee_left_pos, dim=1)
+    
+    # Determine which arm is closer (1.0 for closer, 0.0 for farther)
+    right_is_closer = (dist_right < dist_left).float()
+    left_is_closer = (dist_left < dist_right).float()
+    
+    # Reward only the closer arm for reaching
+    right_reward = right_is_closer * (1 - torch.tanh(dist_right / std))
+    left_reward = left_is_closer * (1 - torch.tanh(dist_left / std))
+    
+    # Return combined reward (only one arm gets rewarded at a time)
+    return right_reward + left_reward
+
+
+def farther_arm_stays_still(
+    env: ManagerBasedRLEnv,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    ee_right_cfg: SceneEntityCfg = SceneEntityCfg("ee_right"),
+    ee_left_cfg: SceneEntityCfg = SceneEntityCfg("ee_left"),
+    right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
+    left_arm_cfg: SceneEntityCfg = SceneEntityCfg("left_arm"),
+) -> torch.Tensor:
+    """Reward the farther arm for staying still (low joint velocities).
+    
+    This encourages the farther arm to not move while the closer arm reaches.
+    """
+    object: RigidObject = env.scene[object_cfg.name]
+    ee_right: FrameTransformer = env.scene[ee_right_cfg.name]
+    ee_left: FrameTransformer = env.scene[ee_left_cfg.name]
+    right_arm = env.scene[right_arm_cfg.name]
+    left_arm = env.scene[left_arm_cfg.name]
+    
+    # Object position
+    obj_pos = object.data.root_pos_w
+    
+    # End-effector positions
+    ee_right_pos = ee_right.data.target_pos_w[..., 0, :]
+    ee_left_pos = ee_left.data.target_pos_w[..., 0, :]
+    
+    # Calculate distances
+    dist_right = torch.norm(obj_pos - ee_right_pos, dim=1)
+    dist_left = torch.norm(obj_pos - ee_left_pos, dim=1)
+    
+    # Determine which arm is farther
+    right_is_farther = (dist_right > dist_left).float()
+    left_is_farther = (dist_left > dist_right).float()
+    
+    # Calculate joint velocity magnitude for each arm
+    right_vel_mag = torch.norm(right_arm.data.joint_vel, dim=1)
+    left_vel_mag = torch.norm(left_arm.data.joint_vel, dim=1)
+    
+    # Reward farther arm for staying still (lower velocity = higher reward)
+    right_stillness = right_is_farther * torch.exp(-right_vel_mag)
+    left_stillness = left_is_farther * torch.exp(-left_vel_mag)
+    
+    return right_stillness + left_stillness

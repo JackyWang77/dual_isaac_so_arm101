@@ -144,7 +144,7 @@ class DualSoArm100LiftCube_IK_EnvCfg(LiftEnvCfg):
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Right_Arm/wrist_2_link",
                     name="ee_right",
-                    offset=OffsetCfg(pos=[0.01, 0.0, 0.1]),
+                    offset=OffsetCfg(pos=[0.01, 0.0, 0.05]),  # Reduced z from 0.1 to 0.05
                 ),
             ],
         )
@@ -158,7 +158,7 @@ class DualSoArm100LiftCube_IK_EnvCfg(LiftEnvCfg):
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Left_Arm/wrist_2_link",
                     name="ee_left",
-                    offset=OffsetCfg(pos=[0.01, 0.0, 0.1]),
+                    offset=OffsetCfg(pos=[0.01, 0.0, 0.05]),  # Reduced z from 0.1 to 0.05
                 ),
             ],
         )

@@ -1,9 +1,4 @@
-# Copyright (c) 2024-2025, Muammer Bay (LycheeAI), Louis Le Lay
-# All rights reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
-#
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers.
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -13,5 +8,4 @@
 from isaaclab.envs.mdp import *  # noqa: F401, F403
 
 from .observations import *  # noqa: F401, F403
-from .rewards import *  # noqa: F401, F403
 from .terminations import *  # noqa: F401, F403

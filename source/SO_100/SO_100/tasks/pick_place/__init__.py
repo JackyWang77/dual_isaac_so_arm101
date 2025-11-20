@@ -1,19 +1,65 @@
-# Copyright (c) 2024-2025, Muammer Bay (LycheeAI), Louis Le Lay
-# All rights reserved.
-#
-# SPDX-License-Identifier: BSD-3-Clause
-#
-# Copyright (c) 2022-2025, The Isaac Lab Project Developers.
+# Copyright (c) 2022-2025, The Isaac Lab Project Developers
+# (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-import gymnasium as gym
+import gymnasium as gym  # type: ignore[import]
 
-from . import agents
+from . import dual_pick_place_ik_rel_mimic_env_cfg
+from . import dual_pick_place_ik_rel_mimic_env  # noqa: F401
+from . import pick_place_ik_abs_env_cfg
+from . import pick_place_ik_abs_env  # noqa: F401
+from . import pick_place_joint_pos_env_cfg
+from . import pick_place_joint_for_ik_abs_env  # noqa: F401
+
+##
+# IK Relative Mimic Environment
+##
+_ENV_CFG_REL = (
+    dual_pick_place_ik_rel_mimic_env_cfg.DualArmPickPlaceIKRelMimicEnvCfg
+)
+_ENTRY_POINT_REL = (
+    f"{__name__}.dual_pick_place_ik_rel_mimic_env:"
+    "DualArmPickPlaceIKRelMimicEnv"
+)
+
+##
+# IK Absolute Environment
+##
+_ENV_CFG_ABS = pick_place_ik_abs_env_cfg.DualArmPickPlaceIKAbsEnvCfg
+_ENTRY_POINT_ABS = f"{__name__}.pick_place_ik_abs_env:DualArmPickPlaceIKAbsEnv"
+
+##
+# Joint Control for IK Absolute Data Collection
+##
+_ENV_CFG_JOINT_FOR_IK_ABS = pick_place_joint_pos_env_cfg.DualArmPickPlaceJointPosEnvCfg
+_ENTRY_POINT_JOINT_FOR_IK_ABS = f"{__name__}.pick_place_joint_for_ik_abs_env:DualArmPickPlaceJointForIKAbsEnv"
 
 ##
 # Register Gym environments.
 ##
 
-# Register the SO-100 Cube Lift environment
+# IK Relative Mimic
+gym.register(
+    id="SO-ARM100-Pick-Place-DualArm-IK-Rel-Mimic-v0",
+    entry_point=_ENTRY_POINT_REL,
+    kwargs={"env_cfg_entry_point": _ENV_CFG_REL},
+    disable_env_checker=True,
+)
+
+# IK Absolute
+gym.register(
+    id="SO-ARM100-Pick-Place-DualArm-IK-Abs-v0",
+    entry_point=_ENTRY_POINT_ABS,
+    kwargs={"env_cfg_entry_point": _ENV_CFG_ABS},
+    disable_env_checker=True,
+)
+
+# Joint Control for IK Absolute Data Collection
+gym.register(
+    id="SO-ARM100-Pick-Place-Joint-For-IK-Abs-v0",
+    entry_point=_ENTRY_POINT_JOINT_FOR_IK_ABS,
+    kwargs={"env_cfg_entry_point": _ENV_CFG_JOINT_FOR_IK_ABS},
+    disable_env_checker=True,
+)
