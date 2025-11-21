@@ -55,5 +55,3 @@ python scripts/teleop_se3_agent.py \
     --task SO-ARM100-Pick-Place-Joint-For-IK-Abs-v0 \
     --teleop_device joint_states \
     --num_envs 1
-
-

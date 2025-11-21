@@ -172,7 +172,6 @@ class ObservationsCfg:
             self.enable_corruption = False
             self.concatenate_terms = False
 
-
     # observation groups
     policy: PolicyCfg = PolicyCfg()
     rgb_camera: RGBCameraPolicyCfg = RGBCameraPolicyCfg()
@@ -231,15 +230,15 @@ class PickPlaceEnvCfg(ManagerBasedRLEnvCfg):
     def __post_init__(self):
         """Post initialization."""
         # general settings
-        self.decimation = 5
+        # 60Hz golden setup (physics:render:display = 1:1:1)
+        self.decimation = 1
         self.episode_length_s = 30.0
         # simulation settings
-        self.sim.dt = 0.01  # 100Hz
+        self.sim.dt = 1.0 / 60.0
         # Render interval should match decimation to avoid rendering intermediate physics steps
         self.sim.render_interval = self.decimation
 
         self.sim.physx.bounce_threshold_velocity = 0.2
-        self.sim.physx.bounce_threshold_velocity = 0.01
         self.sim.physx.gpu_found_lost_aggregate_pairs_capacity = 1024 * 1024 * 4
         self.sim.physx.gpu_total_aggregate_pairs_capacity = 16 * 1024
         self.sim.physx.friction_correlation_distance = 0.00625

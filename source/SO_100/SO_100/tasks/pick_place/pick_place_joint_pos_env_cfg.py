@@ -73,12 +73,17 @@ class EventCfg:
 @configclass
 class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
 
+    simplify_scene: bool = False
+
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
 
         # Set events
-        self.events = EventCfg()
+        if not self.simplify_scene:
+            self.events = EventCfg()
+        else:
+            self.events = None
 
         # Set DualArm as robot
         self.scene.robot = SO_ARM100_ROSCON_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")

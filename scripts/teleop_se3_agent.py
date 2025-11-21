@@ -10,6 +10,7 @@
 import argparse
 from collections.abc import Callable
 
+import carb.settings
 from isaaclab.app import AppLauncher
 
 # add argparse arguments
@@ -22,7 +23,7 @@ parser.add_argument(
     help=(
         "Teleop device. Set here (legacy) or via the environment config. If using the environment config, pass the"
         " device key/name defined under 'teleop_devices' (it can be a custom name, not necessarily 'handtracking')."
-        " Built-ins: keyboard, spacemouse, gamepad, ros2. Not all tasks support all built-ins."
+        " Built-ins: keyboard, spacemouse, gamepad, ros2, joint_states, dummy_joint. Not all tasks support all built-ins."
         " Use 'ros2' to teleoperate from a real robot via ROS2 topics."
     ),
 )
@@ -33,6 +34,12 @@ parser.add_argument(
     action="store_true",
     default=False,
     help="Enable Pinocchio.",
+)
+parser.add_argument(
+    "--target_hz",
+    type=float,
+    default=30.0,
+    help="Target loop rate for teleop steps in Hz.",
 )
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -53,8 +60,15 @@ if "handtracking" in args_cli.teleop_device.lower():
 app_launcher = AppLauncher(app_launcher_args)
 simulation_app = app_launcher.app
 
+# Disable VSync / Present Mode via API to avoid waiting on display
+settings = carb.settings.get_settings()
+settings.set_int("/app/window/presentMode", 0)
+print("⚡ Present Mode set to IMMEDIATE (VSync OFF)")
+
 """Rest everything follows."""
 
+
+import time
 
 import gymnasium as gym
 import logging
@@ -82,6 +96,23 @@ if args_cli.enable_pinocchio:
 
 # import logger
 logger = logging.getLogger(__name__)
+
+
+class DummyJointTeleop:
+    """Simple teleop device that always returns zero joint commands."""
+
+    def __init__(self, action_dim: int) -> None:
+        self._action = torch.zeros((1, action_dim), dtype=torch.float32)
+        self._callbacks: dict[str, Callable[[], None]] = {}
+
+    def add_callback(self, key: str, callback: Callable[[], None]) -> None:
+        self._callbacks[key] = callback
+
+    def reset(self) -> None:
+        self._action.zero_()
+
+    def advance(self) -> torch.Tensor:
+        return self._action
 
 
 def main() -> None:
@@ -234,7 +265,6 @@ def main() -> None:
                     return
                 # Create Joint States ROS2 device
                 from SO_100.devices import JointStatesROS2, JointStatesROS2Cfg
-                
                 joint_states_cfg = JointStatesROS2Cfg(
                     joint_state_topic="/joint_states",
                     num_dof=6,  # 5 arm joints + 1 gripper
@@ -252,6 +282,14 @@ def main() -> None:
                 print("[teleop_se3_agent] 🤖 Using ROS2 Joint States teleoperation")
                 print(f"[teleop_se3_agent] 📡 Subscribed to: {joint_states_cfg.joint_state_topic}")
                 print("[teleop_se3_agent] 💡 Real robot controls simulated robot")
+            elif args_cli.teleop_device.lower() in ("dummy_joint", "dummy"):
+                action_shape = env.action_space.shape
+                if isinstance(action_shape, tuple):
+                    action_dim = action_shape[-1]
+                else:
+                    action_dim = action_shape
+                teleop_interface = DummyJointTeleop(action_dim)
+                print("[teleop_se3_agent] 🤖 Using dummy joint teleop device (zero actions)")
             else:
                 logger.error(f"Unsupported teleop device: {args_cli.teleop_device}")
                 logger.error("Supported devices: keyboard, spacemouse, gamepad, ros2, joint_states, handtracking")
@@ -286,19 +324,26 @@ def main() -> None:
     print("Teleoperation started. Press 'R' to reset the environment.")
 
     # simulate environment
+    last_step_time = time.time()
     while simulation_app.is_running():
         try:
             # run everything in inference mode
             with torch.inference_mode():
+                loop_start = time.time()
+
                 # get device command
+                advance_start = time.time()
                 action = teleop_interface.advance()
+                advance_end = time.time()
 
                 # Only apply teleop commands when active
                 if teleoperation_active:
                     # process actions
                     actions = action.repeat(env.num_envs, 1)
                     # apply actions
+                    step_start = time.time()
                     env.step(actions)
+                    step_end = time.time()
                 else:
                     env.sim.render()
 
@@ -306,6 +351,21 @@ def main() -> None:
                     env.reset()
                     should_reset_recording_instance = False
                     print("Environment reset complete")
+                loop_mid = time.time()
+                total_loop = loop_mid - loop_start
+                target_step_duration = 1.0 / args_cli.target_hz
+                sleep_time = max(0.0, target_step_duration - total_loop)
+                if sleep_time > 0.0:
+                    time.sleep(sleep_time)
+                loop_end = time.time()
+                step_duration = loop_end - last_step_time
+                last_step_time = loop_end
+                advance_dt = advance_end - advance_start
+                step_dt = (step_end - step_start) if teleoperation_active else 0.0
+                print(
+                    f"[teleop_se3_agent] advance_dt={advance_dt:.4f}s "
+                    f"step_dt={step_dt:.4f}s step_time={step_duration:.4f}s total_loop={total_loop:.4f}s"
+                )
         except Exception as e:
             logger.error(f"Error during simulation step: {e}")
             break
