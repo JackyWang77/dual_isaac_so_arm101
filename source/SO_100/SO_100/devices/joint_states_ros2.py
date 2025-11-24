@@ -15,7 +15,7 @@ import numpy as np
 import torch
 from isaaclab.devices.device_base import DeviceBase
 from isaaclab.utils import configclass
-
+import carb.settings
 # ROS2 imports
 import rclpy
 from sensor_msgs.msg import JointState
@@ -79,7 +79,7 @@ class JointStatesROS2(DeviceBase):
         """
         # Store configuration
         self.cfg = cfg
-
+        carb.settings.get_settings().set_int("/app/window/presentMode", 0)
         # Internal state - use torch tensor directly to avoid conversions
         self._latest_joint_positions = torch.zeros((1, cfg.num_dof), dtype=torch.float32)
         self._previous_joint_positions = torch.zeros((1, cfg.num_dof), dtype=torch.float32)  # For interpolation

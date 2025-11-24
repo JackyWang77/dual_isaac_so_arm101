@@ -36,10 +36,10 @@ TEMPLATE_ASSETS_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data
 
 SO_ARM100_ROSCON_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path=f"{TEMPLATE_ASSETS_DATA_DIR}/Robots/so_arm100_roscon/so_arm100.usd",
+        usd_path=f"{TEMPLATE_ASSETS_DATA_DIR}/Robots/SO-ARM101-NEW-TF2.usd",
         activate_contact_sensors=False,  # Adjust based on need
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
-            disable_gravity=False,
+            disable_gravity=True,
             max_depenetration_velocity=5.0,
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
@@ -50,13 +50,14 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         rot=(0.7071068, 0.0, 0.0, 0.7071068),  # Quaternion for 90 degrees rotation around Y-axis
+        pos=(0.0, 0.0, -0.1),  # Lower robot by 0.1m
         joint_pos={
             "shoulder_pan_joint": 0.0,
             "shoulder_lift_joint": 0.0,
             "elbow_joint": 0.0,
             "wrist_pitch_joint": 0.0,
             "wrist_roll_joint": 0.0,
-            "jaw_joint": 0.1,  # Middle position to make movement more apparent
+            "jaw_joint": 0.0,  # Initial gripper position set to 0
         },
         # Set initial joint velocities to zero
         joint_vel={".*": 0.0},
@@ -70,8 +71,8 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
         # Jaw               moves: Only moving jaw              (~0.034kg)
         "arm": ImplicitActuatorCfg(
             joint_names_expr=["shoulder_.*", "elbow_joint", "wrist_.*"],
-            effort_limit_sim=1.9,
-            velocity_limit_sim=1.5,
+            effort_limit_sim=1000,
+            velocity_limit_sim=100,
             stiffness={
                 "shoulder_pan_joint": 200.0,  # Highest - moves all mass
                 "shoulder_lift_joint": 170.0,  # Slightly less than rotation
@@ -89,8 +90,8 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
         ),
         "gripper": ImplicitActuatorCfg(
             joint_names_expr=["jaw_joint"],
-            effort_limit_sim=2.5,  # Increased from 1.9 to 2.5 for stronger grip
-            velocity_limit_sim=1.5,
+            effort_limit_sim=1000,  # Increased from 1.9 to 2.5 for stronger grip
+            velocity_limit_sim=100,
             stiffness=60.0,  # Increased from 25.0 to 60.0 for more reliable closing
             damping=20.0,  # Increased from 10.0 to 20.0 for stability
         ),

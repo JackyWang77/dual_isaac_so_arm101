@@ -38,7 +38,7 @@ class EventCfg:
         params={
             # SO-ARM100: 5 arm joints + 1 gripper joint (total 6 values)
             # [shoulder_pan, shoulder_lift, elbow, wrist_pitch, wrist_roll, jaw]
-            "default_pose": [0.0, -0.5, 0.0, -1.5, 0.0, 0.698],
+            "default_pose": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         },
     )
 
@@ -86,7 +86,12 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
             self.events = None
 
         # Set DualArm as robot
-        self.scene.robot = SO_ARM100_ROSCON_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        self.scene.robot = SO_ARM100_ROSCON_CFG.replace(
+            prim_path="{ENV_REGEX_NS}/Robot",
+            init_state=SO_ARM100_ROSCON_CFG.init_state.replace(
+                pos=(0.0, 0.0, 0.0),  # Lower robot by 0.1m
+            ),
+        )
         self.scene.robot.spawn.semantic_tags = [("class", "robot")]
 
         # Add semantics to table
@@ -97,13 +102,13 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
 
         # Set actions for the specific robot type (dual_arm)
         self.actions.arm_action = mdp.JointPositionActionCfg(
-            asset_name="robot", joint_names=["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_pitch_joint", "wrist_roll_joint"], scale=0.5, use_default_offset=True
+            asset_name="robot", joint_names=["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_pitch_joint", "wrist_roll_joint"], scale=1.0, use_default_offset=False
         )
-        self.actions.gripper_action = mdp.BinaryJointPositionActionCfg(
+        self.actions.gripper_action = mdp.JointPositionActionCfg(
             asset_name="robot",
             joint_names=["jaw_joint"],
-            open_command_expr={"jaw_joint": 0.698},
-            close_command_expr={"jaw_joint": 0.0},
+            scale=1.0,
+            use_default_offset=False,
         )
         # utilities for gripper status check
         self.gripper_joint_names = ["jaw_joint"]
