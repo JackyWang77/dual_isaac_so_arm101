@@ -312,3 +312,96 @@ def randomize_visual_texture_material(
         rep.randomizer.texture(
             textures=textures, project_uvw=True, texture_rotate=rep.distribution.uniform(*texture_rotation)
         )
+
+
+def apply_high_friction_material(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    asset_cfg: SceneEntityCfg,
+    static_friction: float = 2.0,
+    dynamic_friction: float = 2.0,
+    restitution: float = 0.0,
+):
+    """Apply high friction physics material to rigid objects.
+    
+    This function creates a global physics material and binds it to all collision meshes
+    of the specified asset. This is useful for improving grasp stability.
+
+    Architecture: Uses UsdShade.Material for visual binding and UsdPhysics.MaterialAPI
+    for physics properties. Material is created once and bound to all collision prims.
+    
+    Args:
+        env: The environment instance.
+        env_ids: Environment IDs to apply the material to (can be None for all).
+        asset_cfg: Configuration for the asset to modify.
+        static_friction: Static friction coefficient (default: 2.0).
+        dynamic_friction: Dynamic friction coefficient (default: 2.0).
+        restitution: Restitution coefficient (default: 0.0, no bounce).
+    """
+    import omni.usd
+    from pxr import UsdPhysics, UsdShade
+
+    # Get the stage
+    stage = omni.usd.get_context().get_stage()
+    if stage is None:
+        return
+    
+    # Get the asset
+    asset = env.scene[asset_cfg.name]
+    
+    # Create a unique material name based on asset name and friction values
+    # USD paths cannot contain dots, so replace them with underscores
+    static_friction_str = str(static_friction).replace(".", "_")
+    dynamic_friction_str = str(dynamic_friction).replace(".", "_")
+    material_name = f"HighFrictionMaterial_{asset_cfg.name}_{static_friction_str}_{dynamic_friction_str}"
+    material_path = f"/World/Materials/{material_name}"
+
+    # Check if material already exists, if not create it
+    material_prim = stage.GetPrimAtPath(material_path)
+    if not material_prim.IsValid():
+        # Create the material prim
+        material_prim = stage.DefinePrim(material_path, "Material")
+
+        # Create UsdShade.Material
+        usd_material = UsdShade.Material.Define(stage, material_path)
+
+        # Apply UsdPhysics.MaterialAPI to set physics properties
+        physics_material_api = UsdPhysics.MaterialAPI.Apply(material_prim)
+        physics_material_api.GetStaticFrictionAttr().Set(static_friction)
+        physics_material_api.GetDynamicFrictionAttr().Set(dynamic_friction)
+        physics_material_api.GetRestitutionAttr().Set(restitution)
+    else:
+        # Material already exists, get it
+        usd_material = UsdShade.Material(material_prim)
+
+    # Apply material to all prims of this asset
+    # For startup events, apply to all environments (env_ids may be None or all envs)
+    # Get the prim path from asset configuration and replace environment namespace
+    base_prim_path = asset.cfg.prim_path
+    num_envs = env.num_envs
+
+    # Apply to all environments
+    for env_id in range(num_envs):
+        # Replace {ENV_REGEX_NS} with actual environment namespace
+        prim_path = base_prim_path.replace("{ENV_REGEX_NS}", f"/World/envs/env_{env_id}")
+        
+        # Get the root prim using USD API
+        prim = stage.GetPrimAtPath(prim_path)
+        if not prim.IsValid():
+            continue
+        
+        # Recursively find all collision meshes and bind material
+        def bind_material_to_prim(prim):
+            """Recursively bind material to prim and its children."""
+            # Check if this prim has a collision mesh
+            if prim.HasAPI(UsdPhysics.CollisionAPI):
+                # Bind the material using MaterialBindingAPI
+                binding_api = UsdShade.MaterialBindingAPI.Apply(prim)
+                binding_api.Bind(usd_material)
+            
+            # Recursively process children
+            for child in prim.GetChildren():
+                bind_material_to_prim(child)
+        
+        # Apply to root and all children
+        bind_material_to_prim(prim)

@@ -49,15 +49,15 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        rot=(0.7071068, 0.0, 0.0, 0.7071068),  # Quaternion for 90 degrees rotation around Y-axis
-        pos=(0.0, 0.0, -0.1),  # Lower robot by 0.1m
+        rot=(1.0, 0.0, 0.0, 0.0),  # 无旋转 (w, x, y, z)，让机器人正立
+        pos=(0.0, 0.0, 0.0),  # 修复了逗号错误 (0,0 -> 0.0)
         joint_pos={
-            "shoulder_pan_joint": 0.0,
-            "shoulder_lift_joint": 0.0,
-            "elbow_joint": 0.0,
-            "wrist_pitch_joint": 0.0,
-            "wrist_roll_joint": 0.0,
-            "jaw_joint": 0.0,  # Initial gripper position set to 0
+            "shoulder_pan_joint": 0,  # From real robot ROS2
+            "shoulder_lift_joint": -1.745,  # From real robot ROS2, clamped to limit [-1.745, 1.745]
+            "elbow_joint": 1.5907367333984375,  # From real robot ROS2
+            "wrist_pitch_joint": 1.2225816552734374,  # From real robot ROS2
+            "wrist_roll_joint": 0.0,  # From real robot ROS2
+            "jaw_joint": 0.698,  # From real robot ROS2, clamped to limit [-0.175, 1.745]
         },
         # Set initial joint velocities to zero
         joint_vel={".*": 0.0},
@@ -72,7 +72,7 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
         "arm": ImplicitActuatorCfg(
             joint_names_expr=["shoulder_.*", "elbow_joint", "wrist_.*"],
             effort_limit_sim=5,
-            velocity_limit_sim=100,
+            velocity_limit_sim=50,
             stiffness={
                 "shoulder_pan_joint": 200.0,  # Highest - moves all mass
                 "shoulder_lift_joint": 170.0,  # Slightly less than rotation
@@ -91,7 +91,7 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
         "gripper": ImplicitActuatorCfg(
             joint_names_expr=["jaw_joint"],
             effort_limit_sim=5,  # Increased from 1.9 to 2.5 for stronger grip
-            velocity_limit_sim=100,
+            velocity_limit_sim=50,
             stiffness=60.0,  # Increased from 25.0 to 60.0 for more reliable closing
             damping=20.0,  # Increased from 10.0 to 20.0 for stability
         ),

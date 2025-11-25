@@ -111,7 +111,7 @@ class JointStatesROS2(DeviceBase):
         # Subscribe to joint states topic with more forgiving QoS to avoid missed bridge callbacks
         from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
         qos_profile = QoSProfile(
-            depth=5,  # Buffer a few messages to tolerate bursts/relay delays
+            depth=2,  # Buffer a few messages to tolerate bursts/relay delays
             reliability=ReliabilityPolicy.RELIABLE,  # Ensure delivery even if bridge hops exist
             durability=DurabilityPolicy.VOLATILE  # No persistence
         )

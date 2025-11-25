@@ -87,6 +87,7 @@ class DualArmPickPlaceJointStatesMimicEnvCfg(DualArmPickPlaceJointPosEnvCfg, Mim
                 num_fixed_steps=0,
                 # If True, apply action noise during the interpolation phase and execution
                 apply_noise_during_interpolation=False,
+                description="Pick fork",  # 添加描述
                 next_subtask_description="Place fork",
             )
         )
@@ -111,6 +112,7 @@ class DualArmPickPlaceJointStatesMimicEnvCfg(DualArmPickPlaceJointPosEnvCfg, Mim
                 num_fixed_steps=0,
                 # If True, apply action noise during the interpolation phase and execution
                 apply_noise_during_interpolation=False,
+                description="Place fork",  # 添加描述
             )
         )
         # Pick knife
@@ -134,6 +136,7 @@ class DualArmPickPlaceJointStatesMimicEnvCfg(DualArmPickPlaceJointPosEnvCfg, Mim
                 num_fixed_steps=0,
                 # If True, apply action noise during the interpolation phase and execution
                 apply_noise_during_interpolation=False,
+                description="Pick knife",  # 添加描述
                 next_subtask_description="Place knife",
             )
         )
@@ -158,6 +161,7 @@ class DualArmPickPlaceJointStatesMimicEnvCfg(DualArmPickPlaceJointPosEnvCfg, Mim
                 num_fixed_steps=0,
                 # If True, apply action noise during the interpolation phase and execution
                 apply_noise_during_interpolation=False,
+                description="Place knife",  # 添加描述
             )
         )
         self.subtask_configs["end_effector"] = subtask_configs

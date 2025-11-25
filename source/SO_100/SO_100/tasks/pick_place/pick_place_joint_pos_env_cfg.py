@@ -6,15 +6,13 @@
 
 import os
 
-import isaaclab.sim as sim_utils
 from isaaclab.assets import RigidObjectCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import FrameTransformerCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import OffsetCfg
-from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg, MassPropertiesCfg, CollisionPropertiesCfg
+from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
 from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
-from isaaclab.sim.spawners.shapes import shapes_cfg
 from isaaclab.utils import configclass
 
 from . import mdp
@@ -28,9 +26,42 @@ from .pick_place_env_cfg import PickPlaceEnvCfg
 from isaaclab.markers.config import FRAME_MARKER_CFG  # isort: skip
 from SO_100.robots.so_arm100_roscon import SO_ARM100_ROSCON_CFG  # isort: skip
 
+
 @configclass
 class EventCfg:
     """Configuration for events."""
+
+    # Apply high friction material to objects at startup (once per environment initialization)
+    apply_friction_to_plate = EventTerm(
+        func=dual_pick_place_events.apply_high_friction_material,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("plate"),
+            "static_friction": 2.0,
+            "dynamic_friction": 2.0,
+            "restitution": 0.0,
+        },
+    )
+    apply_friction_to_fork = EventTerm(
+        func=dual_pick_place_events.apply_high_friction_material,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("fork"),
+            "static_friction": 2.0,
+            "dynamic_friction": 2.0,
+            "restitution": 0.0,
+        },
+    )
+    apply_friction_to_knife = EventTerm(
+        func=dual_pick_place_events.apply_high_friction_material,
+        mode="startup",
+        params={
+            "asset_cfg": SceneEntityCfg("knife"),
+            "static_friction": 2.0,
+            "dynamic_friction": 2.0,
+            "restitution": 0.0,
+        },
+    )
 
     init_dual_arm_pose = EventTerm(
         func=dual_pick_place_events.set_default_joint_pose,
@@ -38,7 +69,7 @@ class EventCfg:
         params={
             # SO-ARM100: 5 arm joints + 1 gripper joint (total 6 values)
             # [shoulder_pan, shoulder_lift, elbow, wrist_pitch, wrist_roll, jaw]
-            "default_pose": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "default_pose": [0.0, 0.0, 0.0, 0.0, 0.0, 0.698],
         },
     )
 
@@ -60,12 +91,12 @@ class EventCfg:
             # SO-ARM100 舒适工作区：X=0.15-0.25m (15-25cm)，这是小机械臂的黄金工作区
             # 原来太远了 (0.35-0.44)，对于 30-40cm 臂展的 SO-100 来说根本够不着
             "pose_range": {
-                "x": (0.15, 0.25),  # 15cm 到 25cm 处，SO-100 的黄金工作区
-                "y": (-0.15, 0.15),  # Y 轴稍微收窄，防止放在太偏的两侧够不着
+                "x": (0.18, 0.22),  # 减小 X 轴范围：18cm 到 22cm
+                "y": (-0.10, 0.10),  # 减小 Y 轴范围：-10cm 到 10cm
                 "z": (0.02, 0.02),  # 稍微贴近桌面一点
-                "yaw": (-1.0, 1.0)
+                "yaw": (-0.5, 0.5)  # 减小旋转范围：-0.5 到 0.5 弧度
             },
-            "min_separation": 0.05,  # 物体间距稍微改小点，因为桌子小
+            "min_separation": 0.04,  # 减小物体间距：4cm
             "asset_cfgs": [SceneEntityCfg("plate"), SceneEntityCfg("fork"), SceneEntityCfg("knife")],
         },
     )
@@ -117,9 +148,10 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
         self.gripper_threshold = 0.005
 
         # Rigid body properties of each cube
+        # 增加物理迭代次数以提高计算精度
         cube_properties = RigidBodyPropertiesCfg(
-            solver_position_iteration_count=16,
-            solver_velocity_iteration_count=1,
+            solver_position_iteration_count=32,  # 从 16 增加到 32，计算更精准
+            solver_velocity_iteration_count=4,   # 从 1 增加到 4
             max_angular_velocity=1000.0,
             max_linear_velocity=1000.0,
             max_depenetration_velocity=5.0,
@@ -136,7 +168,7 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
         self.scene.plate = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Plate",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.20, -0.02, 0.02], rot=[1, 0, 0, 0]  # 从 0.45 改为 0.20
+                pos=[0.55, 0.0, 0.01], rot=[1, 0, 0, 0]  # 再远一点 (0.5 -> 0.55)，确保完全不接触
             ),
             spawn=UsdFileCfg(
                 usd_path=os.path.join(assets_dir, "Plate/Plate.usd"),
@@ -148,7 +180,7 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
         self.scene.fork = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Fork",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.20, 0.05, 0.02], rot=[1, 0, 0, 0]  # 从 0.45 改为 0.20
+                pos=[0.20, 0.05, 0.005], rot=[1, 0, 0, 0]  # 从 0.45 改为 0.20
             ),
             spawn=UsdFileCfg(
                 usd_path=os.path.join(assets_dir, "Fork/Fork.usd"),
@@ -160,7 +192,7 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
         self.scene.knife = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Knife",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.20, -0.08, 0.02], rot=[1, 0, 0, 0]  # 从 0.45 改为 0.20
+                pos=[0.20, -0.08, 0.005], rot=[1, 0, 0, 0]  # 从 0.45 改为 0.20
             ),
             spawn=UsdFileCfg(
                 usd_path=os.path.join(assets_dir, "Knife/Knife.usd"),
@@ -173,7 +205,7 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
         self.scene.object = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Tray",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.30, 0.0, 0.058], rot=[0.707, 0, 0, 0.707]
+                pos=[0.30, 0.0, 0.02], rot=[0.707, 0, 0, 0.707]
             ),
             spawn=UsdFileCfg(
                 usd_path=os.path.join(assets_dir, "ikea_tray.usd"),
@@ -215,7 +247,9 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Plate",
                     name="plate",
-                    offset=OffsetCfg(pos=[0.0, 0.0, 0.0]),
+                    offset=OffsetCfg(
+                        pos=[0.0, 0.0, 0.0],
+                    ),
                 ),
             ],
         )
@@ -232,7 +266,9 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Fork",
                     name="fork",
-                    offset=OffsetCfg(pos=[0.0, 0.0, 0.0]),
+                    offset=OffsetCfg(
+                        pos=[0.0, 0.0, 0.0],
+                    ),
                 ),
             ],
         )
@@ -249,7 +285,9 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Knife",
                     name="knife",
-                    offset=OffsetCfg(pos=[0.0, 0.0, 0.0]),
+                    offset=OffsetCfg(
+                        pos=[0.0, 0.0, 0.0],
+                    ),
                 ),
             ],
         )

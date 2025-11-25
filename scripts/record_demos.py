@@ -483,23 +483,25 @@ def run_simulation_loop(
     current_recorded_demo_count = 0
     success_step_count = 0
     should_reset_recording_instance = False
-    running_recording_instance = not args_cli.xr
+    # ✅ 默认 False (暂停状态)。等你准备好了按 'L' 键开始。
+    running_recording_instance = False
+    print("🚀 Ready! Press 'L' to START/STOP recording, 'R' to RESET.")
 
     # Callback closures for the teleop device
     def reset_recording_instance():
         nonlocal should_reset_recording_instance
         should_reset_recording_instance = True
-        print("Recording instance reset requested")
+        print("🔄 Recording instance reset requested")
 
     def start_recording_instance():
         nonlocal running_recording_instance
         running_recording_instance = True
-        print("Recording started")
+        print("▶️  Recording started")
 
     def stop_recording_instance():
         nonlocal running_recording_instance
         running_recording_instance = False
-        print("Recording paused")
+        print("⏸️  Recording paused")
 
     # Set up teleoperation callbacks
     teleoperation_callbacks = {
@@ -512,53 +514,201 @@ def run_simulation_loop(
     teleop_interface = setup_teleop_device(teleoperation_callbacks)
     teleop_interface.add_callback("R", reset_recording_instance)
 
+    # === 🔥 新增：独立键盘监听 (专门用于 ROS 模式下的 UI 控制) ===
+    extra_keyboard = None
+    if args_cli.teleop_device.lower() in ["ros2", "joint_states"]:
+        from isaaclab.devices import Se3Keyboard, Se3KeyboardCfg
+        # 创建一个灵敏度为0的键盘，只用来监听按键，不控制机器人
+        extra_keyboard = Se3Keyboard(Se3KeyboardCfg(pos_sensitivity=0.0, rot_sensitivity=0.0))
+        
+        # 定义切换录制状态的函数
+        def toggle_recording():
+            nonlocal running_recording_instance
+            if running_recording_instance:
+                stop_recording_instance()
+            else:
+                start_recording_instance()
+        
+        # 绑定按键：L 键切换录制状态，R 键重置
+        extra_keyboard.add_callback("L", toggle_recording)
+        extra_keyboard.add_callback("R", reset_recording_instance)
+        print("[record_demos] ⌨️  Keyboard control active: [L] = Start/Pause, [R] = Reset")
+    # ============================================================
+
+    # === 🔥 新增：从 ROS2 读取初始关节位置并同步到 Isaac Sim ===
+    initial_joint_pos_saved = None  # 保存初始位置，用于 reset 后立即设置
+    if args_cli.teleop_device.lower() == "joint_states" and hasattr(teleop_interface, "_latest_joint_positions"):
+        print("[record_demos] 🔄 Waiting for initial joint states from real robot...")
+        max_wait_time = 5.0  # 最多等待 5 秒
+        start_time = time.time()
+        initial_joint_pos = None
+        
+        # 等待收到第一个 ROS2 消息
+        while time.time() - start_time < max_wait_time:
+            # 尝试获取关节位置（这会触发 ROS2 spin）
+            _ = teleop_interface.advance()
+            if hasattr(teleop_interface, "_is_connected") and teleop_interface._is_connected():
+                # 读取初始关节位置
+                if hasattr(teleop_interface, "_latest_joint_positions"):
+                    initial_joint_pos = teleop_interface._latest_joint_positions.clone()
+                    if initial_joint_pos.numel() > 0:
+                        # 转换为列表格式
+                        joint_pos_list = initial_joint_pos[0].cpu().tolist()
+                        print(f"[record_demos] ✅ Received initial joint positions: {joint_pos_list}")
+                        break
+            time.sleep(0.1)  # 等待 100ms 再试
+        
+        # 如果成功读取到初始位置，设置到环境中
+        if initial_joint_pos is not None and initial_joint_pos.numel() > 0:
+            robot = env.scene["robot"]
+            joint_pos_list = initial_joint_pos[0].cpu().tolist()
+            
+            # 保存初始位置，用于 reset 后立即设置
+            initial_joint_pos_saved = {
+                "joint_pos_list": joint_pos_list,
+                "joint_names": teleop_interface.cfg.joint_names,
+            }
+            
+            # 设置所有环境的初始关节位置（用于 reset 时使用）
+            for env_id in range(env.num_envs):
+                for i, joint_name in enumerate(teleop_interface.cfg.joint_names):
+                    if i < len(joint_pos_list):
+                        # 设置初始关节位置
+                        if joint_name in robot.joint_names:
+                            joint_idx = robot.joint_names.index(joint_name)
+                            robot.data.default_joint_pos[env_id, joint_idx] = joint_pos_list[i]
+            
+            print("[record_demos] ✅ Set Isaac Sim robot initial pose to match real robot")
+            joint_pos_dict = dict(zip(teleop_interface.cfg.joint_names, joint_pos_list))
+            print(f"[record_demos]    Joint positions: {joint_pos_dict}")
+        else:
+            print("[record_demos] ⚠️  Could not read initial joint positions from ROS2, using default pose")
+    # ============================================================
+
     # Reset before starting
     env.sim.reset()
     env.reset()
     teleop_interface.reset()
+    
+    # === 🔥 优化：立即设置当前关节位置，确保第一帧画面就是同步的 ===
+    if initial_joint_pos_saved is not None:
+        robot = env.scene["robot"]
+        joint_pos_list = initial_joint_pos_saved["joint_pos_list"]
+        joint_names = initial_joint_pos_saved["joint_names"]
+        
+        # 构建完整的关节位置张量（包括所有关节，不仅仅是 ROS2 控制的关节）
+        joint_pos_tensor = robot.data.default_joint_pos.clone()
+        joint_vel_tensor = torch.zeros_like(robot.data.default_joint_vel)
+        
+        # 更新 ROS2 控制的关节位置
+        for env_id in range(env.num_envs):
+            for i, joint_name in enumerate(joint_names):
+                if i < len(joint_pos_list):
+                    if joint_name in robot.joint_names:
+                        joint_idx = robot.joint_names.index(joint_name)
+                        joint_pos_tensor[env_id, joint_idx] = joint_pos_list[i]
+        
+        # 立即写入物理引擎，确保第一帧画面就是同步的
+        robot.write_joint_state_to_sim(joint_pos_tensor, joint_vel_tensor)
+        print("[record_demos] ✅ Immediately synchronized robot pose in physics engine")
+    # ============================================================
 
     label_text = f"Recorded {current_recorded_demo_count} successful demonstrations."
     instruction_display = setup_ui(label_text, env)
 
-    subtasks = {}
-    # Track previous subtask states to detect changes
-    prev_subtask_states = {}
+    # Check if environment has subtask_configs
+    if hasattr(env.cfg, "subtask_configs"):
+        print(f"[DEBUG] Environment has subtask_configs: {list(env.cfg.subtask_configs.keys())}")
+    else:
+        print("[DEBUG] Warning: Environment does not have subtask_configs attribute")
 
-    with contextlib.suppress(KeyboardInterrupt) and torch.inference_mode():
+    subtasks = {}
+    # 初始化终端显示标志
+    run_simulation_loop._last_task_desc = ""
+
+    with torch.inference_mode():
         while simulation_app.is_running():
-            # Get keyboard command
+            # Get command from teleop device (ROS/Robot)
             action = teleop_interface.advance()
+
+            # === 🔥 新增：刷新键盘状态 ===
+            if extra_keyboard:
+                extra_keyboard.advance()  # 这一步会检测你有没有按 L 或 R
+            # ==========================
+
             # Expand to batch dimension
             actions = action.repeat(env.num_envs, 1)
 
             # Perform action on environment
             if running_recording_instance:
                 # Compute actions based on environment
-                obv = env.step(actions)
+                # 每帧都获取观测，保证 UI 实时响应（逻辑检查开销通常可忽略不计）
+                obv, _, _, _, _ = env.step(actions)
+                
+                # 更新 UI 提示（subtask instructions）
                 if subtasks is not None:
                     if subtasks == {}:
-                        subtasks = obv[0].get("subtask_terms")
-                    elif subtasks:
-                        show_subtask_instructions(instruction_display, subtasks, obv, env.cfg)
-                        # Print subtask completion to terminal
-                        if subtasks:
-                            for subtask_name, subtask_value in subtasks.items():
-                                # Handle different formats: tensor, numpy array, or scalar
-                                if hasattr(subtask_value, 'item'):
-                                    # torch.Tensor
-                                    current_state = bool(subtask_value.item())
-                                elif hasattr(subtask_value, '__getitem__'):
-                                    # Array-like (numpy, list, etc.)
-                                    current_state = bool(subtask_value[0])
-                                else:
-                                    # Scalar
-                                    current_state = bool(subtask_value)
-                                
-                                prev_state = prev_subtask_states.get(subtask_name, False)
-                                if current_state and not prev_state:
-                                    # Subtask just completed
-                                    print(f"✅ [{subtask_name}] 子任务完成！")
-                                prev_subtask_states[subtask_name] = current_state
+                        # 第一次初始化 subtasks
+                        # obv 已经是字典了，不需要 [0]
+                        if "subtask_terms" in obv:
+                            subtasks = obv.get("subtask_terms")
+                            print(f"[DEBUG] Initialized subtasks: {list(subtasks.keys()) if subtasks else None}")
+                        else:
+                            print(f"[DEBUG] Warning: 'subtask_terms' not found in observation. Available keys: {list(obv.keys())}")
+                            subtasks = None
+                    
+                    # 每一帧都刷新提示，确保 UI 实时更新（如 "Pick plate" -> "Place plate"）
+                    if subtasks:
+                        # 1. 尝试更新 UI (保留原逻辑)
+                        try:
+                            show_subtask_instructions(instruction_display, subtasks, [obv], env.cfg)
+                        except Exception:
+                            # UI 挂了就挂了，不管它，继续用终端显示
+                            pass
+
+                        # 🔥 2. 终端实时播报 (这是给你的定心丸)
+                        try:
+                            # 获取当前使用的末端名称 (通常是 "end_effector")
+                            if hasattr(env.cfg, "subtask_configs") and env.cfg.subtask_configs:
+                                eef_name = list(env.cfg.subtask_configs.keys())[0]
+                                configs = env.cfg.subtask_configs[eef_name]
+
+                                current_task_desc = "🎉 All Done!"  # 默认全部完成
+
+                                # 遍历所有子任务，找到第一个"未完成"的任务
+                                for i, cfg in enumerate(configs):
+                                    sig_name = cfg.subtask_term_signal
+                                    # 检查信号值 (1.0 = 完成, 0.0 = 未完成)
+                                    if sig_name in subtasks:
+                                        # subtasks[sig_name] 是一个 tensor，取它的值
+                                        signal_value = subtasks[sig_name]
+                                        # 处理 tensor，可能是标量或数组
+                                        if isinstance(signal_value, torch.Tensor):
+                                            val = signal_value.item() if signal_value.numel() == 1 else signal_value[0].item()
+                                        else:
+                                            val = float(signal_value)
+
+                                        if val < 0.5:  # 还没完成
+                                            # 获取任务描述，如果没有则使用信号名称
+                                            task_desc = getattr(cfg, "description", None) or cfg.subtask_term_signal.replace("_", " ").title()
+                                            current_task_desc = f"Step {i+1}/{len(configs)}: {task_desc}"
+                                            break  # 找到了，停止遍历
+
+                                # \r 让光标回到行首，实现原地刷新，不会刷屏
+                                # 只在任务描述改变时打印，避免频繁刷新
+                                if current_task_desc != getattr(run_simulation_loop, "_last_task_desc", ""):
+                                    print(f"\r[Instructor] 🤖 当前任务: {current_task_desc} " + " " * 20, end="", flush=True)
+                                    run_simulation_loop._last_task_desc = current_task_desc
+
+                        except Exception as e:
+                            # 如果出错，打印调试信息（只打印一次，避免刷屏）
+                            if not hasattr(run_simulation_loop, "_debug_printed"):
+                                print(f"\n[Instructor] Debug Error: {e}", flush=True)
+                                if hasattr(env.cfg, "subtask_configs"):
+                                    print(f"[Instructor] subtask_configs keys: {list(env.cfg.subtask_configs.keys())}", flush=True)
+                                if isinstance(subtasks, dict):
+                                    print(f"[Instructor] subtasks keys: {list(subtasks.keys())}", flush=True)
+                                run_simulation_loop._debug_printed = True
             else:
                 env.sim.render()
 
