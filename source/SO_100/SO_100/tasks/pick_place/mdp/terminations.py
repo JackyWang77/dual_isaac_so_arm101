@@ -233,3 +233,50 @@ def objects_picked_and_placed(
             raise ValueError("No gripper_joint_names found in environment config")
 
     return layout_ok
+
+
+def push_plate_and_pick_fork_complete(
+    env: ManagerBasedRLEnv,
+) -> torch.Tensor:
+    """Check if push_plate and pick_fork subtasks are both complete.
+
+    Simple success condition: both push_plate and pick_fork must be True.
+    This is used for the simplified 2-subtask testing scenario.
+    """
+    # Get subtask observations from observation buffer
+    subtask_terms = env.obs_buf["subtask_terms"]
+
+    # Get push_plate and pick_fork signals
+    push_plate_done = subtask_terms["push_plate"]
+    pick_fork_done = subtask_terms["pick_fork"]
+
+    # Ensure tensors and convert to float
+    if not isinstance(push_plate_done, torch.Tensor):
+        push_plate_done = torch.tensor([push_plate_done], device=env.device, dtype=torch.float32)
+    else:
+        push_plate_done = push_plate_done.to(torch.float32).squeeze()
+
+    if not isinstance(pick_fork_done, torch.Tensor):
+        pick_fork_done = torch.tensor([pick_fork_done], device=env.device, dtype=torch.float32)
+    else:
+        pick_fork_done = pick_fork_done.to(torch.float32).squeeze()
+
+    # Both must be complete (use tensor comparison)
+    push_plate_ok = push_plate_done > 0.5
+    pick_fork_ok = pick_fork_done > 0.5
+    both_done = torch.logical_and(push_plate_ok, pick_fork_ok).to(torch.float32)
+
+    # Ensure result has correct shape for all environments
+    if both_done.dim() == 0:
+        both_done = both_done.unsqueeze(0).expand(env.num_envs)
+
+    # Print "all done" when success (only once per environment)
+    if not hasattr(env, "_success_printed"):
+        env._success_printed = {}
+
+    for env_id in range(min(env.num_envs, both_done.shape[0])):
+        if both_done[env_id].item() > 0.5 and env_id not in env._success_printed:
+            print(f"[Termination] ✅ All done! Environment {env_id}: push_plate and pick_fork both complete")
+            env._success_printed[env_id] = True
+
+    return both_done

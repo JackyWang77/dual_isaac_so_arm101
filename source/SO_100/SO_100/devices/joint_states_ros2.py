@@ -50,7 +50,7 @@ class JointStatesROS2Cfg:
     # ❌ 原来是 0.03 (30ms)，太极限了，刚好卡住
     # ✅ 改成 0.05 (50ms)，甚至是 0.1
     # 只要在这个时间内收到数据，就不算断连
-    max_wait_no_msg_sec: float = 0.1
+    max_wait_no_msg_sec: float = 0.2
     """When no message arrives within this duration, return cached action instead of blocking."""
 
 

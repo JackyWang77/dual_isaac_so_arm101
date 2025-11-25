@@ -460,6 +460,22 @@ def object_pushed(
     return pushed
 
 
+def object_height_above(
+    env: ManagerBasedRLEnv,
+    object_cfg: SceneEntityCfg,
+    height_threshold: float = 0.05,
+) -> torch.Tensor:
+    """Check if an object's height (Z position) is above a threshold.
+    
+    Simple check: only verifies if object is lifted high enough.
+    Used for simplified pick detection (e.g., pick_fork).
+    """
+    obj: RigidObject = env.scene[object_cfg.name]
+    object_pos = obj.data.root_pos_w
+    height_above = object_pos[:, 2] > height_threshold
+    return height_above.to(torch.float32)
+
+
 def object_poses_in_base_frame(
     env: ManagerBasedRLEnv,
     plate_cfg: SceneEntityCfg = SceneEntityCfg("plate"),

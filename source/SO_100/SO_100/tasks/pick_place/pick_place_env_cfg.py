@@ -154,7 +154,7 @@ class ObservationsCfg:
 
     @configclass
     class SubtaskCfg(ObsGroup):
-        """Observations for subtask group."""
+        """Observations for subtask group. ✅ Only 2 subtasks for testing."""
 
         push_plate = ObsTerm(
             func=mdp.object_pushed,
@@ -169,68 +169,12 @@ class ObservationsCfg:
                 "height_tolerance": 0.02,
             },
         )
-        # Keep pick_plate for backward compatibility if needed
-        pick_plate = ObsTerm(
-            func=mdp.object_grasped,
-            params={
-                "robot_cfg": SceneEntityCfg("robot"),
-                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-                "object_cfg": SceneEntityCfg("plate"),
-            },
-        )
-        place_plate = ObsTerm(
-            func=mdp.object_placed,
-            params={
-                "robot_cfg": SceneEntityCfg("robot"),
-                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-                "object_cfg": SceneEntityCfg("plate"),
-                "target_cfg": SceneEntityCfg("object"),
-                "planar_offset": (0.0, 0.0),
-                "planar_tolerance": 0.03,
-                "height_target": 0.02,
-                "height_tolerance": 0.02,
-            },
-        )
+        # ✅ pick_fork: only check height > 0.05m
         pick_fork = ObsTerm(
-            func=mdp.object_grasped,
+            func=mdp.object_height_above,
             params={
-                "robot_cfg": SceneEntityCfg("robot"),
-                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
                 "object_cfg": SceneEntityCfg("fork"),
-            },
-        )
-        place_fork = ObsTerm(
-            func=mdp.object_placed,
-            params={
-                "robot_cfg": SceneEntityCfg("robot"),
-                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-                "object_cfg": SceneEntityCfg("fork"),
-                "target_cfg": SceneEntityCfg("object"),
-                "planar_offset": (0.0, 0.08),
-                "planar_tolerance": 0.03,
-                "height_target": 0.02,
-                "height_tolerance": 0.02,
-            },
-        )
-        pick_knife = ObsTerm(
-            func=mdp.object_grasped,
-            params={
-                "robot_cfg": SceneEntityCfg("robot"),
-                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-                "object_cfg": SceneEntityCfg("knife"),
-            },
-        )
-        place_knife = ObsTerm(
-            func=mdp.object_placed,
-            params={
-                "robot_cfg": SceneEntityCfg("robot"),
-                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-                "object_cfg": SceneEntityCfg("knife"),
-                "target_cfg": SceneEntityCfg("object"),
-                "planar_offset": (0.0, -0.08),
-                "planar_tolerance": 0.03,
-                "height_target": 0.02,
-                "height_tolerance": 0.02,
+                "height_threshold": 0.05,
             },
         )
 
@@ -266,8 +210,11 @@ class TerminationsCfg:
     #     params={"minimum_height": 0.03, "asset_cfg": SceneEntityCfg("knife")}
     # )
 
-    # Success condition: all objects correctly placed on tray with gripper open
-    success = DoneTerm(func=mdp.objects_picked_and_placed)
+    # ✅ New simplified success condition: only push_plate and pick_fork
+    success = DoneTerm(func=mdp.push_plate_and_pick_fork_complete)
+    
+    # ❌ Old success condition - commented out for testing
+    # success = DoneTerm(func=mdp.objects_picked_and_placed)
 
 
 @configclass

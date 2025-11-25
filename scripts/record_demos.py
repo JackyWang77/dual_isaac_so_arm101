@@ -740,6 +740,11 @@ def run_simulation_loop(
             if should_reset_recording_instance:
                 success_step_count = handle_reset(env, success_step_count, instruction_display, label_text)
                 should_reset_recording_instance = False
+                
+                # 🔥 Reset 后必须清空任务缓存！
+                subtasks = {}  # 清空引用，强迫下一帧重新获取新的 subtasks
+                run_simulation_loop._last_task_desc = ""  # 清空打印记录，强迫终端重新显示第一步
+                print("\r" + " " * 50 + "\r", end="")  # 清除旧的打印行
 
             # Check if simulation is stopped
             if env.sim.is_stopped():
