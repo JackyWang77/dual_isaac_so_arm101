@@ -57,14 +57,15 @@ class EventCfg:
         func=dual_pick_place_events.randomize_object_pose,
         mode="reset",
         params={
-            # Keep objects away from tray (at x=0.5, y=0.0, z=0.058) to avoid triggering success on init
-            # Success condition requires all 3 objects placed correctly:
-            #   - Plate at tray center (0.5±0.03, 0.0±0.03) with relative height 0.02±0.02
-            #   - Fork at (0.5±0.03, 0.08±0.03) with relative height 0.02±0.02
-            #   - Knife at (0.5±0.03, -0.08±0.03) with relative height 0.02±0.02
-            # Initialize far from x=0.5 on table at safe height (z=0.08, well above dropping threshold 0.03)
-            "pose_range": {"x": (0.35, 0.44), "y": (-0.20, 0.20), "z": (0.08, 0.08), "yaw": (-1.0, 1.0)},
-            "min_separation": 0.08,
+            # SO-ARM100 舒适工作区：X=0.15-0.25m (15-25cm)，这是小机械臂的黄金工作区
+            # 原来太远了 (0.35-0.44)，对于 30-40cm 臂展的 SO-100 来说根本够不着
+            "pose_range": {
+                "x": (0.15, 0.25),  # 15cm 到 25cm 处，SO-100 的黄金工作区
+                "y": (-0.15, 0.15),  # Y 轴稍微收窄，防止放在太偏的两侧够不着
+                "z": (0.02, 0.02),  # 稍微贴近桌面一点
+                "yaw": (-1.0, 1.0)
+            },
+            "min_separation": 0.05,  # 物体间距稍微改小点，因为桌子小
             "asset_cfgs": [SceneEntityCfg("plate"), SceneEntityCfg("fork"), SceneEntityCfg("knife")],
         },
     )
@@ -131,11 +132,11 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
         )
         assets_dir = os.path.abspath(assets_dir)
 
-        # Place objects on table surface (table top at z=0.055)
+        # Place objects on table surface
         self.scene.plate = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Plate",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.45, -0.01468, 0.01760], rot=[1, 0, 0, 0]
+                pos=[0.20, -0.02, 0.02], rot=[1, 0, 0, 0]  # 从 0.45 改为 0.20
             ),
             spawn=UsdFileCfg(
                 usd_path=os.path.join(assets_dir, "Plate/Plate.usd"),
@@ -147,7 +148,7 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
         self.scene.fork = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Fork",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.45, -0.01468, 0.01760], rot=[1, 0, 0, 0]
+                pos=[0.20, 0.05, 0.02], rot=[1, 0, 0, 0]  # 从 0.45 改为 0.20
             ),
             spawn=UsdFileCfg(
                 usd_path=os.path.join(assets_dir, "Fork/Fork.usd"),
@@ -159,7 +160,7 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
         self.scene.knife = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Knife",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.45, -0.15, 0.06], rot=[1, 0, 0, 0]
+                pos=[0.20, -0.08, 0.02], rot=[1, 0, 0, 0]  # 从 0.45 改为 0.20
             ),
             spawn=UsdFileCfg(
                 usd_path=os.path.join(assets_dir, "Knife/Knife.usd"),
@@ -168,10 +169,11 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
                 semantic_tags=[("class", "knife")],
             ),
         )
+
         self.scene.object = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Tray",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.5, 0.0, 0.058], rot=[1, 0, 0, 0]
+                pos=[0.30, 0.0, 0.058], rot=[0.707, 0, 0, 0.707]
             ),
             spawn=UsdFileCfg(
                 usd_path=os.path.join(assets_dir, "ikea_tray.usd"),
@@ -196,6 +198,58 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
                     offset=OffsetCfg(
                         pos=[0.0, 0.0, 0.1034],
                     ),
+                ),
+            ],
+        )
+
+        # Visual markers for objects (plate, fork, knife)
+        # Plate marker (blue-ish)
+        plate_marker_cfg = FRAME_MARKER_CFG.copy()
+        plate_marker_cfg.markers["frame"].scale = (0.08, 0.08, 0.08)
+        plate_marker_cfg.prim_path = "/Visuals/FrameTransformer/Plate"
+        self.scene.plate_frame = FrameTransformerCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/base",
+            debug_vis=False,
+            visualizer_cfg=plate_marker_cfg,
+            target_frames=[
+                FrameTransformerCfg.FrameCfg(
+                    prim_path="{ENV_REGEX_NS}/Plate",
+                    name="plate",
+                    offset=OffsetCfg(pos=[0.0, 0.0, 0.0]),
+                ),
+            ],
+        )
+
+        # Fork marker (green-ish)
+        fork_marker_cfg = FRAME_MARKER_CFG.copy()
+        fork_marker_cfg.markers["frame"].scale = (0.08, 0.08, 0.08)
+        fork_marker_cfg.prim_path = "/Visuals/FrameTransformer/Fork"
+        self.scene.fork_frame = FrameTransformerCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/base",
+            debug_vis=False,
+            visualizer_cfg=fork_marker_cfg,
+            target_frames=[
+                FrameTransformerCfg.FrameCfg(
+                    prim_path="{ENV_REGEX_NS}/Fork",
+                    name="fork",
+                    offset=OffsetCfg(pos=[0.0, 0.0, 0.0]),
+                ),
+            ],
+        )
+
+        # Knife marker (red-ish)
+        knife_marker_cfg = FRAME_MARKER_CFG.copy()
+        knife_marker_cfg.markers["frame"].scale = (0.08, 0.08, 0.08)
+        knife_marker_cfg.prim_path = "/Visuals/FrameTransformer/Knife"
+        self.scene.knife_frame = FrameTransformerCfg(
+            prim_path="{ENV_REGEX_NS}/Robot/base",
+            debug_vis=False,
+            visualizer_cfg=knife_marker_cfg,
+            target_frames=[
+                FrameTransformerCfg.FrameCfg(
+                    prim_path="{ENV_REGEX_NS}/Knife",
+                    name="knife",
+                    offset=OffsetCfg(pos=[0.0, 0.0, 0.0]),
                 ),
             ],
         )

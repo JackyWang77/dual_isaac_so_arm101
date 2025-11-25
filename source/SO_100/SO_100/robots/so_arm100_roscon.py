@@ -71,7 +71,7 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
         # Jaw               moves: Only moving jaw              (~0.034kg)
         "arm": ImplicitActuatorCfg(
             joint_names_expr=["shoulder_.*", "elbow_joint", "wrist_.*"],
-            effort_limit_sim=1000,
+            effort_limit_sim=5,
             velocity_limit_sim=100,
             stiffness={
                 "shoulder_pan_joint": 200.0,  # Highest - moves all mass
@@ -90,7 +90,7 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
         ),
         "gripper": ImplicitActuatorCfg(
             joint_names_expr=["jaw_joint"],
-            effort_limit_sim=1000,  # Increased from 1.9 to 2.5 for stronger grip
+            effort_limit_sim=5,  # Increased from 1.9 to 2.5 for stronger grip
             velocity_limit_sim=100,
             stiffness=60.0,  # Increased from 25.0 to 60.0 for more reliable closing
             damping=20.0,  # Increased from 10.0 to 20.0 for stability

@@ -521,6 +521,8 @@ def run_simulation_loop(
     instruction_display = setup_ui(label_text, env)
 
     subtasks = {}
+    # Track previous subtask states to detect changes
+    prev_subtask_states = {}
 
     with contextlib.suppress(KeyboardInterrupt) and torch.inference_mode():
         while simulation_app.is_running():
@@ -538,6 +540,25 @@ def run_simulation_loop(
                         subtasks = obv[0].get("subtask_terms")
                     elif subtasks:
                         show_subtask_instructions(instruction_display, subtasks, obv, env.cfg)
+                        # Print subtask completion to terminal
+                        if subtasks:
+                            for subtask_name, subtask_value in subtasks.items():
+                                # Handle different formats: tensor, numpy array, or scalar
+                                if hasattr(subtask_value, 'item'):
+                                    # torch.Tensor
+                                    current_state = bool(subtask_value.item())
+                                elif hasattr(subtask_value, '__getitem__'):
+                                    # Array-like (numpy, list, etc.)
+                                    current_state = bool(subtask_value[0])
+                                else:
+                                    # Scalar
+                                    current_state = bool(subtask_value)
+                                
+                                prev_state = prev_subtask_states.get(subtask_name, False)
+                                if current_state and not prev_state:
+                                    # Subtask just completed
+                                    print(f"✅ [{subtask_name}] 子任务完成！")
+                                prev_subtask_states[subtask_name] = current_state
             else:
                 env.sim.render()
 

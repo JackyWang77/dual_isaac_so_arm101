@@ -423,6 +423,43 @@ def object_placed(
     return placed
 
 
+def object_pushed(
+    env: ManagerBasedRLEnv,
+    robot_cfg: SceneEntityCfg,
+    ee_frame_cfg: SceneEntityCfg,
+    object_cfg: SceneEntityCfg,
+    target_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    planar_offset: tuple[float, float] = (0.0, 0.0),
+    planar_tolerance: float = 0.03,
+    height_target: float = 0.02,
+    height_tolerance: float = 0.02,
+) -> torch.Tensor:
+    """Check if an object is pushed to the specified target position.
+    
+    Similar to object_placed, but doesn't require gripper to be open (since pushing doesn't involve grasping).
+    """
+    
+    del ee_frame_cfg  # not required for push check, kept for backward compatibility
+    del robot_cfg  # not required for push check
+
+    obj: RigidObject = env.scene[object_cfg.name]
+    target: RigidObject = env.scene[target_cfg.name]
+
+    target_pos = target.data.root_pos_w
+    target_quat = target.data.root_quat_w
+    obj_rel_pos, _ = math_utils.subtract_frame_transforms(
+        target_pos, target_quat, obj.data.root_pos_w, obj.data.root_quat_w
+    )
+
+    planar_target = torch.tensor(planar_offset, dtype=obj_rel_pos.dtype, device=env.device)
+    planar_error = torch.linalg.norm(obj_rel_pos[:, :2] - planar_target, dim=1)
+
+    # Push only checks planar position, height doesn't matter for pushing
+    pushed = planar_error < planar_tolerance
+
+    return pushed
+
+
 def object_poses_in_base_frame(
     env: ManagerBasedRLEnv,
     plate_cfg: SceneEntityCfg = SceneEntityCfg("plate"),

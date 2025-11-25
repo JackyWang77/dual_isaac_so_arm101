@@ -158,6 +158,7 @@ class DualArmPickPlaceIKRelMimicEnv(ManagerBasedRLMimicEnv):
 
         signals = dict()
         subtask_terms = self.obs_buf["subtask_terms"]
+        signals["push_plate"] = subtask_terms["push_plate"][env_ids]
         signals["pick_plate"] = subtask_terms["pick_plate"][env_ids]
         signals["place_plate"] = subtask_terms["place_plate"][env_ids]
         signals["pick_fork"] = subtask_terms["pick_fork"][env_ids]

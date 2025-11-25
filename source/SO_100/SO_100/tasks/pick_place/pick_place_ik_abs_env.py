@@ -137,6 +137,7 @@ class DualArmPickPlaceIKAbsEnv(ManagerBasedRLMimicEnv):
         
         # Map subtask termination signals from observation buffer
         # These correspond to the pick and place events for each object
+        signals["push_plate"] = subtask_terms["push_plate"][env_ids]
         signals["pick_plate"] = subtask_terms["pick_plate"][env_ids]
         signals["place_plate"] = subtask_terms["place_plate"][env_ids]
         signals["pick_fork"] = subtask_terms["pick_fork"][env_ids]

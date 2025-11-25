@@ -6,20 +6,25 @@
 from isaaclab.envs.mimic_env_cfg import MimicEnvCfg, SubTaskConfig
 from isaaclab.utils import configclass
 
-from .pick_place_ik_rel_env_cfg import DualArmPickPlaceIKRelEnvCfg
+from .pick_place_joint_pos_env_cfg import DualArmPickPlaceJointPosEnvCfg
 
 
 @configclass
-class DualArmPickPlaceIKRelMimicEnvCfg(DualArmPickPlaceIKRelEnvCfg, MimicEnvCfg):
+class DualArmPickPlaceJointForIKAbsMimicEnvCfg(DualArmPickPlaceJointPosEnvCfg, MimicEnvCfg):
     """
-    Isaac Lab Mimic environment config class for DualArm Pick Place IK Rel env.
+    Isaac Lab Mimic environment config class for Joint-For-IK-Abs env.
+    
+    This environment:
+    - Accepts joint_states control (can be controlled by real robot)
+    - Records EE absolute poses (for training IK Absolute policies)
+    - Has subtask configurations for data generation
     """
 
     def __post_init__(self):
         # post init of parents
         super().__post_init__()
         # # TODO: Figure out how we can move this to the MimicEnvCfg class
-        # # The __post_init__() above only calls the init for DualArmPickPlaceIKRelEnvCfg and not MimicEnvCfg
+        # # The __post_init__() above only calls the init for DualArmPickPlaceJointPosEnvCfg and not MimicEnvCfg
         # # https://stackoverflow.com/questions/59986413/achieving-multiple-inheritance-using-python-dataclasses
 
         # Override the existing values
@@ -30,7 +35,7 @@ class DualArmPickPlaceIKRelMimicEnvCfg(DualArmPickPlaceIKRelEnvCfg, MimicEnvCfg)
         self.datagen_config.generation_select_src_per_subtask = True
         self.datagen_config.generation_transform_first_robot_pose = False
         self.datagen_config.generation_interpolate_from_last_target_pose = True
-        self.datagen_config.generation_relative = True
+        self.datagen_config.generation_relative = False  # IK-Abs uses absolute poses
         self.datagen_config.max_num_failures = 25
         self.datagen_config.seed = 1
 
@@ -158,3 +163,4 @@ class DualArmPickPlaceIKRelMimicEnvCfg(DualArmPickPlaceIKRelEnvCfg, MimicEnvCfg)
             )
         )
         self.subtask_configs["dual_arm"] = subtask_configs
+

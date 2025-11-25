@@ -63,7 +63,7 @@ simulation_app = app_launcher.app
 # Disable VSync / Present Mode via API to avoid waiting on display
 settings = carb.settings.get_settings()
 settings.set_int("/app/window/presentMode", 0)
-print("⚡ Present Mode set to IMMEDIATE (VSync OFF)")
+# print("⚡ Present Mode set to IMMEDIATE (VSync OFF)")  # Reduced console output
 
 """Rest everything follows."""
 
@@ -255,8 +255,9 @@ def main() -> None:
                     pos_scale=1.0,
                 )
                 teleop_interface = Se3ROS2(ros2_cfg)
-                print("[teleop_se3_agent] 🤖 Using ROS2 teleoperation")
-                print(f"[teleop_se3_agent] 📡 Subscribed to: {ros2_cfg.ee_pose_topic}")
+                # Reduced console output
+                # print("[teleop_se3_agent] 🤖 Using ROS2 teleoperation")
+                # print(f"[teleop_se3_agent] 📡 Subscribed to: {ros2_cfg.ee_pose_topic}")
             elif args_cli.teleop_device.lower() == "joint_states":
                 if not ROS2_DEVICE_AVAILABLE:
                     logger.error("ROS2 device not available. Please install SO_100 package.")
@@ -279,9 +280,10 @@ def main() -> None:
                     scale=1.0,
                 )
                 teleop_interface = JointStatesROS2(joint_states_cfg)
-                print("[teleop_se3_agent] 🤖 Using ROS2 Joint States teleoperation")
-                print(f"[teleop_se3_agent] 📡 Subscribed to: {joint_states_cfg.joint_state_topic}")
-                print("[teleop_se3_agent] 💡 Real robot controls simulated robot")
+                # Reduced console output
+                # print("[teleop_se3_agent] 🤖 Using ROS2 Joint States teleoperation")
+                # print(f"[teleop_se3_agent] 📡 Subscribed to: {joint_states_cfg.joint_state_topic}")
+                # print("[teleop_se3_agent] 💡 Real robot controls simulated robot")
             elif args_cli.teleop_device.lower() in ("dummy_joint", "dummy"):
                 action_shape = env.action_space.shape
                 if isinstance(action_shape, tuple):
@@ -289,7 +291,7 @@ def main() -> None:
                 else:
                     action_dim = action_shape
                 teleop_interface = DummyJointTeleop(action_dim)
-                print("[teleop_se3_agent] 🤖 Using dummy joint teleop device (zero actions)")
+                # print("[teleop_se3_agent] 🤖 Using dummy joint teleop device (zero actions)")  # Reduced console output
             else:
                 logger.error(f"Unsupported teleop device: {args_cli.teleop_device}")
                 logger.error("Supported devices: keyboard, spacemouse, gamepad, ros2, joint_states, handtracking")
@@ -315,7 +317,8 @@ def main() -> None:
         simulation_app.close()
         return
 
-    print(f"Using teleop device: {teleop_interface}")
+    # Device info removed to reduce console spam
+    # print(f"Using teleop device: {teleop_interface}")
 
     # reset environment
     env.reset()
@@ -360,12 +363,11 @@ def main() -> None:
                 loop_end = time.time()
                 step_duration = loop_end - last_step_time
                 last_step_time = loop_end
-                advance_dt = advance_end - advance_start
-                step_dt = (step_end - step_start) if teleoperation_active else 0.0
-                print(
-                    f"[teleop_se3_agent] advance_dt={advance_dt:.4f}s "
-                    f"step_dt={step_dt:.4f}s step_time={step_duration:.4f}s total_loop={total_loop:.4f}s"
-                )
+                # Performance stats removed to reduce console spam
+                # Uncomment below if needed for debugging:
+                # advance_dt = advance_end - advance_start
+                # step_dt = (step_end - step_start) if teleoperation_active else 0.0
+                # print(f"[teleop_se3_agent] advance_dt={advance_dt:.4f}s step_dt={step_dt:.4f}s step_time={step_duration:.4f}s total_loop={total_loop:.4f}s")
         except Exception as e:
             logger.error(f"Error during simulation step: {e}")
             break

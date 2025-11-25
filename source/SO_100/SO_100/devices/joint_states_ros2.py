@@ -241,10 +241,11 @@ class JointStatesROS2(DeviceBase):
             and time_since_last_msg > 0.02
             and (now - self._last_wait_warning_time) > self._wait_warning_interval
         ):
-            print(
-                f"[JointStatesROS2] ⏳ Waiting for bridge/new message for {time_since_last_msg:.3f}s "
-                f"(threshold {self._wait_warning_interval:.1f}s)"
-            )
+            # Reduced console output - waiting message removed
+            # print(
+            #     f"[JointStatesROS2] ⏳ Waiting for bridge/new message for {time_since_last_msg:.3f}s "
+            #     f"(threshold {self._wait_warning_interval:.1f}s)"
+            # )
             self._last_wait_warning_time = now
         if (
             self._last_joint_msg_time > 0.0
@@ -261,10 +262,11 @@ class JointStatesROS2(DeviceBase):
             and time_since_last_msg > 0.1
             and (now - self._last_timing_log_time) > self._timing_log_interval
         ):
-            print(
-                f"[JointStatesROS2] ⏱️ No new joint message for {time_since_last_msg:.3f}s "
-                f"(threshold {self._timing_log_interval:.1f}s)"
-            )
+            # Reduced console output - timing log removed
+            # print(
+            #     f"[JointStatesROS2] ⏱️ No new joint message for {time_since_last_msg:.3f}s "
+            #     f"(threshold {self._timing_log_interval:.1f}s)"
+            # )
             self._last_timing_log_time = now
         return current_positions * self.cfg.scale
 

@@ -6,31 +6,34 @@
 from isaaclab.envs.mimic_env_cfg import MimicEnvCfg, SubTaskConfig
 from isaaclab.utils import configclass
 
-from .pick_place_ik_rel_env_cfg import DualArmPickPlaceIKRelEnvCfg
+from .pick_place_joint_pos_env_cfg import DualArmPickPlaceJointPosEnvCfg
 
 
 @configclass
-class DualArmPickPlaceIKRelMimicEnvCfg(DualArmPickPlaceIKRelEnvCfg, MimicEnvCfg):
+class DualArmPickPlaceJointStatesMimicEnvCfg(DualArmPickPlaceJointPosEnvCfg, MimicEnvCfg):
     """
-    Isaac Lab Mimic environment config class for DualArm Pick Place IK Rel env.
+    Isaac Lab Mimic environment config class for recording joint states directly.
+    
+    This environment:
+    - Accepts joint_states control (can be controlled by real robot)
+    - Records joint states directly (joint positions + gripper) - no conversion
+    - Has subtask configurations for data generation
+    - Joint states can be converted to EE pose later using forward kinematics
     """
 
     def __post_init__(self):
         # post init of parents
         super().__post_init__()
-        # # TODO: Figure out how we can move this to the MimicEnvCfg class
-        # # The __post_init__() above only calls the init for DualArmPickPlaceIKRelEnvCfg and not MimicEnvCfg
-        # # https://stackoverflow.com/questions/59986413/achieving-multiple-inheritance-using-python-dataclasses
 
         # Override the existing values
-        self.datagen_config.name = "demo_src_pick_place_isaac_lab_task_D0"
+        self.datagen_config.name = "demo_src_pick_place_joint_states_D0"
         self.datagen_config.generation_guarantee = True
         self.datagen_config.generation_keep_failed = True
         self.datagen_config.generation_num_trials = 10
         self.datagen_config.generation_select_src_per_subtask = True
         self.datagen_config.generation_transform_first_robot_pose = False
         self.datagen_config.generation_interpolate_from_last_target_pose = True
-        self.datagen_config.generation_relative = True
+        self.datagen_config.generation_relative = False  # Joint states are absolute
         self.datagen_config.max_num_failures = 25
         self.datagen_config.seed = 1
 
@@ -157,4 +160,5 @@ class DualArmPickPlaceIKRelMimicEnvCfg(DualArmPickPlaceIKRelEnvCfg, MimicEnvCfg)
                 apply_noise_during_interpolation=False,
             )
         )
-        self.subtask_configs["dual_arm"] = subtask_configs
+        self.subtask_configs["end_effector"] = subtask_configs
+

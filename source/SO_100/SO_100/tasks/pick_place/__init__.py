@@ -12,6 +12,9 @@ from . import pick_place_ik_abs_env_cfg
 from . import pick_place_ik_abs_env  # noqa: F401
 from . import pick_place_joint_pos_env_cfg
 from . import pick_place_joint_for_ik_abs_env  # noqa: F401
+from . import pick_place_joint_for_ik_abs_mimic_env_cfg
+from . import pick_place_joint_states_mimic_env  # noqa: F401
+from . import pick_place_joint_states_mimic_env_cfg
 
 ##
 # IK Relative Mimic Environment
@@ -35,6 +38,26 @@ _ENTRY_POINT_ABS = f"{__name__}.pick_place_ik_abs_env:DualArmPickPlaceIKAbsEnv"
 ##
 _ENV_CFG_JOINT_FOR_IK_ABS = pick_place_joint_pos_env_cfg.DualArmPickPlaceJointPosEnvCfg
 _ENTRY_POINT_JOINT_FOR_IK_ABS = f"{__name__}.pick_place_joint_for_ik_abs_env:DualArmPickPlaceJointForIKAbsEnv"
+
+##
+# Joint Control for IK Absolute Data Collection with MimicEnvCfg (subtask configs)
+##
+_ENV_CFG_JOINT_FOR_IK_ABS_MIMIC = (
+    pick_place_joint_for_ik_abs_mimic_env_cfg.DualArmPickPlaceJointForIKAbsMimicEnvCfg
+)
+_ENTRY_POINT_JOINT_FOR_IK_ABS_MIMIC = (
+    f"{__name__}.pick_place_joint_for_ik_abs_env:DualArmPickPlaceJointForIKAbsEnv"
+)
+
+##
+# Joint States Recording with MimicEnvCfg (records joint states directly, no conversion)
+##
+_ENV_CFG_JOINT_STATES_MIMIC = (
+    pick_place_joint_states_mimic_env_cfg.DualArmPickPlaceJointStatesMimicEnvCfg
+)
+_ENTRY_POINT_JOINT_STATES_MIMIC = (
+    f"{__name__}.pick_place_joint_states_mimic_env:DualArmPickPlaceJointStatesMimicEnv"
+)
 
 ##
 # Register Gym environments.
@@ -61,5 +84,21 @@ gym.register(
     id="SO-ARM100-Pick-Place-Joint-For-IK-Abs-v0",
     entry_point=_ENTRY_POINT_JOINT_FOR_IK_ABS,
     kwargs={"env_cfg_entry_point": _ENV_CFG_JOINT_FOR_IK_ABS},
+    disable_env_checker=True,
+)
+
+# Joint Control for IK Absolute Data Collection with MimicEnvCfg (has subtask configs)
+gym.register(
+    id="SO-ARM100-Pick-Place-Joint-For-IK-Abs-Mimic-v0",
+    entry_point=_ENTRY_POINT_JOINT_FOR_IK_ABS_MIMIC,
+    kwargs={"env_cfg_entry_point": _ENV_CFG_JOINT_FOR_IK_ABS_MIMIC},
+    disable_env_checker=True,
+)
+
+# Joint States Recording with MimicEnvCfg (records joint states directly, no conversion)
+gym.register(
+    id="SO-ARM100-Pick-Place-Joint-States-Mimic-v0",
+    entry_point=_ENTRY_POINT_JOINT_STATES_MIMIC,
+    kwargs={"env_cfg_entry_point": _ENV_CFG_JOINT_STATES_MIMIC},
     disable_env_checker=True,
 )
