@@ -22,7 +22,7 @@ from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdF
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
-# 获取 data 目录路径
+# Get data directory path
 TEMPLATE_ASSETS_DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
 
 from . import mdp
@@ -64,49 +64,49 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     )
 
     # ---------------------------------------------------------
-    # 📷 1. 固定相机 (Top Camera - 俯视相机，从上往下看)
+    # 📷 1. Fixed Camera (Top Camera - Overhead view, looking down)
     # ---------------------------------------------------------
     camera_top = CameraCfg(
-        prim_path="{ENV_REGEX_NS}/CameraTop",  # 生成路径
-        update_period=0.1,  # 10Hz 采集频率 (设为 0 则每帧采集)
-        height=224,  # 图像高度 (ResNet通常用 224x224)
-        width=224,  # 图像宽度
-        data_types=["rgb"],  # 只需要 RGB，如果需要深度加 "depth"
+        prim_path="{ENV_REGEX_NS}/CameraTop",  # Generate path
+        update_period=0.1,  # 10Hz capture frequency (set to 0 for per-frame capture)
+        height=224,  # Image height (ResNet typically uses 224x224)
+        width=224,  # Image width
+        data_types=["rgb"],  # Only RGB needed, add "depth" if needed
         spawn=sim_utils.PinholeCameraCfg(
             focal_length=24.0,
             focus_distance=400.0,
             horizontal_aperture=20.955,
             clipping_range=(0.1, 1.0e5),
         ),
-        # 俯视角度：相机位置和朝向
-        # 目标：x=0, y=0, z=-90度（绕Z轴旋转-90度）
+        # Overhead angle: camera position and orientation
+        # Target: x=0, y=0, z=-90 degrees (rotate -90 degrees around Z axis)
         offset=CameraCfg.OffsetCfg(
             pos=(0.2, 0.0, 1.3),  # x=0.2, y=0.0, z=1.3
-            rot=(0.0, -0.7071, 0.7071, 0.0),  # 绕 Z 轴旋转 -90 度 (x=0, y=0, z=-90)
-            convention="ros",  # 使用 ROS 坐标系 (Z向前, X向右, Y向下)
+            rot=(0.0, -0.7071, 0.7071, 0.0),  # Rotate -90 degrees around Z axis (x=0, y=0, z=-90)
+            convention="ros",  # Use ROS coordinate system (Z forward, X right, Y down)
         ),
-        debug_vis=False,  # 关闭调试可视化
+        debug_vis=False,  # Disable debug visualization
     )
 
     # ---------------------------------------------------------
-    # 📷 2. 手腕相机 (Wrist Camera - Eye in Hand)
+    # 📷 2. Wrist Camera (Eye in Hand)
     # ---------------------------------------------------------
-    # 🔥 使用 SO-ARM101-NEW-TF2.usd 文件中已有的相机
-    #    相机已经在 USD 文件中，直接引用即可
+    # Use camera already in SO-ARM101-NEW-TF2.usd file
+    # Camera is already in USD file, reference directly
     camera_wrist = CameraCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/wrist_1_link/Camera",  # USD 文件中的相机路径
-        spawn=None,  # 不生成新相机，直接使用 USD 文件中的
+        prim_path="{ENV_REGEX_NS}/Robot/wrist_1_link/Camera",  # Camera path in USD file
+        spawn=None,  # Don't spawn new camera, use the one in USD file directly
         update_period=0.1,
         height=224,
         width=224,
         data_types=["rgb"],
-        # offset 设为 (0,0,0) 和 (1,0,0,0) 表示使用 USD 文件中相机的原始位置和朝向
+        # offset set to (0,0,0) and (1,0,0,0) means use original position and orientation from USD file
         offset=CameraCfg.OffsetCfg(
-            pos=(0.0, 0.0, 0.0),  # 使用 USD 文件中的原始位置
-            rot=(1.0, 0.0, 0.0, 0.0),  # 使用 USD 文件中的原始朝向（无旋转）
+            pos=(0.0, 0.0, 0.0),  # Use original position from USD file
+            rot=(1.0, 0.0, 0.0, 0.0),  # Use original orientation from USD file (no rotation)
             convention="ros",
         ),
-        debug_vis=False,  # 关闭调试可视化
+        debug_vis=False,  # Disable debug visualization
     )
 
 
@@ -154,7 +154,7 @@ class ObservationsCfg:
 
     @configclass
     class SubtaskCfg(ObsGroup):
-        """Observations for subtask group. ✅ Only 2 subtasks for testing."""
+        """Observations for subtask group."""
 
         push_plate = ObsTerm(
             func=mdp.object_pushed,
@@ -169,12 +169,68 @@ class ObservationsCfg:
                 "height_tolerance": 0.02,
             },
         )
-        # ✅ pick_fork: only check height > 0.05m
-        pick_fork = ObsTerm(
-            func=mdp.object_height_above,
+        # Keep pick_plate for backward compatibility if needed
+        pick_plate = ObsTerm(
+            func=mdp.object_grasped,
             params={
+                "robot_cfg": SceneEntityCfg("robot"),
+                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+                "object_cfg": SceneEntityCfg("plate"),
+            },
+        )
+        place_plate = ObsTerm(
+            func=mdp.object_placed,
+            params={
+                "robot_cfg": SceneEntityCfg("robot"),
+                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+                "object_cfg": SceneEntityCfg("plate"),
+                "target_cfg": SceneEntityCfg("object"),
+                "planar_offset": (0.0, 0.0),
+                "planar_tolerance": 0.03,
+                "height_target": 0.02,
+                "height_tolerance": 0.02,
+            },
+        )
+        pick_fork = ObsTerm(
+            func=mdp.object_grasped,
+            params={
+                "robot_cfg": SceneEntityCfg("robot"),
+                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
                 "object_cfg": SceneEntityCfg("fork"),
-                "height_threshold": 0.05,
+            },
+        )
+        place_fork = ObsTerm(
+            func=mdp.object_placed,
+            params={
+                "robot_cfg": SceneEntityCfg("robot"),
+                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+                "object_cfg": SceneEntityCfg("fork"),
+                "target_cfg": SceneEntityCfg("object"),
+                "planar_offset": (0.0, 0.08),
+                "planar_tolerance": 0.03,
+                "height_target": 0.02,
+                "height_tolerance": 0.02,
+            },
+        )
+        pick_knife = ObsTerm(
+            func=mdp.object_grasped,
+            params={
+                "robot_cfg": SceneEntityCfg("robot"),
+                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+                "object_cfg": SceneEntityCfg("knife"),
+            },
+        )
+        place_knife = ObsTerm(
+            func=mdp.object_placed,
+            params={
+                "robot_cfg": SceneEntityCfg("robot"),
+                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+                "object_cfg": SceneEntityCfg("knife"),
+                "target_cfg": SceneEntityCfg("object"),
+                "planar_offset": (0.0, -0.08),
+                "planar_tolerance": 0.03,
+                "height_target": 0.02,
+                "height_tolerance": 0.02,
             },
         )
 
@@ -210,11 +266,8 @@ class TerminationsCfg:
     #     params={"minimum_height": 0.03, "asset_cfg": SceneEntityCfg("knife")}
     # )
 
-    # ✅ New simplified success condition: only push_plate and pick_fork
-    success = DoneTerm(func=mdp.push_plate_and_pick_fork_complete)
-    
-    # ❌ Old success condition - commented out for testing
-    # success = DoneTerm(func=mdp.objects_picked_and_placed)
+    # Success condition: all objects correctly placed on tray with gripper open
+    success = DoneTerm(func=mdp.objects_picked_and_placed)
 
 
 @configclass

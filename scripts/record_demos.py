@@ -335,8 +335,8 @@ def setup_teleop_device(callbacks: dict[str, Callable]) -> object:
                 from SO_100.devices import JointStatesROS2, JointStatesROS2Cfg
                 
                 joint_states_cfg = JointStatesROS2Cfg(
-                    joint_state_topic="/joint_states",  # 直接订阅原始话题（最低延迟）
-                    # 如果需要使用 relay，改为: joint_state_topic="/isaac_joint_command"
+                    joint_state_topic="/joint_states",  # Subscribe directly to raw topic (lowest latency)
+                    # If using relay, change to: joint_state_topic="/isaac_joint_command"
                     num_dof=6,  # 5 arm joints + 1 gripper
                     joint_names=[
                         "shoulder_pan_joint",
@@ -483,7 +483,7 @@ def run_simulation_loop(
     current_recorded_demo_count = 0
     success_step_count = 0
     should_reset_recording_instance = False
-    # ✅ 默认 False (暂停状态)。等你准备好了按 'L' 键开始。
+    # Default False (paused state). Press 'L' to start when ready.
     running_recording_instance = False
     print("🚀 Ready! Press 'L' to START/STOP recording, 'R' to RESET.")
 
@@ -514,14 +514,14 @@ def run_simulation_loop(
     teleop_interface = setup_teleop_device(teleoperation_callbacks)
     teleop_interface.add_callback("R", reset_recording_instance)
 
-    # === 🔥 新增：独立键盘监听 (专门用于 ROS 模式下的 UI 控制) ===
+    # === Independent keyboard listener (for UI control in ROS mode) ===
     extra_keyboard = None
     if args_cli.teleop_device.lower() in ["ros2", "joint_states"]:
         from isaaclab.devices import Se3Keyboard, Se3KeyboardCfg
-        # 创建一个灵敏度为0的键盘，只用来监听按键，不控制机器人
+        # Create a keyboard with zero sensitivity, only for listening to keys, not controlling robot
         extra_keyboard = Se3Keyboard(Se3KeyboardCfg(pos_sensitivity=0.0, rot_sensitivity=0.0))
         
-        # 定义切换录制状态的函数
+        # Define function to toggle recording state
         def toggle_recording():
             nonlocal running_recording_instance
             if running_recording_instance:
@@ -529,51 +529,51 @@ def run_simulation_loop(
             else:
                 start_recording_instance()
         
-        # 绑定按键：L 键切换录制状态，R 键重置
+        # Bind keys: L key toggles recording state, R key resets
         extra_keyboard.add_callback("L", toggle_recording)
         extra_keyboard.add_callback("R", reset_recording_instance)
         print("[record_demos] ⌨️  Keyboard control active: [L] = Start/Pause, [R] = Reset")
     # ============================================================
 
-    # === 🔥 新增：从 ROS2 读取初始关节位置并同步到 Isaac Sim ===
-    initial_joint_pos_saved = None  # 保存初始位置，用于 reset 后立即设置
+    # === Read initial joint positions from ROS2 and sync to Isaac Sim ===
+    initial_joint_pos_saved = None  # Save initial position for immediate setting after reset
     if args_cli.teleop_device.lower() == "joint_states" and hasattr(teleop_interface, "_latest_joint_positions"):
         print("[record_demos] 🔄 Waiting for initial joint states from real robot...")
-        max_wait_time = 5.0  # 最多等待 5 秒
+        max_wait_time = 5.0  # Maximum wait time: 5 seconds
         start_time = time.time()
         initial_joint_pos = None
         
-        # 等待收到第一个 ROS2 消息
+        # Wait for first ROS2 message
         while time.time() - start_time < max_wait_time:
-            # 尝试获取关节位置（这会触发 ROS2 spin）
+            # Try to get joint positions (this triggers ROS2 spin)
             _ = teleop_interface.advance()
             if hasattr(teleop_interface, "_is_connected") and teleop_interface._is_connected():
-                # 读取初始关节位置
+                # Read initial joint positions
                 if hasattr(teleop_interface, "_latest_joint_positions"):
                     initial_joint_pos = teleop_interface._latest_joint_positions.clone()
                     if initial_joint_pos.numel() > 0:
-                        # 转换为列表格式
+                        # Convert to list format
                         joint_pos_list = initial_joint_pos[0].cpu().tolist()
                         print(f"[record_demos] ✅ Received initial joint positions: {joint_pos_list}")
                         break
-            time.sleep(0.1)  # 等待 100ms 再试
+            time.sleep(0.1)  # Wait 100ms before retry
         
-        # 如果成功读取到初始位置，设置到环境中
+        # If successfully read initial position, set it in environment
         if initial_joint_pos is not None and initial_joint_pos.numel() > 0:
             robot = env.scene["robot"]
             joint_pos_list = initial_joint_pos[0].cpu().tolist()
             
-            # 保存初始位置，用于 reset 后立即设置
+            # Save initial position for immediate setting after reset
             initial_joint_pos_saved = {
                 "joint_pos_list": joint_pos_list,
                 "joint_names": teleop_interface.cfg.joint_names,
             }
             
-            # 设置所有环境的初始关节位置（用于 reset 时使用）
+            # Set initial joint positions for all environments (used during reset)
             for env_id in range(env.num_envs):
                 for i, joint_name in enumerate(teleop_interface.cfg.joint_names):
                     if i < len(joint_pos_list):
-                        # 设置初始关节位置
+                        # Set initial joint position
                         if joint_name in robot.joint_names:
                             joint_idx = robot.joint_names.index(joint_name)
                             robot.data.default_joint_pos[env_id, joint_idx] = joint_pos_list[i]
@@ -590,17 +590,17 @@ def run_simulation_loop(
     env.reset()
     teleop_interface.reset()
     
-    # === 🔥 优化：立即设置当前关节位置，确保第一帧画面就是同步的 ===
+    # === Optimization: Immediately set current joint positions to ensure first frame is synchronized ===
     if initial_joint_pos_saved is not None:
         robot = env.scene["robot"]
         joint_pos_list = initial_joint_pos_saved["joint_pos_list"]
         joint_names = initial_joint_pos_saved["joint_names"]
         
-        # 构建完整的关节位置张量（包括所有关节，不仅仅是 ROS2 控制的关节）
+        # Build complete joint position tensor (including all joints, not just ROS2-controlled ones)
         joint_pos_tensor = robot.data.default_joint_pos.clone()
         joint_vel_tensor = torch.zeros_like(robot.data.default_joint_vel)
         
-        # 更新 ROS2 控制的关节位置
+        # Update ROS2-controlled joint positions
         for env_id in range(env.num_envs):
             for i, joint_name in enumerate(joint_names):
                 if i < len(joint_pos_list):
@@ -608,7 +608,7 @@ def run_simulation_loop(
                         joint_idx = robot.joint_names.index(joint_name)
                         joint_pos_tensor[env_id, joint_idx] = joint_pos_list[i]
         
-        # 立即写入物理引擎，确保第一帧画面就是同步的
+        # Immediately write to physics engine to ensure first frame is synchronized
         robot.write_joint_state_to_sim(joint_pos_tensor, joint_vel_tensor)
         print("[record_demos] ✅ Immediately synchronized robot pose in physics engine")
     # ============================================================
@@ -623,7 +623,7 @@ def run_simulation_loop(
         print("[DEBUG] Warning: Environment does not have subtask_configs attribute")
 
     subtasks = {}
-    # 初始化终端显示标志
+    # Initialize terminal display flag
     run_simulation_loop._last_task_desc = ""
 
     with torch.inference_mode():
@@ -631,9 +631,9 @@ def run_simulation_loop(
             # Get command from teleop device (ROS/Robot)
             action = teleop_interface.advance()
 
-            # === 🔥 新增：刷新键盘状态 ===
+            # === Refresh keyboard state ===
             if extra_keyboard:
-                extra_keyboard.advance()  # 这一步会检测你有没有按 L 或 R
+                extra_keyboard.advance()  # This step detects if you pressed L or R
             # ==========================
 
             # Expand to batch dimension
@@ -642,14 +642,14 @@ def run_simulation_loop(
             # Perform action on environment
             if running_recording_instance:
                 # Compute actions based on environment
-                # 每帧都获取观测，保证 UI 实时响应（逻辑检查开销通常可忽略不计）
+                # Get observations every frame to ensure UI real-time response (logic check overhead is usually negligible)
                 obv, _, _, _, _ = env.step(actions)
                 
-                # 更新 UI 提示（subtask instructions）
+                # Update UI hints (subtask instructions)
                 if subtasks is not None:
                     if subtasks == {}:
-                        # 第一次初始化 subtasks
-                        # obv 已经是字典了，不需要 [0]
+                        # First time initialization of subtasks
+                        # obv is already a dict, no need for [0]
                         if "subtask_terms" in obv:
                             subtasks = obv.get("subtask_terms")
                             print(f"[DEBUG] Initialized subtasks: {list(subtasks.keys()) if subtasks else None}")
@@ -657,51 +657,51 @@ def run_simulation_loop(
                             print(f"[DEBUG] Warning: 'subtask_terms' not found in observation. Available keys: {list(obv.keys())}")
                             subtasks = None
                     
-                    # 每一帧都刷新提示，确保 UI 实时更新（如 "Pick plate" -> "Place plate"）
+                    # Refresh hints every frame to ensure UI real-time updates (e.g., "Pick plate" -> "Place plate")
                     if subtasks:
-                        # 1. 尝试更新 UI (保留原逻辑)
+                        # 1. Try to update UI (keep original logic)
                         try:
                             show_subtask_instructions(instruction_display, subtasks, [obv], env.cfg)
                         except Exception:
-                            # UI 挂了就挂了，不管它，继续用终端显示
+                            # If UI fails, ignore it and continue with terminal display
                             pass
 
-                        # 🔥 2. 终端实时播报 (这是给你的定心丸)
+                        # 2. Terminal real-time broadcast (your peace of mind)
                         try:
-                            # 获取当前使用的末端名称 (通常是 "end_effector")
+                            # Get current end-effector name (usually "end_effector")
                             if hasattr(env.cfg, "subtask_configs") and env.cfg.subtask_configs:
                                 eef_name = list(env.cfg.subtask_configs.keys())[0]
                                 configs = env.cfg.subtask_configs[eef_name]
 
-                                current_task_desc = "🎉 All Done!"  # 默认全部完成
+                                current_task_desc = "🎉 All Done!"  # Default: all done
 
-                                # 遍历所有子任务，找到第一个"未完成"的任务
+                                # Iterate through all subtasks to find the first "incomplete" task
                                 for i, cfg in enumerate(configs):
                                     sig_name = cfg.subtask_term_signal
-                                    # 检查信号值 (1.0 = 完成, 0.0 = 未完成)
+                                    # Check signal value (1.0 = complete, 0.0 = incomplete)
                                     if sig_name in subtasks:
-                                        # subtasks[sig_name] 是一个 tensor，取它的值
+                                        # subtasks[sig_name] is a tensor, get its value
                                         signal_value = subtasks[sig_name]
-                                        # 处理 tensor，可能是标量或数组
+                                        # Handle tensor, could be scalar or array
                                         if isinstance(signal_value, torch.Tensor):
                                             val = signal_value.item() if signal_value.numel() == 1 else signal_value[0].item()
                                         else:
                                             val = float(signal_value)
 
-                                        if val < 0.5:  # 还没完成
-                                            # 获取任务描述，如果没有则使用信号名称
+                                        if val < 0.5:  # Not yet complete
+                                            # Get task description, or use signal name if not available
                                             task_desc = getattr(cfg, "description", None) or cfg.subtask_term_signal.replace("_", " ").title()
                                             current_task_desc = f"Step {i+1}/{len(configs)}: {task_desc}"
-                                            break  # 找到了，停止遍历
+                                            break  # Found it, stop iterating
 
-                                # \r 让光标回到行首，实现原地刷新，不会刷屏
-                                # 只在任务描述改变时打印，避免频繁刷新
+                                # \r returns cursor to line start, enables in-place refresh without screen flooding
+                                # Only print when task description changes to avoid frequent refreshes
                                 if current_task_desc != getattr(run_simulation_loop, "_last_task_desc", ""):
-                                    print(f"\r[Instructor] 🤖 当前任务: {current_task_desc} " + " " * 20, end="", flush=True)
+                                    print(f"\r[Instructor] 🤖 Current task: {current_task_desc} " + " " * 20, end="", flush=True)
                                     run_simulation_loop._last_task_desc = current_task_desc
 
                         except Exception as e:
-                            # 如果出错，打印调试信息（只打印一次，避免刷屏）
+                            # If error occurs, print debug info (only once to avoid screen flooding)
                             if not hasattr(run_simulation_loop, "_debug_printed"):
                                 print(f"\n[Instructor] Debug Error: {e}", flush=True)
                                 if hasattr(env.cfg, "subtask_configs"):
@@ -740,11 +740,6 @@ def run_simulation_loop(
             if should_reset_recording_instance:
                 success_step_count = handle_reset(env, success_step_count, instruction_display, label_text)
                 should_reset_recording_instance = False
-                
-                # 🔥 Reset 后必须清空任务缓存！
-                subtasks = {}  # 清空引用，强迫下一帧重新获取新的 subtasks
-                run_simulation_loop._last_task_desc = ""  # 清空打印记录，强迫终端重新显示第一步
-                print("\r" + " " * 50 + "\r", end="")  # 清除旧的打印行
 
             # Check if simulation is stopped
             if env.sim.is_stopped():

@@ -47,10 +47,10 @@ class JointStatesROS2Cfg:
     interpolation_rate_hz: float = 30.0
     """Target interpolation rate in Hz. Used when enable_interpolation=True. Default is 30.0 Hz."""
 
-    # ❌ 原来是 0.03 (30ms)，太极限了，刚好卡住
-    # ✅ 改成 0.05 (50ms)，甚至是 0.1
-    # 只要在这个时间内收到数据，就不算断连
-    max_wait_no_msg_sec: float = 0.2
+    # Originally 0.03 (30ms), too tight, just barely works
+    # Changed to 0.05 (50ms), or even 0.1
+    # As long as data is received within this time, it's not considered disconnected
+    max_wait_no_msg_sec: float = 0.1
     """When no message arrives within this duration, return cached action instead of blocking."""
 
 

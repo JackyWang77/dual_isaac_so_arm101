@@ -88,15 +88,15 @@ class EventCfg:
         func=dual_pick_place_events.randomize_object_pose,
         mode="reset",
         params={
-            # SO-ARM100 舒适工作区：X=0.15-0.25m (15-25cm)，这是小机械臂的黄金工作区
-            # 原来太远了 (0.35-0.44)，对于 30-40cm 臂展的 SO-100 来说根本够不着
+            # SO-ARM100 comfortable workspace: X=0.15-0.25m (15-25cm), this is the golden workspace for small robot arm
+            # Originally too far (0.35-0.44), unreachable for SO-100 with 30-40cm reach
             "pose_range": {
-                "x": (0.18, 0.22),  # 减小 X 轴范围：18cm 到 22cm
-                "y": (-0.10, 0.10),  # 减小 Y 轴范围：-10cm 到 10cm
-                "z": (0.02, 0.02),  # 稍微贴近桌面一点
-                "yaw": (-0.5, 0.5)  # 减小旋转范围：-0.5 到 0.5 弧度
+                "x": (0.18, 0.22),  # Reduce X axis range: 18cm to 22cm
+                "y": (-0.10, 0.10),  # Reduce Y axis range: -10cm to 10cm
+                "z": (0.02, 0.02),  # Slightly closer to table
+                "yaw": (-0.5, 0.5)  # Reduce rotation range: -0.5 to 0.5 radians
             },
-            "min_separation": 0.04,  # 减小物体间距：4cm
+            "min_separation": 0.04,  # Reduce object spacing: 4cm
             "asset_cfgs": [SceneEntityCfg("plate"), SceneEntityCfg("fork"), SceneEntityCfg("knife")],
         },
     )
@@ -148,10 +148,10 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
         self.gripper_threshold = 0.005
 
         # Rigid body properties of each cube
-        # 增加物理迭代次数以提高计算精度
+        # Increase physics iteration count to improve calculation accuracy
         cube_properties = RigidBodyPropertiesCfg(
-            solver_position_iteration_count=32,  # 从 16 增加到 32，计算更精准
-            solver_velocity_iteration_count=4,   # 从 1 增加到 4
+            solver_position_iteration_count=32,  # Increased from 16 to 32 for more accurate calculation
+            solver_velocity_iteration_count=4,   # Increased from 1 to 4
             max_angular_velocity=1000.0,
             max_linear_velocity=1000.0,
             max_depenetration_velocity=5.0,
@@ -168,7 +168,7 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
         self.scene.plate = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Plate",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.55, 0.0, 0.01], rot=[1, 0, 0, 0]  # 再远一点 (0.5 -> 0.55)，确保完全不接触
+                pos=[0.55, 0.0, 0.01], rot=[1, 0, 0, 0]  # Further away (0.5 -> 0.55) to ensure no contact
             ),
             spawn=UsdFileCfg(
                 usd_path=os.path.join(assets_dir, "Plate/Plate.usd"),
@@ -180,7 +180,7 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
         self.scene.fork = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Fork",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.20, 0.05, 0.005], rot=[1, 0, 0, 0]  # 从 0.45 改为 0.20
+                pos=[0.20, 0.05, 0.005], rot=[1, 0, 0, 0]  # Changed from 0.45 to 0.20
             ),
             spawn=UsdFileCfg(
                 usd_path=os.path.join(assets_dir, "Fork/Fork.usd"),
@@ -192,7 +192,7 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
         self.scene.knife = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Knife",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.20, -0.08, 0.005], rot=[1, 0, 0, 0]  # 从 0.45 改为 0.20
+                pos=[0.20, -0.08, 0.005], rot=[1, 0, 0, 0]  # Changed from 0.45 to 0.20
             ),
             spawn=UsdFileCfg(
                 usd_path=os.path.join(assets_dir, "Knife/Knife.usd"),
@@ -217,7 +217,7 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
 
         # Listens to the required transforms
         marker_cfg = FRAME_MARKER_CFG.copy()
-        marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
+        marker_cfg.markers["frame"].scale = (0.05, 0.05, 0.05)
         marker_cfg.prim_path = "/Visuals/FrameTransformer"
         self.scene.ee_frame = FrameTransformerCfg(
             prim_path="{ENV_REGEX_NS}/Robot/base",
@@ -228,7 +228,7 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
                     prim_path="{ENV_REGEX_NS}/Robot/wrist_2_link",
                     name="end_effector",
                     offset=OffsetCfg(
-                        pos=[0.0, 0.0, 0.1034],
+                        pos=[-0.004, 0.0, -0.102],
                     ),
                 ),
             ],

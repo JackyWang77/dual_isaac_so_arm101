@@ -49,8 +49,8 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        rot=(1.0, 0.0, 0.0, 0.0),  # 无旋转 (w, x, y, z)，让机器人正立
-        pos=(0.0, 0.0, 0.0),  # 修复了逗号错误 (0,0 -> 0.0)
+        rot=(1.0, 0.0, 0.0, 0.0),  # No rotation (w, x, y, z), keep robot upright
+        pos=(0.0, 0.0, 0.0),  # Fixed comma error (0,0 -> 0.0)
         joint_pos={
             "shoulder_pan_joint": 0,  # From real robot ROS2
             "shoulder_lift_joint": -1.745,  # From real robot ROS2, clamped to limit [-1.745, 1.745]
