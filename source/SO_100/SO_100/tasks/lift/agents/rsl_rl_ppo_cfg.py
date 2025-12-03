@@ -49,10 +49,10 @@ class LiftCubePPORunnerCfg(RslRlOnPolicyRunnerCfg):
 @configclass
 class LiftCubePPORecurrentRunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24  # default number of steps per environment
-    save_interval = 100
+    save_interval = 1000
     experiment_name = "lift"
     empirical_normalization = False
-    max_iterations = 1000  # default training iterations
+    max_iterations = 100000  # default training iterations
     policy = RslRlPpoActorCriticRecurrentCfg(
         init_noise_std=1.0,
         actor_hidden_dims=[256, 128, 64],

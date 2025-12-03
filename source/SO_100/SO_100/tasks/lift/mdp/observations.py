@@ -21,6 +21,30 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 
+def object_position_w(
+    env: ManagerBasedRLEnv,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+) -> torch.Tensor:
+    """Return the object's position in world frame.
+    
+    Output shape: (num_envs, 3)
+    """
+    obj: RigidObject = env.scene[object_cfg.name]
+    return obj.data.root_pos_w[:, :3]
+
+
+def object_orientation_w(
+    env: ManagerBasedRLEnv,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+) -> torch.Tensor:
+    """Return the object's orientation (quaternion) in world frame.
+    
+    Output shape: (num_envs, 4) - quaternion (w, x, y, z)
+    """
+    obj: RigidObject = env.scene[object_cfg.name]
+    return obj.data.root_quat_w
+
+
 def object_pos_in_arm_frame(
     env: ManagerBasedRLEnv,
     arm_cfg: SceneEntityCfg,

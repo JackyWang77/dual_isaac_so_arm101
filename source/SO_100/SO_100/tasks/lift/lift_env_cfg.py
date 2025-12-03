@@ -124,40 +124,6 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
 
 
 @configclass
-class CommandsCfg:
-    """Command terms for the MDP."""
-
-    object_pose_right = mdp.UniformPoseCommandCfg(
-        asset_name="right_arm",
-        body_name=MISSING,  # will be set by agent env cfg
-        resampling_time_range=(5.0, 5.0),
-        debug_vis=True,
-        ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(-0.1, 0.1),
-            pos_y=(-0.3, -0.1),
-            pos_z=(0.2, 0.35),
-            roll=(0.0, 0.0),
-            pitch=(0.0, 0.0),
-            yaw=(0.0, 0.0),
-        ),
-    )
-    object_pose_left = mdp.UniformPoseCommandCfg(
-        asset_name="left_arm",
-        body_name=MISSING,  # will be set by agent env cfg
-        resampling_time_range=(5.0, 5.0),
-        debug_vis=True,
-        ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(-0.1, 0.1),
-            pos_y=(0.1, 0.3),
-            pos_z=(0.2, 0.35),
-            roll=(0.0, 0.0),
-            pitch=(0.0, 0.0),
-            yaw=(0.0, 0.0),
-        ),
-    )
-
-
-@configclass
 class ActionsCfg:
     """Action specifications for the dual-arm MDP.
 
@@ -202,7 +168,7 @@ class ObservationsCfg:
 
         # Object position in LEFT arm coordinates
         left_obj_rel = ObsTerm(
-            func=mdp.object_pos_in_arm_frame,    # <<< changed name
+            func=mdp.object_pos_in_arm_frame,
             params={"arm_cfg": SceneEntityCfg("left_arm")},
         )
 
@@ -220,23 +186,18 @@ class ObservationsCfg:
 
         # Object position in RIGHT arm coordinates
         right_obj_rel = ObsTerm(
-            func=mdp.object_pos_in_arm_frame,    # <<< changed name
+            func=mdp.object_pos_in_arm_frame,
             params={"arm_cfg": SceneEntityCfg("right_arm")},
         )
 
         # --------------------------
-        # Task commands / targets
+        # Object pose (world frame)
         # --------------------------
-        # Goal pose sampled for the right arm
-        target_right = ObsTerm(
-            func=mdp.generated_commands,
-            params={"command_name": "object_pose_right"},
+        object_pos = ObsTerm(
+            func=mdp.object_position_w,
         )
-
-        # Goal pose sampled for the left arm
-        target_left = ObsTerm(
-            func=mdp.generated_commands,
-            params={"command_name": "object_pose_left"},
+        object_ori = ObsTerm(
+            func=mdp.object_orientation_w,
         )
 
         # --------------------------
@@ -299,88 +260,33 @@ class DualRewardsCfg:
             "right_arm_cfg": SceneEntityCfg("right_arm"),
             "left_arm_cfg": SceneEntityCfg("left_arm"),
         },
-        weight=2.0  # Increased to strongly penalize unnecessary motion
+        weight=2.0
     )
-    
-    # Original separate rewards (commented out, can be enabled if needed)
-    # reaching_object_right = RewTerm(
-    #     func=mdp.object_ee_distance,
-    #     params={
-    #         "std": 0.05,
-    #         "ee_frame_cfg": SceneEntityCfg("ee_right"),
-    #     },
-    #     weight=1.0
-    # )
-    # 
-    # reaching_object_left = RewTerm(
-    #     func=mdp.object_ee_distance,
-    #     params={
-    #         "std": 0.05,
-    #         "ee_frame_cfg": SceneEntityCfg("ee_left"),
-    #     },
-    #     weight=1.0
-    # )
 
-    lifting_object_right = RewTerm(
-        func=mdp.object_is_lifted,
-        params={"minimal_height": 0.04},
-        weight=15.0
+    # Grasp intent: reward closing gripper when near object (solves "hovering" problem)
+    grasp_intent = RewTerm(
+        func=mdp.grasp_intent,
+        params={
+            "proximity_threshold": 0.05,
+            "ee_right_cfg": SceneEntityCfg("ee_right"),
+            "ee_left_cfg": SceneEntityCfg("ee_left"),
+            "right_arm_cfg": SceneEntityCfg("right_arm"),
+            "left_arm_cfg": SceneEntityCfg("left_arm"),
+        },
+        weight=8.0  # Important: encourage gripper closing when close
     )
-    lifting_object_left = RewTerm(
+
+    # Lift object reward (only need one since object is shared)
+    lifting_object = RewTerm(
         func=mdp.object_is_lifted,
         params={"minimal_height": 0.04},
         weight=15.0
     )
 
-    # object goal tracking reward for right arm
-    object_goal_tracking_right = RewTerm(
-        func=mdp.object_goal_distance,
-        params={
-            "std": 0.3,
-            "minimal_height": 0.04,
-            "command_name": "object_pose_right",
-            "robot_cfg": SceneEntityCfg("right_arm"),
-        },
-        weight=16.0,
-    )
-    object_goal_tracking_left = RewTerm(
-        func=mdp.object_goal_distance,
-        params={"std": 0.3,
-                "minimal_height": 0.04,
-                "command_name": "object_pose_left",
-                "robot_cfg": SceneEntityCfg("left_arm")
-        },
-        weight=16.0,
-    )
-    # object goal tracking reward for right arm (fine-grained)
-    object_goal_tracking_fine_grained_right = RewTerm(
-        func=mdp.object_goal_distance,
-        params={
-            "std": 0.05,
-            "minimal_height": 0.04,
-            "command_name": "object_pose_right",
-            "robot_cfg": SceneEntityCfg("right_arm"),
-        },
-        weight=5.0,
-    )
+    # Action penalty
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-4)
 
-    # object goal tracking reward for left arm (fine-grained)
-    object_goal_tracking_fine_grained_left = RewTerm(
-        func=mdp.object_goal_distance,
-        params={
-            "std": 0.05,
-            "minimal_height": 0.04,
-            "command_name": "object_pose_left",
-            "robot_cfg": SceneEntityCfg("left_arm"),
-        },
-        weight=5.0,
-    )
-
-    # action penalty for right arm
-    action_rate_right = RewTerm(func=mdp.action_rate_l2, weight=-1e-4)
-    action_rate_left = RewTerm(func=mdp.action_rate_l2, weight=-1e-4)
-
-    # joint velocity penalty for right arm
+    # Joint velocity penalty
     joint_vel_right = RewTerm(
         func=mdp.joint_vel_l2,
         weight=-1e-4,
@@ -409,38 +315,21 @@ class TerminationsCfg:
 class CurriculumCfg:
     """Curriculum terms for the dual-arm MDP.
 
-    We gradually increase penalties on unnecessary motion and jitter.
-    This encourages both arms to move smoothly and stay stable,
-    especially the support arm.
+    Gradually increase penalties on unnecessary motion and jitter.
     """
 
-    # Gradually ramp up the global "action smoothness" penalty.
-    # This corresponds to the reward term "action_rate_all"
-    # in DualRewardsCfg, which punishes large action deltas.
-    action_rate_right = CurrTerm(
+    # Gradually ramp up action smoothness penalty
+    action_rate_curriculum = CurrTerm(
         func=mdp.modify_reward_weight,
         params={
-            # must match the key in DualRewardsCfg
-            "term_name": "action_rate_right",
-            # final target weight after curriculum:
-            # more negative => stronger penalty for jerky actions
-            "weight": -1e-1,
-            # number of steps over which we anneal from original weight
-            "num_steps": 10000,
-        },
-    )
-    action_rate_left = CurrTerm(
-        func=mdp.modify_reward_weight,
-        params={
-            "term_name": "action_rate_left",
+            "term_name": "action_rate",
             "weight": -1e-1,
             "num_steps": 10000,
         },
     )
-    # Gradually increase velocity penalty for the right arm.
-    # This aligns with the reward term "joint_vel_right"
-    # in DualRewardsCfg, which penalizes high joint speeds.
-    joint_vel_right = CurrTerm(
+
+    # Gradually increase velocity penalty for right arm
+    joint_vel_right_curriculum = CurrTerm(
         func=mdp.modify_reward_weight,
         params={
             "term_name": "joint_vel_right",
@@ -449,8 +338,8 @@ class CurriculumCfg:
         },
     )
 
-    # Same idea, but for the left arm.
-    joint_vel_left = CurrTerm(
+    # Gradually increase velocity penalty for left arm
+    joint_vel_left_curriculum = CurrTerm(
         func=mdp.modify_reward_weight,
         params={
             "term_name": "joint_vel_left",
@@ -469,7 +358,6 @@ class LiftEnvCfg(ManagerBasedRLEnvCfg):
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
-    commands: CommandsCfg = CommandsCfg()
     # MDP settings
     rewards: DualRewardsCfg = DualRewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
@@ -488,9 +376,13 @@ class LiftEnvCfg(ManagerBasedRLEnvCfg):
 
         self.sim.physx.bounce_threshold_velocity = 0.2
         self.sim.physx.bounce_threshold_velocity = 0.01
-        self.sim.physx.gpu_found_lost_aggregate_pairs_capacity = 1024 * 1024 * 4
-        self.sim.physx.gpu_total_aggregate_pairs_capacity = 16 * 1024
+        # Increase buffer sizes for large number of environments (4096)
+        self.sim.physx.gpu_found_lost_pairs_capacity = 2**23
+        self.sim.physx.gpu_found_lost_aggregate_pairs_capacity = 2**23
+        self.sim.physx.gpu_total_aggregate_pairs_capacity = 2**23
+        self.sim.physx.gpu_max_rigid_contact_count = 2**23
+        self.sim.physx.gpu_max_rigid_patch_count = 2**23
+        self.sim.physx.gpu_heap_capacity = 33554432 * 2  # ~64MB
+        self.sim.physx.gpu_temp_buffer_capacity = 16777216 * 2  # ~32MB
         self.sim.physx.friction_correlation_distance = 0.00625
         self.sim.physx.use_gpu = True
-        self.sim.physx.gpu_max_rigid_contact_count = 65536
-        self.sim.physx.gpu_max_rigid_patch_count = 32768

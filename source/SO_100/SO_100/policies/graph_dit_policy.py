@@ -51,6 +51,9 @@ class GraphDiTPolicyCfg:
     noise_schedule: str = "cosine"
     """Noise schedule: 'cosine', 'linear', etc."""
     
+    num_subtasks: int = 2
+    """Number of subtasks (for conditional generation)."""
+    
     device: str = "cuda"
     """Device to run on."""
 
@@ -85,6 +88,17 @@ class GraphDiTPolicy(nn.Module):
             nn.Dropout(0.1),
         )
         
+        # Subtask condition encoder (one-hot encoding of subtask description)
+        # Input: one-hot vector [num_subtasks], Output: condition embedding
+        self.subtask_encoder = nn.Sequential(
+            nn.Linear(cfg.num_subtasks, cfg.hidden_dim // 4),  # Smaller embedding for condition
+            nn.LayerNorm(cfg.hidden_dim // 4),
+            nn.GELU(),
+        )
+        
+        # Projection layer to combine obs_embed + subtask_embed -> hidden_dim
+        self.condition_proj = nn.Linear(cfg.hidden_dim + cfg.hidden_dim // 4, cfg.hidden_dim)
+        
         # Placeholder: Graph-DiT layers (replace with your implementation)
         # Example: Simple transformer (replace with Graph-DiT)
         encoder_layer = nn.TransformerEncoderLayer(
@@ -100,13 +114,15 @@ class GraphDiTPolicy(nn.Module):
         )
         
         # Output projection
+        # Note: No Tanh() here - actions need to match dataset ranges
+        # Action normalization should be handled in training script or environment
         self.action_head = nn.Sequential(
             nn.Linear(cfg.hidden_dim, cfg.hidden_dim),
             nn.LayerNorm(cfg.hidden_dim),
             nn.GELU(),
             nn.Dropout(0.1),
             nn.Linear(cfg.hidden_dim, cfg.action_dim),
-            nn.Tanh(),  # Actions in [-1, 1]
+            # No activation - output raw actions to match dataset ranges
         )
         
         # Diffusion-related components (replace with your implementation)
@@ -130,6 +146,7 @@ class GraphDiTPolicy(nn.Module):
     def forward(
         self,
         obs: torch.Tensor,
+        subtask_condition: torch.Tensor | None = None,
         timesteps: torch.Tensor | None = None,
         return_dict: bool = False,
     ) -> torch.Tensor | dict:
@@ -137,6 +154,7 @@ class GraphDiTPolicy(nn.Module):
         
         Args:
             obs: Observations [batch_size, obs_dim] or [batch_size, seq_len, obs_dim]
+            subtask_condition: Subtask condition (one-hot) [batch_size, num_subtasks] (optional)
             timesteps: Diffusion timesteps [batch_size] (optional, for training)
             return_dict: If True, return dict with additional info
             
@@ -144,11 +162,19 @@ class GraphDiTPolicy(nn.Module):
             actions: Predicted actions [batch_size, action_dim]
             or dict with 'actions' and other fields if return_dict=True
         """
-        batch_size = obs.shape[0]
-        
         # Encode observations
         # obs: [batch_size, obs_dim] -> [batch_size, hidden_dim]
         obs_embed = self.obs_encoder(obs)
+        
+        # Encode subtask condition if provided
+        if subtask_condition is not None:
+            # subtask_condition: [batch_size, num_subtasks] -> [batch_size, hidden_dim // 4]
+            subtask_embed = self.subtask_encoder(subtask_condition)
+            # Concatenate with observation embedding
+            # [batch_size, hidden_dim] + [batch_size, hidden_dim // 4] -> [batch_size, hidden_dim + hidden_dim // 4]
+            obs_embed = torch.cat([obs_embed, subtask_embed], dim=-1)
+            # Project back to hidden_dim
+            obs_embed = self.condition_proj(obs_embed)
         
         # Add sequence dimension if needed for transformer
         # [batch_size, hidden_dim] -> [batch_size, 1, hidden_dim]
@@ -183,11 +209,17 @@ class GraphDiTPolicy(nn.Module):
         else:
             return actions
     
-    def predict(self, obs: torch.Tensor, deterministic: bool = True) -> torch.Tensor:
+    def predict(
+        self, 
+        obs: torch.Tensor, 
+        subtask_condition: torch.Tensor | None = None,
+        deterministic: bool = True
+    ) -> torch.Tensor:
         """Predict actions from observations (inference mode).
         
         Args:
             obs: Observations [batch_size, obs_dim]
+            subtask_condition: Subtask condition (one-hot) [batch_size, num_subtasks] (optional)
             deterministic: If True, use deterministic prediction
             
         Returns:
@@ -195,7 +227,7 @@ class GraphDiTPolicy(nn.Module):
         """
         self.eval()
         with torch.no_grad():
-            actions = self.forward(obs)
+            actions = self.forward(obs, subtask_condition=subtask_condition)
             if not deterministic:
                 # Add noise for exploration if needed
                 actions = actions + 0.1 * torch.randn_like(actions)
@@ -206,6 +238,7 @@ class GraphDiTPolicy(nn.Module):
         self,
         obs: torch.Tensor,
         actions: torch.Tensor,
+        subtask_condition: torch.Tensor | None = None,
         timesteps: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         """Compute loss for training.
@@ -213,13 +246,14 @@ class GraphDiTPolicy(nn.Module):
         Args:
             obs: Observations [batch_size, obs_dim]
             actions: Target actions [batch_size, action_dim]
+            subtask_condition: Subtask condition (one-hot) [batch_size, num_subtasks] (optional)
             timesteps: Diffusion timesteps [batch_size] (optional)
             
         Returns:
             dict: Loss dictionary with 'total_loss' and other losses
         """
         # Forward pass
-        pred_actions = self.forward(obs, timesteps=timesteps)
+        pred_actions = self.forward(obs, subtask_condition=subtask_condition, timesteps=timesteps)
         
         # ============================================
         # TODO: Replace with your Graph-DiT loss function

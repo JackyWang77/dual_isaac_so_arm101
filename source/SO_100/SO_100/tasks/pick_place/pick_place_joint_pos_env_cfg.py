@@ -4,6 +4,7 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+import copy
 import os
 
 from isaaclab.assets import RigidObjectCfg
@@ -11,9 +12,10 @@ from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import FrameTransformerCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import OffsetCfg
-from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
+from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg, CollisionPropertiesCfg, MassPropertiesCfg
 from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 from isaaclab.utils import configclass
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
 from . import mdp
 from .mdp import dual_pick_place_events
@@ -30,38 +32,6 @@ from SO_100.robots.so_arm100_roscon import SO_ARM100_ROSCON_CFG  # isort: skip
 @configclass
 class EventCfg:
     """Configuration for events."""
-
-    # Apply high friction material to objects at startup (once per environment initialization)
-    apply_friction_to_plate = EventTerm(
-        func=dual_pick_place_events.apply_high_friction_material,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("plate"),
-            "static_friction": 2.0,
-            "dynamic_friction": 2.0,
-            "restitution": 0.0,
-        },
-    )
-    apply_friction_to_fork = EventTerm(
-        func=dual_pick_place_events.apply_high_friction_material,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("fork"),
-            "static_friction": 2.0,
-            "dynamic_friction": 2.0,
-            "restitution": 0.0,
-        },
-    )
-    apply_friction_to_knife = EventTerm(
-        func=dual_pick_place_events.apply_high_friction_material,
-        mode="startup",
-        params={
-            "asset_cfg": SceneEntityCfg("knife"),
-            "static_friction": 2.0,
-            "dynamic_friction": 2.0,
-            "restitution": 0.0,
-        },
-    )
 
     init_dual_arm_pose = EventTerm(
         func=dual_pick_place_events.set_default_joint_pose,
@@ -97,7 +67,8 @@ class EventCfg:
                 "yaw": (-0.5, 0.5)  # Reduce rotation range: -0.5 to 0.5 radians
             },
             "min_separation": 0.04,  # Reduce object spacing: 4cm
-            "asset_cfgs": [SceneEntityCfg("plate"), SceneEntityCfg("fork"), SceneEntityCfg("knife")],
+            # Plate commented out for testing - only cube
+            "asset_cfgs": [SceneEntityCfg("cube")],
         },
     )
 
@@ -125,7 +96,7 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
             ),
         )
         self.scene.robot.spawn.semantic_tags = [("class", "robot")]
-
+        self.scene.robot.spawn.articulation_props.fix_root_link = True
         # Add semantics to table
         self.scene.table.spawn.semantic_tags = [("class", "table")]
 
@@ -139,12 +110,12 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
         self.actions.gripper_action = mdp.JointPositionActionCfg(
             asset_name="robot",
             joint_names=["jaw_joint"],
-            scale=1.0,
+            scale=1.1,
             use_default_offset=False,
         )
         # utilities for gripper status check
         self.gripper_joint_names = ["jaw_joint"]
-        self.gripper_open_val = 0.698
+        self.gripper_open_val = 0.5
         self.gripper_threshold = 0.005
 
         # Rigid body properties of each cube
@@ -165,40 +136,67 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
         assets_dir = os.path.abspath(assets_dir)
 
         # Place objects on table surface
-        self.scene.plate = RigidObjectCfg(
-            prim_path="{ENV_REGEX_NS}/Plate",
+        # Tray position: [0.30, 0.0, 0.02]
+        # Object frame offsets (for visualization):
+        #   - plate_frame: [0.0, 0.0, 0.04] (frame marker 4cm above plate center)
+        #   - cube_frame: [0.0, 0.0, 0.03] (frame marker 3cm above cube center)
+        # Initial positions adjusted so that object frame markers align with desired EE positions
+        
+        # Plate - COMMENTED OUT for testing (only cube)
+        # self.scene.plate = RigidObjectCfg(
+        #     prim_path="{ENV_REGEX_NS}/Plate",
+        #     init_state=RigidObjectCfg.InitialStateCfg(
+        #         # Position adjusted for plate_frame offset [0.0, 0.0, 0.04]
+        #         # Frame marker will be at: plate_pos + [0.0, 0.0, 0.04]
+        #         pos=[0.28, 0.0, 0.0], rot=[1, 0, 0, 0]  # Frame marker at [0.28, 0.0, 0.04]
+        #     ),
+        #     spawn=UsdFileCfg(
+        #         usd_path=os.path.join(assets_dir, "Plate/Plate.usd"),
+        #         scale=(1.0, 1.0, 1.0),
+        #         rigid_props=cube_properties,
+        #         semantic_tags=[("class", "plate")],
+        #     ),
+        # )
+        # Fork - COMMENTED OUT (replaced with cube for easier grasping)
+        # self.scene.fork = RigidObjectCfg(
+        #     prim_path="{ENV_REGEX_NS}/Fork",
+        #     init_state=RigidObjectCfg.InitialStateCfg(
+        #         # Position adjusted for fork_frame offset [0.0, 0.0, 0.07]
+        #         # Frame marker will be at: fork_pos + [0.0, 0.0, 0.07]
+        #         pos=[0.30, 0.06, 0.0], rot=[1, 0, 0, 0]  # Frame marker at [0.30, 0.06, 0.07]
+        #     ),
+        #     spawn=UsdFileCfg(
+        #         usd_path=os.path.join(assets_dir, "Fork/Fork.usd"),
+        #         scale=(1.0, 1.0, 1.0),
+        #         rigid_props=cube_properties,
+        #         semantic_tags=[("class", "fork")],
+        #     ),
+        # )
+
+        # Cube - easier to grasp than fork
+        self.scene.cube = RigidObjectCfg(
+            prim_path="{ENV_REGEX_NS}/Object",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.55, 0.0, 0.01], rot=[1, 0, 0, 0]  # Further away (0.5 -> 0.55) to ensure no contact
+                # Position adjusted for cube_frame offset [0.0, 0.0, 0.03]
+                # Frame marker will be at: cube_pos + [0.0, 0.0, 0.03]
+                pos=[0.30, 0.06, 0.02], rot=[1, 0, 0, 0]  # z=0.02 slightly above table
             ),
             spawn=UsdFileCfg(
-                usd_path=os.path.join(assets_dir, "Plate/Plate.usd"),
-                scale=(1.0, 1.0, 1.0),
-                rigid_props=cube_properties,
-                semantic_tags=[("class", "plate")],
-            ),
-        )
-        self.scene.fork = RigidObjectCfg(
-            prim_path="{ENV_REGEX_NS}/Fork",
-            init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.20, 0.05, 0.005], rot=[1, 0, 0, 0]  # Changed from 0.45 to 0.20
-            ),
-            spawn=UsdFileCfg(
-                usd_path=os.path.join(assets_dir, "Fork/Fork.usd"),
-                scale=(1.0, 1.0, 1.0),
-                rigid_props=cube_properties,
-                semantic_tags=[("class", "fork")],
-            ),
-        )
-        self.scene.knife = RigidObjectCfg(
-            prim_path="{ENV_REGEX_NS}/Knife",
-            init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.20, -0.08, 0.005], rot=[1, 0, 0, 0]  # Changed from 0.45 to 0.20
-            ),
-            spawn=UsdFileCfg(
-                usd_path=os.path.join(assets_dir, "Knife/Knife.usd"),
-                scale=(1.0, 1.0, 1.0),
-                rigid_props=cube_properties,
-                semantic_tags=[("class", "knife")],
+                usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
+                scale=(0.7, 0.7, 0.3),
+                rigid_props=RigidBodyPropertiesCfg(
+                    solver_position_iteration_count=16,
+                    solver_velocity_iteration_count=1,
+                    max_angular_velocity=1000.0,
+                    max_linear_velocity=1000.0,
+                    max_depenetration_velocity=5.0,
+                    disable_gravity=False,
+                ),
+                collision_props=CollisionPropertiesCfg(
+                    collision_enabled=True,
+                ),
+                mass_props=MassPropertiesCfg(mass=0.02),  # 20g, ultra light cube
+                semantic_tags=[("class", "cube")],
             ),
         )
 
@@ -234,59 +232,62 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
             ],
         )
 
-        # Visual markers for objects (plate, fork, knife)
-        # Plate marker (blue-ish)
-        plate_marker_cfg = FRAME_MARKER_CFG.copy()
-        plate_marker_cfg.markers["frame"].scale = (0.08, 0.08, 0.08)
-        plate_marker_cfg.prim_path = "/Visuals/FrameTransformer/Plate"
-        self.scene.plate_frame = FrameTransformerCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/base",
-            debug_vis=False,
-            visualizer_cfg=plate_marker_cfg,
-            target_frames=[
-                FrameTransformerCfg.FrameCfg(
-                    prim_path="{ENV_REGEX_NS}/Plate",
-                    name="plate",
-                    offset=OffsetCfg(
-                        pos=[0.0, 0.0, 0.0],
-                    ),
-                ),
-            ],
-        )
+        # Visual markers for objects (cube only for now)
+        # Use deepcopy() to create independent visualizer configs to avoid PointInstancer prototype mismatch
+        # Each frame needs a completely independent visualizer configuration (shallow copy is not enough)
 
-        # Fork marker (green-ish)
-        fork_marker_cfg = FRAME_MARKER_CFG.copy()
-        fork_marker_cfg.markers["frame"].scale = (0.08, 0.08, 0.08)
-        fork_marker_cfg.prim_path = "/Visuals/FrameTransformer/Fork"
-        self.scene.fork_frame = FrameTransformerCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/base",
-            debug_vis=False,
-            visualizer_cfg=fork_marker_cfg,
-            target_frames=[
-                FrameTransformerCfg.FrameCfg(
-                    prim_path="{ENV_REGEX_NS}/Fork",
-                    name="fork",
-                    offset=OffsetCfg(
-                        pos=[0.0, 0.0, 0.0],
-                    ),
-                ),
-            ],
-        )
+        # Plate marker - COMMENTED OUT for testing (only cube)
+        # plate_marker_cfg = copy.deepcopy(FRAME_MARKER_CFG)
+        # plate_marker_cfg.markers["frame"].scale = (0.03, 0.03, 0.03)
+        # plate_marker_cfg.prim_path = "/Visuals/FrameTransformer/Plate"  # Unique prim path
+        # self.scene.plate_frame = FrameTransformerCfg(
+        #     prim_path="{ENV_REGEX_NS}/Robot/base",
+        #     debug_vis=True,
+        #     visualizer_cfg=plate_marker_cfg,
+        #     target_frames=[
+        #         FrameTransformerCfg.FrameCfg(
+        #             prim_path="{ENV_REGEX_NS}/Plate",
+        #             name="plate",
+        #             offset=OffsetCfg(
+        #                 pos=[0.0, 0.0, 0.04],
+        #             ),
+        #         ),
+        #     ],
+        # )
 
-        # Knife marker (red-ish)
-        knife_marker_cfg = FRAME_MARKER_CFG.copy()
-        knife_marker_cfg.markers["frame"].scale = (0.08, 0.08, 0.08)
-        knife_marker_cfg.prim_path = "/Visuals/FrameTransformer/Knife"
-        self.scene.knife_frame = FrameTransformerCfg(
+        # Fork marker - COMMENTED OUT (replaced with cube)
+        # fork_marker_cfg = copy.deepcopy(FRAME_MARKER_CFG)
+        # fork_marker_cfg.markers["frame"].scale = (0.03, 0.03, 0.03)
+        # fork_marker_cfg.prim_path = "/Visuals/FrameTransformer/Fork"  # Unique prim path
+        # self.scene.fork_frame = FrameTransformerCfg(
+        #     prim_path="{ENV_REGEX_NS}/Robot/base",
+        #     debug_vis=True,
+        #     visualizer_cfg=fork_marker_cfg,
+        #     target_frames=[
+        #         FrameTransformerCfg.FrameCfg(
+        #             prim_path="{ENV_REGEX_NS}/Fork",
+        #             name="fork",
+        #             offset=OffsetCfg(
+        #                 pos=[0.0, 0.0, 0.07],
+        #             ),
+        #         ),
+        #     ],
+        # )
+
+        # Cube marker (green-ish) - independent config with visualization
+        cube_marker_cfg = copy.deepcopy(FRAME_MARKER_CFG)
+        cube_marker_cfg.markers["frame"].scale = (0.2, 0.2, 0.2)
+        cube_marker_cfg.prim_path = "/Visuals/FrameTransformer/Cube"  # Unique prim path
+        self.scene.cube_frame = FrameTransformerCfg(
             prim_path="{ENV_REGEX_NS}/Robot/base",
             debug_vis=False,
-            visualizer_cfg=knife_marker_cfg,
+            visualizer_cfg=cube_marker_cfg,
             target_frames=[
                 FrameTransformerCfg.FrameCfg(
-                    prim_path="{ENV_REGEX_NS}/Knife",
-                    name="knife",
+                    prim_path="{ENV_REGEX_NS}/Object",
+                    name="cube",
                     offset=OffsetCfg(
-                        pos=[0.0, 0.0, 0.0],
+                        pos=[0.0, 0.0, 0.0],  # 3cm above cube center
                     ),
                 ),
             ],

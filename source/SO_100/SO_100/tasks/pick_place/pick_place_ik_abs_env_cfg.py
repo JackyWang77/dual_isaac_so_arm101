@@ -29,7 +29,7 @@ class DualArmPickPlaceIKAbsEnvCfg(pick_place_joint_pos_env_cfg.DualArmPickPlaceJ
         # Set DualArm as robot
         # We switch here to a stiffer PD controller for IK tracking to be better.
         self.scene.robot = SO_ARM100_ROSCON_HIGH_PD_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-
+        self.scene.robot.spawn.articulation_props.fix_root_link = True
         # Set actions for the specific robot type (dual_arm)
         # IK ABSOLUTE mode: action is target EE pose in robot base frame
         self.actions.arm_action = DifferentialInverseKinematicsActionCfg(

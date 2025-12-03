@@ -31,20 +31,17 @@ simulation_app = app_launcher.app
 
 import argparse
 import os
-from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import h5py
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
+from torch.utils.data._utils.collate import default_collate
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-import gymnasium as gym
 import SO_100.tasks  # noqa: F401  # Register environments
 from SO_100.policies.graph_dit_policy import GraphDiTPolicy, GraphDiTPolicyCfg
 
@@ -55,21 +52,25 @@ class HDF5Dataset(Dataset):
     Loads observations and actions from Isaac Lab HDF5 format.
     """
     
-    def __init__(self, hdf5_path: str, obs_keys: list[str], normalize_obs: bool = True):
+    def __init__(self, hdf5_path: str, obs_keys: list[str], normalize_obs: bool = True, normalize_actions: bool = True):
         """Initialize dataset.
         
         Args:
             hdf5_path: Path to HDF5 file.
             obs_keys: List of observation keys to load.
-            normalize_obs: If True, normalize observations to [0, 1].
+            normalize_obs: If True, normalize observations.
+            normalize_actions: If True, normalize actions (recommended for IK Abs actions with different ranges).
         """
         self.hdf5_path = hdf5_path
         self.obs_keys = obs_keys
         self.normalize_obs = normalize_obs
+        self.normalize_actions = normalize_actions
         
         # Load all episodes
         self.episodes = []
         self.obs_stats = {}  # For normalization
+        self.action_stats = {}  # For action normalization
+        self.subtask_order = []  # Order of subtasks for encoding
         
         print(f"[HDF5Dataset] Loading dataset from: {hdf5_path}")
         
@@ -82,19 +83,49 @@ class HDF5Dataset(Dataset):
             all_obs = []
             all_actions = []
             
+            # Track subtask statistics
+            subtask_stats = {}
+            
             for demo_key in demo_keys:
                 demo = f[f'data/{demo_key}']
                 
                 # Load observations
+                # Try 'obs' first (Isaac Lab Mimic format), fallback to 'observations'
+                obs_container = demo.get('obs', demo.get('observations', None))
+                if obs_container is None:
+                    raise ValueError(f"Neither 'obs' nor 'observations' found in {demo_key}")
+                
                 obs_dict = {}
                 for key in obs_keys:
-                    if key in demo['observations']:
-                        obs_dict[key] = np.array(demo['observations'][key])
+                    if key in obs_container:
+                        obs_dict[key] = np.array(obs_container[key])
                     else:
                         print(f"[HDF5Dataset] Warning: Key '{key}' not found in {demo_key}")
                 
                 # Load actions
                 actions = np.array(demo['actions'])
+                
+                # Load subtask signals if available (for multi-subtask demos)
+                subtask_signals = None
+                subtask_order = []  # Order of subtasks: ['push_cube', 'lift_ee']
+                if 'datagen_info' in obs_container:
+                    datagen_info = obs_container['datagen_info']
+                    if 'subtask_term_signals' in datagen_info:
+                        subtask_signals = {}
+                        signals_group = datagen_info['subtask_term_signals']
+                        for subtask_name in signals_group.keys():
+                            subtask_signals[subtask_name] = np.array(signals_group[subtask_name])
+                            subtask_order.append(subtask_name)
+                            # Track statistics
+                            if subtask_name not in subtask_stats:
+                                subtask_stats[subtask_name] = {'total_steps': 0, 'completed_steps': 0}
+                            subtask_stats[subtask_name]['total_steps'] += len(subtask_signals[subtask_name])
+                            subtask_stats[subtask_name]['completed_steps'] += np.sum(subtask_signals[subtask_name])
+                
+                # Store subtask order for encoding
+                if not hasattr(self, 'subtask_order') and subtask_order:
+                    self.subtask_order = subtask_order
+                    print(f"[HDF5Dataset] Subtask order: {subtask_order}")
                 
                 # Store each (obs, action) pair
                 for i in range(len(actions)):
@@ -107,15 +138,57 @@ class HDF5Dataset(Dataset):
                                 obs_vec.append(obs_val.flatten())
                             else:
                                 obs_vec.append(np.array([obs_val]))
+                    
                     obs = np.concatenate(obs_vec).astype(np.float32)
                     
-                    self.episodes.append({
+                    # Determine subtask condition (one-hot) if available
+                    subtask_condition = None
+                    if subtask_signals is not None and subtask_order:
+                        # Determine current active subtask based on signals
+                        # Logic: Find the first incomplete subtask, or use the last one if all are complete
+                        active_subtask_idx = None
+                        for idx, subtask_name in enumerate(subtask_order):
+                            # If this subtask is not yet completed, it's the active one
+                            if not subtask_signals[subtask_name][i]:
+                                active_subtask_idx = idx
+                                break
+                        
+                        # If all subtasks are completed, use the last one (lift_ee)
+                        if active_subtask_idx is None:
+                            active_subtask_idx = len(subtask_order) - 1
+                        
+                        # One-hot encoding: [push_cube, lift_ee] for 2 subtasks
+                        subtask_condition = np.zeros(len(subtask_order), dtype=np.float32)
+                        subtask_condition[active_subtask_idx] = 1.0
+                    
+                    # Store episode data with subtask condition
+                    episode_data = {
                         'obs': obs,
                         'action': actions[i].astype(np.float32),
-                    })
+                    }
+                    if subtask_condition is not None:
+                        episode_data['subtask_condition'] = subtask_condition
+                    if subtask_signals is not None:
+                        episode_data['subtask_signals'] = {
+                            name: signal[i] for name, signal in subtask_signals.items()
+                        }
+                    
+                    self.episodes.append(episode_data)
                     
                     all_obs.append(obs)
                     all_actions.append(actions[i])
+            
+            # Print subtask statistics
+            if subtask_stats:
+                print(f"\n[HDF5Dataset] Subtask Statistics:")
+                for subtask_name, stats in subtask_stats.items():
+                    completion_rate = (stats['completed_steps'] / stats['total_steps'] * 100) if stats['total_steps'] > 0 else 0
+                    print(f"  {subtask_name}: {stats['completed_steps']}/{stats['total_steps']} steps completed ({completion_rate:.1f}%)")
+            
+            # Print subtask encoding info
+            if self.subtask_order:
+                print(f"[HDF5Dataset] Subtask condition: {len(self.subtask_order)} subtasks will be passed as condition to policy")
+                print(f"[HDF5Dataset] Subtask order: {self.subtask_order}")
             
             # Compute normalization stats
             if normalize_obs and len(all_obs) > 0:
@@ -125,6 +198,16 @@ class HDF5Dataset(Dataset):
                 
                 print(f"[HDF5Dataset] Computed obs stats: mean shape={self.obs_stats['mean'].shape}, "
                       f"std shape={self.obs_stats['std'].shape}")
+            
+            # Compute action normalization stats
+            if normalize_actions and len(all_actions) > 0:
+                all_actions = np.stack(all_actions)
+                self.action_stats['mean'] = np.mean(all_actions, axis=0, keepdims=True)
+                self.action_stats['std'] = np.std(all_actions, axis=0, keepdims=True) + 1e-8
+                
+                print(f"[HDF5Dataset] Computed action stats: mean shape={self.action_stats['mean'].shape}, "
+                      f"std shape={self.action_stats['std'].shape}")
+                print(f"[HDF5Dataset] Action ranges (before norm): min={all_actions.min(axis=0)}, max={all_actions.max(axis=0)}")
         
         print(f"[HDF5Dataset] Loaded {len(self.episodes)} samples")
     
@@ -140,7 +223,16 @@ class HDF5Dataset(Dataset):
         if self.normalize_obs and len(self.obs_stats) > 0:
             obs = (obs - self.obs_stats['mean'].squeeze()) / self.obs_stats['std'].squeeze()
         
-        return torch.from_numpy(obs), torch.from_numpy(action)
+        # Normalize actions
+        if self.normalize_actions and len(self.action_stats) > 0:
+            action = (action - self.action_stats['mean'].squeeze()) / self.action_stats['std'].squeeze()
+        
+        # Get subtask condition if available
+        subtask_condition = None
+        if 'subtask_condition' in episode:
+            subtask_condition = torch.from_numpy(episode['subtask_condition'].copy())
+        
+        return torch.from_numpy(obs), torch.from_numpy(action), subtask_condition
     
     def get_obs_stats(self):
         """Get observation normalization statistics.
@@ -149,6 +241,14 @@ class HDF5Dataset(Dataset):
             dict: Dictionary with 'mean' and 'std' keys.
         """
         return self.obs_stats
+    
+    def get_action_stats(self):
+        """Get action normalization statistics.
+        
+        Returns:
+            dict: Dictionary with 'mean' and 'std' keys.
+        """
+        return self.action_stats
 
 
 def train_graph_dit_policy(
@@ -204,12 +304,25 @@ def train_graph_dit_policy(
     
     # Load dataset
     print(f"\n[Train] Loading dataset...")
-    dataset = HDF5Dataset(dataset_path, obs_keys, normalize_obs=True)
+    dataset = HDF5Dataset(dataset_path, obs_keys, normalize_obs=True, normalize_actions=True)
+    
+    # Get normalization stats for saving
+    obs_stats = dataset.get_obs_stats()
+    action_stats = dataset.get_action_stats()
     
     # Get actual observation dimension from dataset
     sample_obs, sample_action = dataset[0]
     actual_obs_dim = sample_obs.shape[0]
     actual_action_dim = sample_action.shape[0]
+    
+    # Check if subtask condition is available
+    num_subtasks = len(dataset.subtask_order) if hasattr(dataset, 'subtask_order') and dataset.subtask_order else 0
+    if num_subtasks > 0:
+        print(f"[Train] Subtask condition available: {num_subtasks} subtasks ({dataset.subtask_order})")
+        print(f"[Train] Observations: {actual_obs_dim} dim (state-based, no subtask encoding)")
+        print(f"[Train] Subtask condition: {num_subtasks} dim (one-hot, passed separately to policy)")
+    else:
+        print(f"[Train] No subtask condition found in dataset")
     
     print(f"[Train] Actual obs dim: {actual_obs_dim}, Actual action dim: {actual_action_dim}")
     
@@ -221,6 +334,30 @@ def train_graph_dit_policy(
         print(f"[Train] Warning: action_dim mismatch ({action_dim} vs {actual_action_dim}), using {actual_action_dim}")
         action_dim = actual_action_dim
     
+    # Custom collate function to handle optional subtask_condition
+    def collate_fn(batch):
+        """Collate function that handles optional subtask_condition."""
+        # Check if subtask_condition is present
+        has_subtask = any(len(item) == 3 and item[2] is not None for item in batch)
+        
+        if has_subtask:
+            # All items have subtask_condition (may be None)
+            obs_batch = default_collate([item[0] for item in batch])
+            action_batch = default_collate([item[1] for item in batch])
+            subtask_batch = []
+            num_subtasks = len(dataset.subtask_order) if hasattr(dataset, 'subtask_order') and dataset.subtask_order else 2
+            for item in batch:
+                if len(item) == 3 and item[2] is not None:
+                    subtask_batch.append(item[2])
+                else:
+                    # Create zero vector if missing
+                    subtask_batch.append(torch.zeros(num_subtasks))
+            subtask_batch = default_collate(subtask_batch)
+            return obs_batch, action_batch, subtask_batch
+        else:
+            # No subtask_condition, return only obs and actions
+            return default_collate([(item[0], item[1]) for item in batch])
+    
     # Create dataloader
     dataloader = DataLoader(
         dataset,
@@ -229,7 +366,11 @@ def train_graph_dit_policy(
         num_workers=4,
         pin_memory=True,
         drop_last=True,
+        collate_fn=collate_fn,
     )
+    
+    # Get number of subtasks from dataset
+    num_subtasks = len(dataset.subtask_order) if hasattr(dataset, 'subtask_order') and dataset.subtask_order else 0
     
     # Create policy configuration
     cfg = GraphDiTPolicyCfg(
@@ -238,8 +379,14 @@ def train_graph_dit_policy(
         hidden_dim=hidden_dims[0] if hidden_dims else 256,
         num_layers=6,
         num_heads=8,
+        num_subtasks=num_subtasks if num_subtasks > 0 else 2,  # Default to 2 if not found
         device=device,
     )
+    
+    if num_subtasks > 0:
+        print(f"[Train] Policy configured with {num_subtasks} subtasks: {dataset.subtask_order}")
+    else:
+        print(f"[Train] Warning: No subtask info found, using default num_subtasks=2")
     
     # Create policy network
     print(f"\n[Train] Creating Graph-DiT Policy...")
@@ -291,12 +438,20 @@ def train_graph_dit_policy(
         epoch_mse_losses = []
         
         pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}")
-        for batch_idx, (obs, actions) in enumerate(pbar):
+        for batch_idx, batch in enumerate(pbar):
+            # Handle subtask condition (may be present or not)
+            if len(batch) == 3:
+                obs, actions, subtask_condition = batch
+                subtask_condition = subtask_condition.to(device, non_blocking=True)
+            else:
+                obs, actions = batch
+                subtask_condition = None
+            
             obs = obs.to(device, non_blocking=True)
             actions = actions.to(device, non_blocking=True)
             
             # Forward pass
-            loss_dict = policy.loss(obs, actions)
+            loss_dict = policy.loss(obs, actions, subtask_condition=subtask_condition)
             loss = loss_dict['total_loss']
             
             # Backward pass
@@ -347,27 +502,50 @@ def train_graph_dit_policy(
             'cfg': cfg,
             'best_loss': best_loss,
             'avg_loss': avg_loss,
+            'obs_stats': obs_stats,  # For observation normalization
+            'action_stats': action_stats,  # For action denormalization during inference
         }, checkpoint_path)
         
         # Save best model
         if avg_loss < best_loss:
             best_loss = avg_loss
             best_path = save_dir / "best_model.pt"
-            policy.save(str(best_path))
+            # Save with stats for inference
+            torch.save({
+                'policy_state_dict': policy.state_dict(),
+                'cfg': cfg,
+                'obs_stats': obs_stats,
+                'action_stats': action_stats,
+            }, str(best_path))
             print(f"[Train] Saved best model (loss: {best_loss:.6f}) to: {best_path}")
         
         # Save latest model
         latest_path = save_dir / "latest_model.pt"
-        policy.save(str(latest_path))
+        torch.save({
+            'policy_state_dict': policy.state_dict(),
+            'cfg': cfg,
+            'obs_stats': obs_stats,
+            'action_stats': action_stats,
+        }, str(latest_path))
         
         # Save every N epochs
         if (epoch + 1) % 10 == 0:
             epoch_path = save_dir / f"model_epoch_{epoch+1}.pt"
-            policy.save(str(epoch_path))
+            torch.save({
+                'policy_state_dict': policy.state_dict(),
+                'cfg': cfg,
+                'obs_stats': obs_stats,
+                'action_stats': action_stats,
+            }, str(epoch_path))
     
     # Save final model
     final_path = save_dir / "final_model.pt"
-    policy.save(str(final_path))
+    torch.save({
+        'policy_state_dict': policy.state_dict(),
+        'cfg': cfg,
+        'obs_stats': obs_stats,
+        'action_stats': action_stats,
+    }, str(final_path))
     print(f"\n[Train] Training completed!")
     print(f"[Train] Final model saved to: {final_path}")
     print(f"[Train] Best model saved to: {save_dir / 'best_model.pt'}")

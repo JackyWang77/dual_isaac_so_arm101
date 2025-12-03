@@ -48,9 +48,9 @@ class JointStatesROS2Cfg:
     """Target interpolation rate in Hz. Used when enable_interpolation=True. Default is 30.0 Hz."""
 
     # Originally 0.03 (30ms), too tight, just barely works
-    # Changed to 0.05 (50ms), or even 0.1
+    # Changed to 0.05 (50ms), or even 0.1, then 0.2 for more tolerance
     # As long as data is received within this time, it's not considered disconnected
-    max_wait_no_msg_sec: float = 0.1
+    max_wait_no_msg_sec: float = 0.2
     """When no message arrives within this duration, return cached action instead of blocking."""
 
 
@@ -259,7 +259,7 @@ class JointStatesROS2(DeviceBase):
         self._last_returned_positions.copy_(current_positions)
         if (
             self._last_joint_msg_time > 0.0
-            and time_since_last_msg > 0.1
+            and time_since_last_msg > 0.2
             and (now - self._last_timing_log_time) > self._timing_log_interval
         ):
             # Reduced console output - timing log removed

@@ -158,13 +158,9 @@ class DualArmPickPlaceIKRelMimicEnv(ManagerBasedRLMimicEnv):
 
         signals = dict()
         subtask_terms = self.obs_buf["subtask_terms"]
-        signals["push_plate"] = subtask_terms["push_plate"][env_ids]
-        signals["pick_plate"] = subtask_terms["pick_plate"][env_ids]
-        signals["place_plate"] = subtask_terms["place_plate"][env_ids]
-        signals["pick_fork"] = subtask_terms["pick_fork"][env_ids]
-        signals["place_fork"] = subtask_terms["place_fork"][env_ids]
-        signals["pick_knife"] = subtask_terms["pick_knife"][env_ids]
-        signals["place_knife"] = subtask_terms["place_knife"][env_ids]
+        # Only cube tasks for testing (plate and knife removed)
+        signals["pick_cube"] = subtask_terms["pick_cube"][env_ids]
+        signals["place_cube"] = subtask_terms["place_cube"][env_ids]
         return signals
 
     def get_expected_attached_object(self, eef_name: str, subtask_index: int, env_cfg) -> str | None:

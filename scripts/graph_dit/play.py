@@ -25,6 +25,8 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import argparse
+
+import numpy as np
 import torch
 
 import gymnasium as gym
@@ -83,10 +85,45 @@ def play_graph_dit_policy(
     
     print(f"[Play] Obs dim: {obs_dim}, Action dim: {action_dim}")
     
-    # Load policy
+    # Load policy and normalization stats
     print(f"\n[Play] Loading policy from: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    
+    # Load policy
     policy = GraphDiTPolicy.load(checkpoint_path, device=device)
     policy.eval()
+    
+    # Load normalization stats (if available)
+    obs_stats = checkpoint.get('obs_stats', None)
+    action_stats = checkpoint.get('action_stats', None)
+    
+    if obs_stats is not None:
+        print(f"[Play] Loaded observation normalization stats")
+        # Handle both numpy arrays and torch tensors
+        if isinstance(obs_stats['mean'], np.ndarray):
+            obs_mean = torch.from_numpy(obs_stats['mean']).squeeze().to(device)
+            obs_std = torch.from_numpy(obs_stats['std']).squeeze().to(device)
+        else:
+            obs_mean = obs_stats['mean'].squeeze().to(device)
+            obs_std = obs_stats['std'].squeeze().to(device)
+    else:
+        print(f"[Play] Warning: No observation stats found, skipping normalization")
+        obs_mean = None
+        obs_std = None
+    
+    if action_stats is not None:
+        print(f"[Play] Loaded action normalization stats")
+        # Handle both numpy arrays and torch tensors
+        if isinstance(action_stats['mean'], np.ndarray):
+            action_mean = torch.from_numpy(action_stats['mean']).squeeze().to(device)
+            action_std = torch.from_numpy(action_stats['std']).squeeze().to(device)
+        else:
+            action_mean = action_stats['mean'].squeeze().to(device)
+            action_std = action_stats['std'].squeeze().to(device)
+    else:
+        print(f"[Play] Warning: No action stats found, skipping denormalization")
+        action_mean = None
+        action_std = None
     
     # Run episodes
     print(f"\n[Play] Running {num_episodes} episodes...")
@@ -116,9 +153,23 @@ def play_graph_dit_policy(
                 if len(obs_tensor.shape) == 1:
                     obs_tensor = obs_tensor.unsqueeze(0)
             
-            # Get actions from policy
-            actions = policy.predict(obs_tensor, deterministic=True)
-            actions = actions.cpu().numpy()
+            # Normalize observations (if stats available)
+            if obs_mean is not None and obs_std is not None:
+                obs_tensor = (obs_tensor - obs_mean) / obs_std
+            
+            # Get subtask condition (optional - can be determined from environment or set manually)
+            # For now, we'll pass None and let policy work without condition
+            # TODO: Extract subtask condition from environment observations if available
+            subtask_condition = None
+            
+            # Get actions from policy (output is normalized)
+            actions_normalized = policy.predict(obs_tensor, subtask_condition=subtask_condition, deterministic=True)
+            
+            # Denormalize actions (if stats available)
+            if action_mean is not None and action_std is not None:
+                actions = (actions_normalized * action_std + action_mean).cpu().numpy()
+            else:
+                actions = actions_normalized.cpu().numpy()
             
             # Step environment
             obs, rewards, terminated, truncated, info = env.step(actions)

@@ -6,7 +6,7 @@
 from dataclasses import MISSING
 
 import isaaclab.sim as sim_utils
-from isaaclab.assets import ArticulationCfg, AssetBaseCfg
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg, DeformableObjectCfg
 from isaaclab.devices.openxr import XrCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
@@ -19,6 +19,12 @@ from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import CameraCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg
 from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdFileCfg
+from isaaclab.sim import (
+    MeshCuboidCfg,
+    DeformableBodyMaterialCfg,
+    DeformableBodyPropertiesCfg,
+    PreviewSurfaceCfg,
+)
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
@@ -62,6 +68,44 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
         prim_path="/World/light",
         spawn=sim_utils.DomeLightCfg(color=(0.75, 0.75, 0.75), intensity=3000.0),
     )
+
+    # 🍞 软面包片 (Deformable Bread) - COMMENTED OUT for now (will be used later)
+    # bread = DeformableObjectCfg(
+    #     prim_path="{ENV_REGEX_NS}/Bread",
+    #     # 1. 定义形状：使用 Mesh 生成器 (必须是 Mesh，不能是 Shape)
+    #     spawn=MeshCuboidCfg(
+    #         size=(0.10, 0.10, 0.01),  # 10cm x 10cm x 1cm (薄面包片)
+    #         # 2. 视觉材质：看起来像面包
+    #         visual_material=PreviewSurfaceCfg(
+    #             diffuse_color=(0.8, 0.6, 0.3),  # 焦黄色
+    #             roughness=0.9,
+    #         ),
+    #         # 3. 物理材质：决定软硬 (关键!)
+    #         physics_material=DeformableBodyMaterialCfg(
+    #             youngs_modulus=5e4,  # 50000 Pa (越小越软，太小会塌)
+    #             poissons_ratio=0.4,  # 0.4 (像海绵一样)
+    #             damping_scale=0.1,  # 阻尼 (防止像果冻一样乱晃)
+    #             dynamic_friction=1.0,  # 摩擦力 (设大点，防止从盘子里滑出去)
+    #         ),
+    #         # 4. 物理属性：决定计算精度 (关键!)
+    #         deformable_props=DeformableBodyPropertiesCfg(
+    #             rest_offset=0.0,
+    #             contact_offset=0.005,  # 接触厚度 (设为 5mm 左右防止穿模)
+    #             # 🔥 关键：网格分辨率。
+    #             # 这个数决定了把你的面包切成多少个小块来计算变形。
+    #             # 设太小(如 2)就不软了，设太大(如 50)显卡会爆。
+    #             # 10 左右对于这个尺寸是黄金值。
+    #             simulation_hexahedral_resolution=10,
+    #             solver_position_iteration_count=16,  # 计算迭代次数 (防穿模)
+    #         ),
+    #     ),
+    #     # 5. 初始位置：放在盘子上方一点点（盘子位置约在 x=0.28, z=0.0）
+    #     init_state=DeformableObjectCfg.InitialStateCfg(
+    #         pos=(0.28, 0.0, 0.08),  # 在盘子中心上方 8cm，让它自然掉落
+    #         rot=(1.0, 0.0, 0.0, 0.0),
+    #     ),
+    #     debug_vis=False,
+    # )
 
     # ---------------------------------------------------------
     # 📷 1. Fixed Camera (Top Camera - Overhead view, looking down)
@@ -146,7 +190,12 @@ class ObservationsCfg:
 
     @configclass
     class RGBCameraPolicyCfg(ObsGroup):
-        """Observations for policy group with RGB images."""
+        """Observations for policy group with RGB images.
+        
+        Note: Currently empty - kept for future use in sim2real distillation.
+        Teacher policy (Graph-DiT) and student policy (RL fine-tuning) both use
+        state-based observations for consistency.
+        """
 
         def __post_init__(self):
             self.enable_corruption = False
@@ -156,83 +205,121 @@ class ObservationsCfg:
     class SubtaskCfg(ObsGroup):
         """Observations for subtask group."""
 
-        push_plate = ObsTerm(
+        # Plate tasks - COMMENTED OUT for testing (only cube)
+        # push_plate = ObsTerm(
+        #     func=mdp.object_pushed,
+        #     params={
+        #         "robot_cfg": SceneEntityCfg("robot"),
+        #         "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+        #         "object_cfg": SceneEntityCfg("plate"),
+        #         "target_cfg": SceneEntityCfg("object"),
+        #         "planar_offset": (0.0, 0.0),
+        #         "planar_tolerance": 0.03,
+        #         "height_target": 0.02,
+        #         "height_tolerance": 0.02,
+        #     },
+        # )
+        # pick_plate = ObsTerm(
+        #     func=mdp.object_grasped,
+        #     params={
+        #         "robot_cfg": SceneEntityCfg("robot"),
+        #         "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+        #         "object_cfg": SceneEntityCfg("plate"),
+        #     },
+        # )
+        # place_plate = ObsTerm(
+        #     func=mdp.object_placed,
+        #     params={
+        #         "robot_cfg": SceneEntityCfg("robot"),
+        #         "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+        #         "object_cfg": SceneEntityCfg("plate"),
+        #         "target_cfg": SceneEntityCfg("object"),
+        #         "planar_offset": (0.0, 0.0),
+        #         "planar_tolerance": 0.03,
+        #         "height_target": 0.02,
+        #         "height_tolerance": 0.02,
+        #     },
+        # )
+        # Fork - COMMENTED OUT (replaced with cube)
+        # pick_fork = ObsTerm(
+        #     func=mdp.object_grasped,
+        #     params={
+        #         "robot_cfg": SceneEntityCfg("robot"),
+        #         "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+        #         "object_cfg": SceneEntityCfg("fork"),
+        #         "table_height": 0.0,  # Table initial position z=0.0 (table is AssetBaseCfg, not RigidObject)
+        #         "min_lift_height": 0.01,  # Fork must be lifted 1cm above table to be considered picked
+        #     },
+        # )
+        # place_fork = ObsTerm(
+        #     func=mdp.object_placed,
+        #     params={
+        #         "robot_cfg": SceneEntityCfg("robot"),
+        #         "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+        #         "object_cfg": SceneEntityCfg("fork"),
+        #         "target_cfg": SceneEntityCfg("object"),
+        #         "planar_offset": (0.0, 0.08),
+        #         "planar_tolerance": 0.03,
+        #         "height_target": 0.02,
+        #         "height_tolerance": 0.02,
+        #     },
+        # )
+        # pick_cube - COMMENTED OUT for push task
+        # pick_cube = ObsTerm(
+        #     func=mdp.object_grasped,
+        #     params={
+        #         "robot_cfg": SceneEntityCfg("robot"),
+        #         "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+        #         "object_cfg": SceneEntityCfg("cube"),
+        #         "table_height": 0.0,
+        #         "min_lift_height": 0.01,
+        #     },
+        # )
+        
+        # Push cube - only checks position, no gripper check
+        push_cube = ObsTerm(
             func=mdp.object_pushed,
             params={
                 "robot_cfg": SceneEntityCfg("robot"),
                 "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-                "object_cfg": SceneEntityCfg("plate"),
+                "object_cfg": SceneEntityCfg("cube"),
                 "target_cfg": SceneEntityCfg("object"),
-                "planar_offset": (0.0, 0.0),
-                "planar_tolerance": 0.03,
-                "height_target": 0.02,
-                "height_tolerance": 0.02,
+                "planar_offset": (0.0, 0.0),  # Push to tray center
+                "planar_tolerance": 0.05,     # 5cm tolerance
             },
         )
-        # Keep pick_plate for backward compatibility if needed
-        pick_plate = ObsTerm(
-            func=mdp.object_grasped,
+        
+        # Lift EE - check if hand is raised above 7cm
+        lift_ee = ObsTerm(
+            func=mdp.ee_lifted,
             params={
-                "robot_cfg": SceneEntityCfg("robot"),
                 "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-                "object_cfg": SceneEntityCfg("plate"),
+                "min_height": 0.07,  # 7cm above table
             },
         )
-        place_plate = ObsTerm(
-            func=mdp.object_placed,
-            params={
-                "robot_cfg": SceneEntityCfg("robot"),
-                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-                "object_cfg": SceneEntityCfg("plate"),
-                "target_cfg": SceneEntityCfg("object"),
-                "planar_offset": (0.0, 0.0),
-                "planar_tolerance": 0.03,
-                "height_target": 0.02,
-                "height_tolerance": 0.02,
-            },
-        )
-        pick_fork = ObsTerm(
-            func=mdp.object_grasped,
-            params={
-                "robot_cfg": SceneEntityCfg("robot"),
-                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-                "object_cfg": SceneEntityCfg("fork"),
-            },
-        )
-        place_fork = ObsTerm(
-            func=mdp.object_placed,
-            params={
-                "robot_cfg": SceneEntityCfg("robot"),
-                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-                "object_cfg": SceneEntityCfg("fork"),
-                "target_cfg": SceneEntityCfg("object"),
-                "planar_offset": (0.0, 0.08),
-                "planar_tolerance": 0.03,
-                "height_target": 0.02,
-                "height_tolerance": 0.02,
-            },
-        )
-        pick_knife = ObsTerm(
-            func=mdp.object_grasped,
-            params={
-                "robot_cfg": SceneEntityCfg("robot"),
-                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-                "object_cfg": SceneEntityCfg("knife"),
-            },
-        )
-        place_knife = ObsTerm(
-            func=mdp.object_placed,
-            params={
-                "robot_cfg": SceneEntityCfg("robot"),
-                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-                "object_cfg": SceneEntityCfg("knife"),
-                "target_cfg": SceneEntityCfg("object"),
-                "planar_offset": (0.0, -0.08),
-                "planar_tolerance": 0.03,
-                "height_target": 0.02,
-                "height_tolerance": 0.02,
-            },
-        )
+        
+        # Knife - COMMENTED OUT (not generated)
+        # pick_knife = ObsTerm(
+        #     func=mdp.object_grasped,
+        #     params={
+        #         "robot_cfg": SceneEntityCfg("robot"),
+        #         "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+        #         "object_cfg": SceneEntityCfg("knife"),
+        #     },
+        # )
+        # place_knife = ObsTerm(
+        #     func=mdp.object_placed,
+        #     params={
+        #         "robot_cfg": SceneEntityCfg("robot"),
+        #         "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+        #         "object_cfg": SceneEntityCfg("knife"),
+        #         "target_cfg": SceneEntityCfg("object"),
+        #         "planar_offset": (0.0, -0.08),
+        #         "planar_tolerance": 0.03,
+        #         "height_target": 0.02,
+        #         "height_tolerance": 0.02,
+        #     },
+        # )
 
         def __post_init__(self):
             self.enable_corruption = False
@@ -266,8 +353,9 @@ class TerminationsCfg:
     #     params={"minimum_height": 0.03, "asset_cfg": SceneEntityCfg("knife")}
     # )
 
-    # Success condition: all objects correctly placed on tray with gripper open
-    success = DoneTerm(func=mdp.objects_picked_and_placed)
+    # Success condition: cube pushed to target AND EE lifted above 7cm
+    # Two subtasks: push_cube -> lift_ee
+    success = DoneTerm(func=mdp.push_and_lift_complete)
 
 
 @configclass
@@ -300,7 +388,7 @@ class PickPlaceEnvCfg(ManagerBasedRLEnvCfg):
         self.decimation = 1
         self.episode_length_s = 30.0
         # simulation settings
-        self.sim.dt = 1.0 / 60.0
+        self.sim.dt = 1.0 / 90
         # Render interval should match decimation to avoid rendering intermediate physics steps
         self.sim.render_interval = self.decimation
 
@@ -308,3 +396,8 @@ class PickPlaceEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physx.gpu_found_lost_aggregate_pairs_capacity = 1024 * 1024 * 4
         self.sim.physx.gpu_total_aggregate_pairs_capacity = 16 * 1024
         self.sim.physx.friction_correlation_distance = 0.00625
+
+        # 🔥 必须开启！否则 Deformable Object 会报错或变成刚体
+        self.sim.physx.use_gpu = True
+        self.sim.device = "cuda:0"
+        

@@ -139,7 +139,7 @@ class DualArmPickPlaceJointForIKAbsEnv(ManagerBasedRLMimicEnv):
     def get_subtask_term_signals(self, env_ids: Sequence[int] | None = None) -> dict[str, torch.Tensor]:
         """Get subtask termination signals from observation buffer.
         
-        These signals indicate when each subtask (pick/place) is completed,
+        These signals indicate when each subtask is completed,
         and are used by the data generation pipeline.
         
         Args:
@@ -155,14 +155,40 @@ class DualArmPickPlaceJointForIKAbsEnv(ManagerBasedRLMimicEnv):
         subtask_terms = self.obs_buf["subtask_terms"]
         
         # Map subtask termination signals from observation buffer
-        signals["push_plate"] = subtask_terms["push_plate"][env_ids]
-        signals["pick_plate"] = subtask_terms["pick_plate"][env_ids]
-        signals["place_plate"] = subtask_terms["place_plate"][env_ids]
-        signals["pick_fork"] = subtask_terms["pick_fork"][env_ids]
-        signals["place_fork"] = subtask_terms["place_fork"][env_ids]
-        signals["pick_knife"] = subtask_terms["pick_knife"][env_ids]
-        signals["place_knife"] = subtask_terms["place_knife"][env_ids]
+        # Simplified task: push_cube and lift_ee
+        signals["push_cube"] = subtask_terms["push_cube"][env_ids]
+        signals["lift_ee"] = subtask_terms["lift_ee"][env_ids]
         
         return signals
+
+    def get_object_poses(self, env_ids: Sequence[int] | None = None) -> dict[str, torch.Tensor]:
+        """Get the poses of all manipulated objects as 4x4 transformation matrices.
+        
+        Args:
+            env_ids: Environment IDs to query, defaults to all environments
+        
+        Returns:
+            dict: Dictionary mapping object name to 4x4 pose matrix
+        """
+        if env_ids is None:
+            env_ids = slice(None)
+        
+        object_poses = {}
+        
+        # Get cube pose as 4x4 matrix
+        cube = self.scene["cube"]
+        cube_pos = cube.data.root_pos_w[env_ids]
+        cube_quat = cube.data.root_quat_w[env_ids]
+        cube_rot = PoseUtils.matrix_from_quat(cube_quat)
+        object_poses["cube"] = PoseUtils.make_pose(cube_pos, cube_rot)
+        
+        # Get tray pose as 4x4 matrix (target object)
+        tray = self.scene["object"]
+        tray_pos = tray.data.root_pos_w[env_ids]
+        tray_quat = tray.data.root_quat_w[env_ids]
+        tray_rot = PoseUtils.matrix_from_quat(tray_quat)
+        object_poses["object"] = PoseUtils.make_pose(tray_pos, tray_rot)
+        
+        return object_poses
 
 

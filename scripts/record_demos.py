@@ -652,7 +652,16 @@ def run_simulation_loop(
                         # obv is already a dict, no need for [0]
                         if "subtask_terms" in obv:
                             subtasks = obv.get("subtask_terms")
-                            print(f"[DEBUG] Initialized subtasks: {list(subtasks.keys()) if subtasks else None}")
+                            print(f"\n[Instructor] ✅ Initialized subtasks: {list(subtasks.keys()) if subtasks else None}")
+                            # Print initial task description
+                            if hasattr(env.cfg, "subtask_configs") and env.cfg.subtask_configs:
+                                eef_name = list(env.cfg.subtask_configs.keys())[0]
+                                configs = env.cfg.subtask_configs[eef_name]
+                                print(f"[Instructor] 📋 Subtask configs ({eef_name}):")
+                                for i, cfg in enumerate(configs):
+                                    task_desc = getattr(cfg, "description", None) or cfg.subtask_term_signal.replace("_", " ").title()
+                                    print(f"   Step {i+1}: {task_desc} (signal: {cfg.subtask_term_signal})")
+                                print("")
                         else:
                             print(f"[DEBUG] Warning: 'subtask_terms' not found in observation. Available keys: {list(obv.keys())}")
                             subtasks = None

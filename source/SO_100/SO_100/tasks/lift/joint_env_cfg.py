@@ -1,11 +1,12 @@
 # ----------------------------------------------------------------
-# --------------- Dual Arm IK Lift Environment -------------------
+# --------------- Dual Arm IK Relative Lift Environment ----------
 # ----------------------------------------------------------------
 
 import isaaclab_tasks.manager_based.manipulation.lift.mdp as mdp
 from isaaclab.assets import RigidObjectCfg
+from isaaclab.controllers.differential_ik_cfg import DifferentialIKControllerCfg
+from isaaclab.envs.mdp.actions.actions_cfg import DifferentialInverseKinematicsActionCfg
 from isaaclab.markers.config import FRAME_MARKER_CFG  # isort: skip
-# from isaaclab.managers NotImplementedError
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import (
     FrameTransformerCfg,
     OffsetCfg,
@@ -13,34 +14,29 @@ from isaaclab.sensors.frame_transformer.frame_transformer_cfg import (
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
-from isaaclab.controllers.differential_ik_cfg import DifferentialIKControllerCfg
-from isaaclab.envs.mdp.actions.actions_cfg import DifferentialInverseKinematicsActionCfg
 from isaaclab.utils import configclass
 
-from SO_100.robots import SO_ARM100_ROSCON_HIGH_PD_CFG  # high-stiffness PD controller
-from SO_100.tasks.lift.lift_env_cfg import LiftEnvCfg  # base environment (joint-position controlled)
+from SO_100.robots.so_arm100_roscon import SO_ARM100_ROSCON_HIGH_PD_CFG
+from SO_100.tasks.lift.lift_env_cfg import LiftEnvCfg
 
 
 @configclass
-class DualSoArm100LiftCube_IK_EnvCfg(LiftEnvCfg):
+class DualSoArm100LiftCubeEnvCfg(LiftEnvCfg):
     def __post_init__(self):
         # initialize parent configuration
         super().__post_init__()
 
         # ----------------------------------------------------------
-        # Replace both arms with high-stiffness PD controllers
-        # to improve tracking accuracy during IK control
+        # Replace both arms with SO_ARM100_ROSCON_HIGH_PD_CFG (stiffer PD for IK)
         # ----------------------------------------------------------
         self.scene.right_arm = SO_ARM100_ROSCON_HIGH_PD_CFG.replace(
             prim_path="{ENV_REGEX_NS}/Right_Arm",
             init_state=SO_ARM100_ROSCON_HIGH_PD_CFG.init_state.replace(
                 pos=(0.0, -0.25, 0.0),
-                # keep same base rotation you had before
                 rot=(0.7071068, 0.0, 0.0, 0.7071068),
-                # Start with gripper open for easier approach
                 joint_pos={
                     **SO_ARM100_ROSCON_HIGH_PD_CFG.init_state.joint_pos,
-                    "jaw_joint": 0.698,  # Maximum joint limit: start fully open (matches open_command_expr)
+                    "jaw_joint": 0.698,  # Start fully open
                 },
             ),
         )
@@ -51,15 +47,14 @@ class DualSoArm100LiftCube_IK_EnvCfg(LiftEnvCfg):
                 rot=(0.7071068, 0.0, 0.0, 0.7071068),
                 joint_pos={
                     **SO_ARM100_ROSCON_HIGH_PD_CFG.init_state.joint_pos,
-                    "jaw_joint": 0.698,  # Maximum joint limit: start fully open (matches open_command_expr)
+                    "jaw_joint": 0.698,  # Start fully open
                 },
             ),
         )
 
         # ----------------------------------------------------------
-        # Define IK-based control actions for both arms
-        # Each arm uses a Differential IK controller with
-        # Damped Least Squares (DLS) method for stable pose control
+        # Define IK Relative control actions for both arms
+        # Action is delta EE pose (translation + rotation)
         # ----------------------------------------------------------
         self.actions.right_arm_action = DifferentialInverseKinematicsActionCfg(
             asset_name="right_arm",
@@ -73,11 +68,14 @@ class DualSoArm100LiftCube_IK_EnvCfg(LiftEnvCfg):
             body_name="wrist_2_link",
             controller=DifferentialIKControllerCfg(
                 command_type="pose",
-                use_relative_mode=True,
-                ik_method="dls",  # Damped Least Squares method
+                use_relative_mode=True,  # RELATIVE mode
+                ik_method="dls",
             ),
-            scale=0.5,
-            body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(pos=[-0.01, 0.0, 0.0]),
+            scale=0.5,  # Scale for relative actions (0.5 means action 1.0 -> 0.5m/s or rad/s)
+            # IMPORTANT: Must match ee_right offset for reward/IK alignment!
+            body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(
+                pos=[0.004, -0.102, 0.0]
+            ),
         )
 
         self.actions.left_arm_action = DifferentialInverseKinematicsActionCfg(
@@ -92,27 +90,30 @@ class DualSoArm100LiftCube_IK_EnvCfg(LiftEnvCfg):
             body_name="wrist_2_link",
             controller=DifferentialIKControllerCfg(
                 command_type="pose",
-                use_relative_mode=True,
+                use_relative_mode=True,  # RELATIVE mode
                 ik_method="dls",
             ),
-            scale=0.5,
-            body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(pos=[-0.01, 0.0, 0.0]),
+            scale=0.5,  # Scale for relative actions
+            # IMPORTANT: Must match ee_left offset for reward/IK alignment!
+            body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(
+                pos=[0.004, -0.102, 0.0]
+            ),
         )
+
+        # Gripper actions (binary control)
         self.actions.right_gripper_action = mdp.BinaryJointPositionActionCfg(
             asset_name="right_arm",
             joint_names=["jaw_joint"],
-            open_command_expr={"jaw_joint": 0.698},  # Maximum joint limit: fully open gripper
+            open_command_expr={"jaw_joint": 0.698},
             close_command_expr={"jaw_joint": 0.0},
         )
         self.actions.left_gripper_action = mdp.BinaryJointPositionActionCfg(
             asset_name="left_arm",
             joint_names=["jaw_joint"],
-            open_command_expr={"jaw_joint": 0.698},  # Maximum joint limit: fully open gripper
+            open_command_expr={"jaw_joint": 0.698},
             close_command_expr={"jaw_joint": 0.0},
         )
-        # Set the body name for the end effector
-        self.commands.object_pose_right.body_name = ["wrist_2_link"]
-        self.commands.object_pose_left.body_name = ["wrist_2_link"]
+
         # Set Cube as object
         self.scene.object = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Object",
@@ -131,48 +132,44 @@ class DualSoArm100LiftCube_IK_EnvCfg(LiftEnvCfg):
             ),
         )
 
-        # Listens to the required transforms
+        # End-effector frame trackers
         marker_cfg = FRAME_MARKER_CFG.copy()
         marker_cfg.markers["frame"].scale = (0.05, 0.05, 0.05)
         marker_cfg.prim_path = "/Visuals/FrameTransformer"
-        # right end-effector frame tracker
+
         self.scene.ee_right = FrameTransformerCfg(
-            prim_path="{ENV_REGEX_NS}/Right_Arm/base",  # base frame of right arm
+            prim_path="{ENV_REGEX_NS}/Right_Arm/base",
             debug_vis=False,
             visualizer_cfg=marker_cfg,
             target_frames=[
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Right_Arm/wrist_2_link",
                     name="ee_right",
-                    offset=OffsetCfg(pos=[0.01, 0.0, 0.05]),  # Reduced z from 0.1 to 0.05
+                    offset=OffsetCfg(pos=[0.004, -0.102, 0]),
                 ),
             ],
         )
 
-        # left end-effector frame tracker
         self.scene.ee_left = FrameTransformerCfg(
-            prim_path="{ENV_REGEX_NS}/Left_Arm/base",   # base frame of left arm
+            prim_path="{ENV_REGEX_NS}/Left_Arm/base",
             debug_vis=False,
             visualizer_cfg=marker_cfg,
             target_frames=[
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Left_Arm/wrist_2_link",
                     name="ee_left",
-                    offset=OffsetCfg(pos=[0.01, 0.0, 0.05]),  # Reduced z from 0.1 to 0.05
+                    offset=OffsetCfg(pos=[0.004, -0.102, 0]),
                 ),
             ],
         )
 
 
 @configclass
-class DualSoArm100LiftCubeIK_EnvCfg_PLAY(DualSoArm100LiftCube_IK_EnvCfg):
+class DualSoArm100LiftCubeEnvCfg_PLAY(DualSoArm100LiftCubeEnvCfg):
     def __post_init__(self):
-        # initialize parent configuration
         super().__post_init__()
 
-        # ----------------------------------------------------------
-        # Create a smaller scene for testing or demonstration
-        # ----------------------------------------------------------
+        # Smaller scene for testing
         self.scene.num_envs = 2
         self.scene.env_spacing = 2.5
 

@@ -13,7 +13,7 @@ from .pick_place_joint_pos_env_cfg import DualArmPickPlaceJointPosEnvCfg
 class DualArmPickPlaceJointStatesMimicEnvCfg(DualArmPickPlaceJointPosEnvCfg, MimicEnvCfg):
     """
     Isaac Lab Mimic environment config class for recording joint states directly.
-
+    
     This environment:
     - Accepts joint_states control (can be controlled by real robot)
     - Records joint states directly (joint positions + gripper) - no conversion
@@ -37,131 +37,89 @@ class DualArmPickPlaceJointStatesMimicEnvCfg(DualArmPickPlaceJointPosEnvCfg, Mim
         self.datagen_config.max_num_failures = 25
         self.datagen_config.seed = 1
 
-        # The following are the subtask configurations for the pick and place task.
+        # The following are the subtask configurations for the PUSH task.
+        # Simplified: only push_cube (no gripper check)
         subtask_configs = []
-        # Push plate (instead of pick & place)
+        
+        # Subtask 1: Push cube to target location
         subtask_configs.append(
             SubTaskConfig(
-                # Each subtask involves manipulation with respect to a single object frame.
-                object_ref="plate",
-                # This key corresponds to the binary indicator in "datagen_info" that signals
-                # when this subtask is finished (e.g., on a 0 to 1 edge).
-                subtask_term_signal="push_plate",
-                # Specifies time offsets for data generation when splitting a trajectory into
-                # subtask segments. Random offsets are added to the termination boundary.
-                subtask_term_offset_range=(10, 20),
-                # Selection strategy for the source subtask segment during data generation
+                object_ref="cube",
+                subtask_term_signal="push_cube",
+                subtask_term_offset_range=(0, 5),  # Reduced offset to avoid overlap with lift_ee
                 selection_strategy="nearest_neighbor_object",
-                # Optional parameters for the selection strategy function
                 selection_strategy_kwargs={"nn_k": 3},
-                # Amount of action noise to apply during this subtask
-                action_noise=0.03,
-                # Number of interpolation steps to bridge to this subtask segment
+                action_noise=0.0,
                 num_interpolation_steps=5,
-                # Additional fixed steps for the robot to reach the necessary pose
                 num_fixed_steps=0,
-                # If True, apply action noise during the interpolation phase and execution
                 apply_noise_during_interpolation=False,
-                description="Push plate",
-                next_subtask_description="Pick fork",
+                description="Push cube to target",
+                next_subtask_description="Lift hand up",
             )
         )
-        # Pick fork
+        
+        # Subtask 2: Lift EE up (hand raised after completing push)
         subtask_configs.append(
             SubTaskConfig(
-                # Each subtask involves manipulation with respect to a single object frame.
-                object_ref="fork",
-                # Corresponding key for the binary indicator in "datagen_info" for completion
-                subtask_term_signal="pick_fork",
-                # Time offsets for data generation when splitting a trajectory
-                subtask_term_offset_range=(10, 20),
-                # Selection strategy for source subtask segment
+                object_ref="cube",  # Still reference cube for consistency
+                subtask_term_signal="lift_ee",
+                subtask_term_offset_range=(0, 0),  # Final subtask
                 selection_strategy="nearest_neighbor_object",
-                # Optional parameters for the selection strategy function
                 selection_strategy_kwargs={"nn_k": 3},
-                # Amount of action noise to apply during this subtask
-                action_noise=0.03,
-                # Number of interpolation steps to bridge to this subtask segment
+                action_noise=0.0,
                 num_interpolation_steps=5,
-                # Additional fixed steps for the robot to reach the necessary pose
                 num_fixed_steps=0,
-                # If True, apply action noise during the interpolation phase and execution
                 apply_noise_during_interpolation=False,
-                description="Pick fork",  # Add description
-                next_subtask_description="Place fork",
+                description="Lift hand up",
             )
         )
-        # Place fork
-        subtask_configs.append(
-            SubTaskConfig(
-                # Each subtask involves manipulation with respect to a single object frame.
-                object_ref="fork",
-                # Corresponding key for the binary indicator in "datagen_info" for completion
-                subtask_term_signal="place_fork",
-                # Time offsets for data generation when splitting a trajectory
-                subtask_term_offset_range=(10, 20),
-                # Selection strategy for source subtask segment
-                selection_strategy="nearest_neighbor_object",
-                # Optional parameters for the selection strategy function
-                selection_strategy_kwargs={"nn_k": 3},
-                # Amount of action noise to apply during this subtask
-                action_noise=0.03,
-                # Number of interpolation steps to bridge to this subtask segment
-                num_interpolation_steps=5,
-                # Additional fixed steps for the robot to reach the necessary pose
-                num_fixed_steps=0,
-                # If True, apply action noise during the interpolation phase and execution
-                apply_noise_during_interpolation=False,
-                description="Place fork",  # Add description
-            )
-        )
-        # Pick knife
-        subtask_configs.append(
-            SubTaskConfig(
-                # Each subtask involves manipulation with respect to a single object frame.
-                object_ref="knife",
-                # Corresponding key for the binary indicator in "datagen_info" for completion
-                subtask_term_signal="pick_knife",
-                # Time offsets for data generation when splitting a trajectory
-                subtask_term_offset_range=(10, 20),
-                # Selection strategy for source subtask segment
-                selection_strategy="nearest_neighbor_object",
-                # Optional parameters for the selection strategy function
-                selection_strategy_kwargs={"nn_k": 3},
-                # Amount of action noise to apply during this subtask
-                action_noise=0.03,
-                # Number of interpolation steps to bridge to this subtask segment
-                num_interpolation_steps=5,
-                # Additional fixed steps for the robot to reach the necessary pose
-                num_fixed_steps=0,
-                # If True, apply action noise during the interpolation phase and execution
-                apply_noise_during_interpolation=False,
-                description="Pick knife",  # Add description
-                next_subtask_description="Place knife",
-            )
-        )
-        # Place knife
-        subtask_configs.append(
-            SubTaskConfig(
-                # Each subtask involves manipulation with respect to a single object frame.
-                object_ref="knife",
-                # End of final subtask does not need to be detected
-                subtask_term_signal="place_knife",
-                # No time offsets for the final subtask
-                subtask_term_offset_range=(0, 0),
-                # Selection strategy for source subtask segment
-                selection_strategy="nearest_neighbor_object",
-                # Optional parameters for the selection strategy function
-                selection_strategy_kwargs={"nn_k": 3},
-                # Amount of action noise to apply during this subtask
-                action_noise=0.03,
-                # Number of interpolation steps to bridge to this subtask segment
-                num_interpolation_steps=5,
-                # Additional fixed steps for the robot to reach the necessary pose
-                num_fixed_steps=0,
-                # If True, apply action noise during the interpolation phase and execution
-                apply_noise_during_interpolation=False,
-                description="Place knife",  # Add description
-            )
-        )
+        # Pick knife - Commented out for testing (only push plate and pick/place fork)
+        # subtask_configs.append(
+        #     SubTaskConfig(
+        #         # Each subtask involves manipulation with respect to a single object frame.
+        #         object_ref="knife",
+        #         # Corresponding key for the binary indicator in "datagen_info" for completion
+        #         subtask_term_signal="pick_knife",
+        #         # Time offsets for data generation when splitting a trajectory
+        #         subtask_term_offset_range=(10, 20),
+        #         # Selection strategy for source subtask segment
+        #         selection_strategy="nearest_neighbor_object",
+        #         # Optional parameters for the selection strategy function
+        #         selection_strategy_kwargs={"nn_k": 3},
+        #         # Amount of action noise to apply during this subtask
+        #         action_noise=0.03,
+        #         # Number of interpolation steps to bridge to this subtask segment
+        #         num_interpolation_steps=5,
+        #         # Additional fixed steps for the robot to reach the necessary pose
+        #         num_fixed_steps=0,
+        #         # If True, apply action noise during the interpolation phase and execution
+        #         apply_noise_during_interpolation=False,
+        #         description="Pick knife",  # Add description
+        #         next_subtask_description="Place knife",
+        #     )
+        # )
+        # Place knife - Commented out for testing (only push plate and pick/place fork)
+        # subtask_configs.append(
+        #     SubTaskConfig(
+        #         # Each subtask involves manipulation with respect to a single object frame.
+        #         object_ref="knife",
+        #         # End of final subtask does not need to be detected
+        #         subtask_term_signal="place_knife",
+        #         # No time offsets for the final subtask
+        #         subtask_term_offset_range=(0, 0),
+        #         # Selection strategy for source subtask segment
+        #         selection_strategy="nearest_neighbor_object",
+        #         # Optional parameters for the selection strategy function
+        #         selection_strategy_kwargs={"nn_k": 3},
+        #         # Amount of action noise to apply during this subtask
+        #         action_noise=0.03,
+        #         # Number of interpolation steps to bridge to this subtask segment
+        #         num_interpolation_steps=5,
+        #         # Additional fixed steps for the robot to reach the necessary pose
+        #         num_fixed_steps=0,
+        #         # If True, apply action noise during the interpolation phase and execution
+        #         apply_noise_during_interpolation=False,
+        #         description="Place knife",  # Add description
+        #     )
+        # )
         self.subtask_configs["end_effector"] = subtask_configs

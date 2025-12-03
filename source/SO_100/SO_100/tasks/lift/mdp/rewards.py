@@ -168,3 +168,62 @@ def farther_arm_stays_still(
     left_stillness = left_is_farther * torch.exp(-left_vel_mag)
     
     return right_stillness + left_stillness
+
+
+def grasp_intent(
+    env: ManagerBasedRLEnv,
+    proximity_threshold: float = 0.05,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    ee_right_cfg: SceneEntityCfg = SceneEntityCfg("ee_right"),
+    ee_left_cfg: SceneEntityCfg = SceneEntityCfg("ee_left"),
+    right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
+    left_arm_cfg: SceneEntityCfg = SceneEntityCfg("left_arm"),
+) -> torch.Tensor:
+    """Reward the closer arm for closing gripper when near the object.
+    
+    This solves the "hovering" problem where the agent learns to approach
+    but never actually grasps. When ee is close enough, reward gripper closing.
+    
+    Args:
+        proximity_threshold: Distance threshold to start rewarding gripper closing.
+    """
+    object: RigidObject = env.scene[object_cfg.name]
+    ee_right: FrameTransformer = env.scene[ee_right_cfg.name]
+    ee_left: FrameTransformer = env.scene[ee_left_cfg.name]
+    right_arm = env.scene[right_arm_cfg.name]
+    left_arm = env.scene[left_arm_cfg.name]
+    
+    # Object position
+    obj_pos = object.data.root_pos_w
+    
+    # End-effector positions
+    ee_right_pos = ee_right.data.target_pos_w[..., 0, :]
+    ee_left_pos = ee_left.data.target_pos_w[..., 0, :]
+    
+    # Calculate distances
+    dist_right = torch.norm(obj_pos - ee_right_pos, dim=1)
+    dist_left = torch.norm(obj_pos - ee_left_pos, dim=1)
+    
+    # Determine which arm is closer
+    right_is_closer = (dist_right < dist_left).float()
+    left_is_closer = (dist_left < dist_right).float()
+    
+    # Get gripper joint positions (jaw_joint: 0.698 = open, 0.0 = closed)
+    # jaw_joint is the last joint
+    right_gripper_pos = right_arm.data.joint_pos[:, -1]  # jaw_joint
+    left_gripper_pos = left_arm.data.joint_pos[:, -1]    # jaw_joint
+    
+    # Gripper closing reward: higher when gripper is more closed (lower pos)
+    # Normalized: (0.698 - pos) / 0.698 gives 0 when open, 1 when closed
+    right_gripper_closed = (0.698 - right_gripper_pos) / 0.698
+    left_gripper_closed = (0.698 - left_gripper_pos) / 0.698
+    
+    # Only reward gripper closing when close to object
+    right_near = (dist_right < proximity_threshold).float()
+    left_near = (dist_left < proximity_threshold).float()
+    
+    # Reward = closer_arm * near_object * gripper_closing
+    right_reward = right_is_closer * right_near * right_gripper_closed
+    left_reward = left_is_closer * left_near * left_gripper_closed
+    
+    return right_reward + left_reward

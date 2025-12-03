@@ -19,5 +19,5 @@ cd /mnt/ssd/dual_isaac_so_arm101
 python scripts/record_demos.py \
     --task SO-ARM100-Pick-Place-Joint-States-Mimic-v0 \
     --teleop_device joint_states \
-    --num_demos 1 \
+    --num_demos 20 \
     --enable_cameras
