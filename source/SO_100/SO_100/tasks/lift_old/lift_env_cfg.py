@@ -235,7 +235,7 @@ class LiftEnvCfg(ManagerBasedRLEnvCfg):
         self.episode_length_s = 5.0
         self.viewer.eye = (2.5, 2.5, 1.5)
         # simulation settings
-        self.sim.dt = 0.01  # 100Hz
+        self.sim.dt = 0.005  # 100Hz
         self.sim.render_interval = self.decimation
 
         self.sim.physx.bounce_threshold_velocity = 0.2
@@ -243,3 +243,7 @@ class LiftEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physx.gpu_found_lost_aggregate_pairs_capacity = 1024 * 1024 * 4
         self.sim.physx.gpu_total_aggregate_pairs_capacity = 16 * 1024
         self.sim.physx.friction_correlation_distance = 0.00625
+        self.sim.physx.gpu_temp_buffer_capacity = 128 * 1024 * 1024  # 128MB
+        self.sim.physx.gpu_max_rigid_contact_count = 10 * 1024 * 1024
+        self.sim.physx.gpu_max_rigid_patch_count = 10 * 1024 * 1024
+        self.sim.physx.gpu_heap_capacity = 128 * 1024 * 1024

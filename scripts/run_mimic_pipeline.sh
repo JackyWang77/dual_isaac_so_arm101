@@ -34,7 +34,6 @@ python scripts/isaaclab_mimic/annotate_demos.py \
     --device "$DEVICE" \
     --task "$TASK_ANNOTATE" \
     --auto \
-    --headless \
     --enable_cameras \
     --input_file "$INPUT_FILE" \
     --output_file "$ANNOTATED_FILE"
@@ -47,15 +46,15 @@ echo "========================================"
 echo ""
 echo "[Step 2/2] Generating IK Abs dataset..."
 echo "========================================"
-python scripts/isaaclab_mimic/generate_dataset.py \
-    --device "$DEVICE" \
-    --num_envs "$NUM_ENVS" \
-    --generation_num_trials "$NUM_TRIALS" \
-    --task "$TASK_GENERATE" \
-    --headless \
-    --enable_cameras \
-    --input_file "$ANNOTATED_FILE" \
-    --output_file "$OUTPUT_FILE"
+# python scripts/isaaclab_mimic/generate_dataset.py \
+#     --device "$DEVICE" \
+#     --num_envs "$NUM_ENVS" \
+#     --generation_num_trials "$NUM_TRIALS" \
+#     --task "$TASK_GENERATE" \
+#     --headless \
+#     --enable_cameras \
+#     --input_file "$ANNOTATED_FILE" \
+#     --output_file "$OUTPUT_FILE"
 
 echo ""
 echo "[Step 2/2] Generation complete!"

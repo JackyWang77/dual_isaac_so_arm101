@@ -36,8 +36,7 @@ TEMPLATE_ASSETS_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data
 
 SO_ARM100_ROSCON_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        # 使用旧的 USD 文件，新的 SO-ARM101-NEW-TF2.usd 在多实例时位置有问题
-        usd_path=f"{TEMPLATE_ASSETS_DATA_DIR}/Robots/SO-ARM101-NEW-TF2.usd",
+        usd_path=f"{TEMPLATE_ASSETS_DATA_DIR}/Robots/SO-ARM101-NEW-TF2-nopad.usd",
         # usd_path=f"{TEMPLATE_ASSETS_DATA_DIR}/Robots/so_arm100_roscon/so_arm100.usd",
         activate_contact_sensors=False,  # Adjust based on need
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
@@ -46,20 +45,28 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
             enabled_self_collisions=True,
-            solver_position_iteration_count=16,
-            solver_velocity_iteration_count=1,
+            solver_position_iteration_count=8,
+            solver_velocity_iteration_count=0,
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         rot=(1.0, 0.0, 0.0, 0.0),  # No rotation (w, x, y, z), keep robot upright
         pos=(0.0, 0.0, 0.0),  # Fixed comma error (0,0 -> 0.0)
+        # joint_pos={
+        #     "shoulder_pan_joint": 0,  # From real robot ROS2
+        #     "shoulder_lift_joint": -1.745,  # From real robot ROS2, clamped to limit [-1.745, 1.745]
+        #     "elbow_joint": 1.560,  # Changed to fit joint limits
+        #     "wrist_pitch_joint": 0.1,  # Changed to fit joint limits
+        #     "wrist_roll_joint": 0.0,  # From real robot ROS2
+        #     "jaw_joint": 0.698,  # From real robot ROS2, clamped to limit [-0.175, 1.745]
+        # },
         joint_pos={
             "shoulder_pan_joint": 0,  # From real robot ROS2
-            "shoulder_lift_joint": -1.745,  # From real robot ROS2, clamped to limit [-1.745, 1.745]
-            "elbow_joint": 1.560,  # Changed to fit joint limits
-            "wrist_pitch_joint": 0.1,  # Changed to fit joint limits
-            "wrist_roll_joint": 0.0,  # From real robot ROS2
-            "jaw_joint": 0.698,  # From real robot ROS2, clamped to limit [-0.175, 1.745]
+            "shoulder_lift_joint": 0,  # From real robot ROS2, clamped to limit [-1.745, 1.745]
+            "elbow_joint": 0,  # Changed to fit joint limits
+            "wrist_pitch_joint": 0,  # Changed to fit joint limits
+            "wrist_roll_joint": 0,  # From real robot ROS2
+            "jaw_joint": 0.3,  # From real robot ROS2, clamped to limit [-0.175, 1.745]
         },
         # Set initial joint velocities to zero
         joint_vel={".*": 0.0},
@@ -73,8 +80,8 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
         # Jaw               moves: Only moving jaw              (~0.034kg)
         "arm": ImplicitActuatorCfg(
             joint_names_expr=["shoulder_.*", "elbow_joint", "wrist_.*"],
-            effort_limit_sim=5,
-            velocity_limit_sim=5,
+            effort_limit_sim=1.9,
+            velocity_limit_sim=1.5,
             stiffness={
                 "shoulder_pan_joint": 200.0,  # Highest - moves all mass
                 "shoulder_lift_joint": 170.0,  # Slightly less than rotation
@@ -92,8 +99,8 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
         ),
         "gripper": ImplicitActuatorCfg(
             joint_names_expr=["jaw_joint"],
-            effort_limit_sim=5,  # Increased from 1.9 to 2.5 for stronger grip
-            velocity_limit_sim=5,
+            effort_limit_sim=2.5,  # Increased from 1.9 to 2.5 for stronger grip
+            velocity_limit_sim=1.5,
             stiffness=60.0,  # Increased from 25.0 to 60.0 for more reliable closing
             damping=20.0,  # Increased from 10.0 to 20.0 for stability
         ),
