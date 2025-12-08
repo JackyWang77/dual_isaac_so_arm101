@@ -54,8 +54,8 @@ class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
             # open_command_expr={"Gripper": 0.5},
             # close_command_expr={"Gripper": 0.0},
             joint_names=["jaw_joint"],
-            open_command_expr={"jaw_joint": 0.5},
-            close_command_expr={"jaw_joint": 0.0},
+            open_command_expr={"jaw_joint": 0.7},
+            close_command_expr={"jaw_joint": 0.1},
         )
         # NOTE: commands.object_pose is not defined in parent LiftEnvCfg
         # self.commands.object_pose.body_name = ["Fixed_Gripper"]
@@ -110,4 +110,3 @@ class SoArm100LiftJointCubeEnvCfg_PLAY(SoArm100LiftJointCubeEnvCfg):
         self.scene.env_spacing = 2.5
         # disable randomization for play
         self.observations.policy.enable_corruption = False
-        

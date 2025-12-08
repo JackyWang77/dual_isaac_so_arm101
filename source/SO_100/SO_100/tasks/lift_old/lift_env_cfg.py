@@ -9,6 +9,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from dataclasses import MISSING
+import math
 
 import isaaclab.sim as sim_utils
 
@@ -95,12 +96,12 @@ class CommandsCfg:
         resampling_time_range=(5.0, 5.0),
         debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(-0.1, 0.1),
-            pos_y=(-0.3, -0.1),
-            pos_z=(0.2, 0.35),
-            roll=(0.0, 0.0),
-            pitch=(0.0, 0.0),
-            yaw=(0.0, 0.0),
+            pos_x=(0.0, 0.0),
+            pos_y=(0.0, 0.0),
+            pos_z=(0.35, 0.35),
+            roll=(math.pi, math.pi),
+            pitch=(0,0),  # Fixed to π to make z-axis point downward
+            yaw=(math.pi, math.pi),
         ),
     )
 
@@ -239,7 +240,6 @@ class LiftEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.render_interval = self.decimation
 
         self.sim.physx.bounce_threshold_velocity = 0.2
-        self.sim.physx.bounce_threshold_velocity = 0.01
         self.sim.physx.gpu_found_lost_aggregate_pairs_capacity = 1024 * 1024 * 4
         self.sim.physx.gpu_total_aggregate_pairs_capacity = 16 * 1024
         self.sim.physx.friction_correlation_distance = 0.00625
