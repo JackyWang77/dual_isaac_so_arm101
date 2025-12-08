@@ -55,7 +55,7 @@ class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
             # close_command_expr={"Gripper": 0.0},
             joint_names=["jaw_joint"],
             open_command_expr={"jaw_joint": 0.7},
-            close_command_expr={"jaw_joint": 0.1},
+            close_command_expr={"jaw_joint": 0.05},
         )
         # NOTE: commands.object_pose is not defined in parent LiftEnvCfg
         # self.commands.object_pose.body_name = ["Fixed_Gripper"]
