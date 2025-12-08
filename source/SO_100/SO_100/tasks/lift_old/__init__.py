@@ -18,7 +18,7 @@ from . import agents
 
 # Register the SO-100 Cube Lift environment
 gym.register(
-    id="SO-ARM100-Lift-Cube-v0",
+    id="SO-ARM101-Lift-Cube-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     kwargs={
         "env_cfg_entry_point": f"{__name__}.joint_pos_env_cfg:SoArm100LiftJointCubeEnvCfg",
@@ -28,7 +28,7 @@ gym.register(
 )
 
 gym.register(
-    id="SO-ARM100-Lift-Cube-Play-v0",
+    id="SO-ARM101-Lift-Cube-Play-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     kwargs={
         "env_cfg_entry_point": f"{__name__}.joint_pos_env_cfg:SoArm100LiftJointCubeEnvCfg_PLAY",

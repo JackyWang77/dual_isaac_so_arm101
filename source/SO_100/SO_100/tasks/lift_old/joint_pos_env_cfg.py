@@ -45,7 +45,7 @@ class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
             asset_name="robot",
             # joint_names=["Shoulder_Rotation", "Shoulder_Pitch", "Elbow", "Wrist_Pitch", "Wrist_Roll"],
             joint_names=["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_pitch_joint", "wrist_roll_joint"],
-            scale=0.5,
+            scale=1,
             use_default_offset=True,
         )
         self.actions.gripper_action = mdp.BinaryJointPositionActionCfg(
@@ -54,8 +54,8 @@ class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
             # open_command_expr={"Gripper": 0.5},
             # close_command_expr={"Gripper": 0.0},
             joint_names=["jaw_joint"],
-            open_command_expr={"jaw_joint": 0.7},
-            close_command_expr={"jaw_joint": 0.05},
+            open_command_expr={"jaw_joint": 0.1},
+            close_command_expr={"jaw_joint": 0.02},
         )
         # NOTE: commands.object_pose is not defined in parent LiftEnvCfg
         # self.commands.object_pose.body_name = ["Fixed_Gripper"]
@@ -94,6 +94,25 @@ class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
                     name="end_effector",
                     offset=OffsetCfg(
                         pos=[0.0, 0.0, -0.1],
+                    ),
+                ),
+            ],
+        )
+        
+        # Visual marker for cube object
+        object_marker_cfg = FRAME_MARKER_CFG.copy()
+        object_marker_cfg.markers["frame"].scale = (0.05, 0.05, 0.05)
+        object_marker_cfg.prim_path = "/Visuals/ObjectFrameTransformer"
+        self.scene.object_frame = FrameTransformerCfg(
+            prim_path="{ENV_REGEX_NS}/Object",
+            debug_vis=True,
+            visualizer_cfg=object_marker_cfg,
+            target_frames=[
+                FrameTransformerCfg.FrameCfg(
+                    prim_path="{ENV_REGEX_NS}/Object",
+                    name="object",
+                    offset=OffsetCfg(
+                        pos=[0.0, 0.0, 0.0],
                     ),
                 ),
             ],
