@@ -188,7 +188,7 @@ class RewardsCfg:
         func=mdp.grasp,
         params={
             "std": 0.05,  # Unused but kept for compatibility
-            "distance_threshold": 0.002,  # 0.2cm in meters
+            "distance_threshold": 0.0005,  # 0.05cm in meters
             "open_joint_pos": 0.3,  # jaw_joint position when open
             "close_joint_pos": 0.01,  # jaw_joint position when closed
         },
