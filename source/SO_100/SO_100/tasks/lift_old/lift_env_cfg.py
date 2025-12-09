@@ -183,18 +183,6 @@ class RewardsCfg:
         params={"asset_cfg": SceneEntityCfg("robot")},
     )
 
-    # Grasp reward: encourage closing gripper when close to object, opening when far
-    grasp_reward = RewTerm(
-        func=mdp.grasp,
-        params={
-            "std": 0.05,  # Unused but kept for compatibility
-            "distance_threshold": 0.0005,  # 0.05cm in meters
-            "open_joint_pos": 0.3,  # jaw_joint position when open
-            "close_joint_pos": 0.01,  # jaw_joint position when closed
-        },
-        weight=5.0,
-    )
-
 
 @configclass
 class TerminationsCfg:
