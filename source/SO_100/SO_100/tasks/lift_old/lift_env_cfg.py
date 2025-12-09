@@ -13,8 +13,8 @@ import math
 
 import isaaclab.sim as sim_utils
 
-# from . import mdp
-import isaaclab_tasks.manager_based.manipulation.lift.mdp as mdp
+from . import mdp
+# import isaaclab_tasks.manager_based.manipulation.lift.mdp as mdp
 from isaaclab.assets import (
     ArticulationCfg,
     AssetBaseCfg,
@@ -100,7 +100,7 @@ class CommandsCfg:
             pos_y=(0.0, 0.0),
             pos_z=(0.35, 0.35),
             roll=(math.pi, math.pi),
-            pitch=(0,0),  # Fixed to π to make z-axis point downward
+            pitch=(0.0, 0.0),  # Fixed to π to make z-axis point downward
             yaw=(math.pi, math.pi),
         ),
     )
@@ -158,7 +158,7 @@ class EventCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
 
-    reaching_object = RewTerm(func=mdp.object_ee_distance, params={"std": 0.05}, weight=1.0)
+    reaching_object = RewTerm(func=mdp.object_ee_distance, params={"std": 0.05}, weight=3.0)
 
     lifting_object = RewTerm(func=mdp.object_is_lifted, params={"minimal_height": 0.04}, weight=15.0)
 
@@ -181,6 +181,18 @@ class RewardsCfg:
         func=mdp.joint_vel_l2,
         weight=-1e-4,
         params={"asset_cfg": SceneEntityCfg("robot")},
+    )
+
+    # Grasp reward: encourage closing gripper when close to object, opening when far
+    grasp_reward = RewTerm(
+        func=mdp.grasp,
+        params={
+            "std": 0.05,  # Unused but kept for compatibility
+            "distance_threshold": 0.002,  # 0.2cm in meters
+            "open_joint_pos": 0.3,  # jaw_joint position when open
+            "close_joint_pos": 0.01,  # jaw_joint position when closed
+        },
+        weight=5.0,
     )
 
 
