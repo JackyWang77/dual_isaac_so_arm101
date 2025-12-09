@@ -11,6 +11,8 @@
 import gymnasium as gym
 
 from . import agents
+from . import lift_old_joint_states_mimic_env  # noqa: F401
+from . import lift_old_joint_states_mimic_env_cfg
 
 ##
 # Register Gym environments.
@@ -34,5 +36,23 @@ gym.register(
         "env_cfg_entry_point": f"{__name__}.joint_pos_env_cfg:SoArm100LiftJointCubeEnvCfg_PLAY",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:LiftCubePPORunnerCfg",
     },
+    disable_env_checker=True,
+)
+
+##
+# Joint States Recording with MimicEnvCfg (records joint states directly, no conversion)
+##
+_ENV_CFG_JOINT_STATES_MIMIC = (
+    lift_old_joint_states_mimic_env_cfg.SoArm100LiftJointStatesMimicEnvCfg
+)
+_ENTRY_POINT_JOINT_STATES_MIMIC = (
+    f"{__name__}.lift_old_joint_states_mimic_env:SoArm100LiftJointStatesMimicEnv"
+)
+
+# Joint States Recording with MimicEnvCfg (records joint states directly, no conversion)
+gym.register(
+    id="SO-ARM101-Lift-Joint-States-Mimic-v0",
+    entry_point=_ENTRY_POINT_JOINT_STATES_MIMIC,
+    kwargs={"env_cfg_entry_point": _ENV_CFG_JOINT_STATES_MIMIC},
     disable_env_checker=True,
 )

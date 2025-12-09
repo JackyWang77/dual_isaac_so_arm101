@@ -133,8 +133,27 @@ class ObservationsCfg:
             self.enable_corruption = True
             self.concatenate_terms = True
 
+    @configclass
+    class SubtaskCfg(ObsGroup):
+        """Observations for subtask group."""
+
+        # Lift object - check if object is lifted to target height
+        # Note: This uses the observation function from mdp.observations, not the reward function
+        lift_object = ObsTerm(
+            func=mdp.object_is_lifted,
+            params={
+                "minimal_height": 0.04,  # 4cm above initial position
+                "object_cfg": SceneEntityCfg("object"),
+            },
+        )
+
+        def __post_init__(self):
+            self.enable_corruption = False
+            self.concatenate_terms = False
+
     # observation groups
     policy: PolicyCfg = PolicyCfg()
+    subtask_terms: SubtaskCfg = SubtaskCfg()
 
 
 @configclass
