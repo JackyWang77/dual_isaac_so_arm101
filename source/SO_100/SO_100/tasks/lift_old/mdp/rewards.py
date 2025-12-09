@@ -101,25 +101,37 @@ def grasp(
     gripper_joint_pos = robot.data.joint_pos[:, -1]  # (num_envs,)
     
     # Determine if gripper is closed (closer to close_joint_pos than open_joint_pos)
-    # Use midpoint between open and close positions as threshold
-    gripper_midpoint = (open_joint_pos + close_joint_pos) / 2.0
-    is_closed = (gripper_joint_pos < gripper_midpoint).float()  # 1.0 if closed, 0.0 if open
+    # Use a stricter threshold: must be closer to close position than open position
+    # Also add a tolerance: must be within 20% of the range from close position
+    gripper_range = open_joint_pos - close_joint_pos
+    close_tolerance = close_joint_pos + 0.2 * gripper_range  # 20% of range from close position
+    
+    # Gripper is considered closed if:
+    # 1. It's closer to close position than open position, AND
+    # 2. It's within the tolerance range (not too far from close position)
+    distance_to_close = torch.abs(gripper_joint_pos - close_joint_pos)
+    distance_to_open = torch.abs(gripper_joint_pos - open_joint_pos)
+    is_closer_to_close = (distance_to_close < distance_to_open).float()
+    is_within_tolerance = (gripper_joint_pos <= close_tolerance).float()
+    is_closed = (is_closer_to_close * is_within_tolerance)  # 1.0 if closed, 0.0 if open
     
     # Reward logic:
     # - Distance < threshold AND closed: positive reward (encourage closing when close)
     # - Distance < threshold AND open: negative reward (discourage opening when close)
-    # - Distance >= threshold AND open: positive reward (encourage opening when far)
+    # - Distance >= threshold AND open: small positive reward (slightly encourage opening when far)
     # - Distance >= threshold AND closed: negative reward (discourage closing when far)
     
     is_close = (object_ee_distance < distance_threshold).float()  # 1.0 if close, 0.0 if far
     
     # Reward when behavior matches distance:
-    # - Close + Closed = good (reward = 1.0)
-    # - Far + Open = good (reward = 1.0)
-    # - Close + Open = bad (reward = -1.0)
-    # - Far + Closed = bad (reward = -1.0)
+    # - Close + Closed = good (reward = 1.0) - strong reward for closing when close
+    # - Far + Open = okay (reward = 0.2) - small reward for opening when far
+    # - Close + Open = bad (reward = -1.0) - strong penalty for opening when close
+    # - Far + Closed = bad (reward = -1.0) - strong penalty for closing when far
     
-    reward = (is_close * is_closed + (1 - is_close) * (1 - is_closed)) * 2.0 - 1.0
+    # Strong reward for closing when close, small reward for opening when far
+    reward = is_close * is_closed * 1.0 + (1 - is_close) * (1 - is_closed) * 0.1 - \
+             (is_close * (1 - is_closed) + (1 - is_close) * is_closed) * 1.0
     
     return reward
 
