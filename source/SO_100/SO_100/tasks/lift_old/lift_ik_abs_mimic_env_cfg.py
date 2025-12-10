@@ -1,43 +1,51 @@
-# Copyright (c) 2024-2025, The Isaac Lab Project Developers (https://github.com/isaac-sim/IsaacLab/blob/main/CONTRIBUTORS.md).
+# Copyright (c) 2024-2025, The Isaac Lab Project Developers
 # All rights reserved.
 #
 # SPDX-License-Identifier: Apache-2.0
 
+"""IK Absolute Mimic environment configuration for lift task data generation.
+
+This environment:
+- Uses IK Absolute control (action = EEF pose)
+- Has subtask configurations for Mimic data generation
+- Generates data suitable for training IK Abs policies
+"""
+
 from isaaclab.envs.mimic_env_cfg import MimicEnvCfg, SubTaskConfig
 from isaaclab.utils import configclass
 
-from .joint_pos_env_cfg import SoArm100LiftJointCubeEnvCfg
+from .lift_ik_abs_env_cfg import SoArm100LiftIKAbsEnvCfg
 
 
 @configclass
-class SoArm100LiftJointStatesMimicEnvCfg(SoArm100LiftJointCubeEnvCfg, MimicEnvCfg):
+class SoArm100LiftIKAbsMimicEnvCfg(SoArm100LiftIKAbsEnvCfg, MimicEnvCfg):
     """
-    Isaac Lab Mimic environment config class for recording joint states directly for lift task.
+    Isaac Lab Mimic environment config class for IK Absolute env.
     
     This environment:
-    - Accepts joint_states control (can be controlled by real robot)
-    - Records joint states directly (joint positions + gripper) - no conversion
+    - Uses IK Absolute control (action = target EEF pose)
     - Has subtask configurations for data generation
-    - Joint states can be converted to EE pose later using forward kinematics
+    - Generates EEF pose actions for training IK Abs policies
     """
 
     def __post_init__(self):
         # post init of parents
         super().__post_init__()
 
-        # Disable concatenation for Mimic recording (recorder needs dict format)
-        self.observations.policy.concatenate_terms = False
-        self.observations.policy.enable_corruption = False
+        # Disable randomize_object_positions event for Mimic data generation
+        # Mimic will set initial states from annotated demos, so we don't want randomization
+        if hasattr(self.events, "randomize_object_positions"):
+            delattr(self.events, "randomize_object_positions")
 
         # Override the existing values
-        self.datagen_config.name = "demo_src_lift_joint_states_D0"
+        self.datagen_config.name = "demo_src_lift_ik_abs"
         self.datagen_config.generation_guarantee = True
         self.datagen_config.generation_keep_failed = True
         self.datagen_config.generation_num_trials = 10
         self.datagen_config.generation_select_src_per_subtask = True
         self.datagen_config.generation_transform_first_robot_pose = False
         self.datagen_config.generation_interpolate_from_last_target_pose = True
-        self.datagen_config.generation_relative = False  # Joint states are absolute
+        self.datagen_config.generation_relative = False  # IK-Abs uses absolute poses
         self.datagen_config.max_num_failures = 25
         self.datagen_config.seed = 1
 

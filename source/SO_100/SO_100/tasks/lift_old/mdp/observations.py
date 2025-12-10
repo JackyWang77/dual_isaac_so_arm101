@@ -39,25 +39,29 @@ def object_position_in_robot_root_frame(
 def object_is_lifted(
     env: ManagerBasedRLEnv,
     minimal_height: float = 0.04,
+    initial_height: float = 0.015,
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
 ) -> torch.Tensor:
     """Check if the object is lifted above a minimum height.
     
     Used as a subtask signal for "lift object" task completion.
+    Checks if object is lifted to at least minimal_height above its initial position.
     
     Args:
         env: The environment
-        minimal_height: Minimum height (in meters) for object to be considered "lifted"
+        minimal_height: Minimum height (in meters) above initial position for object to be considered "lifted"
+        initial_height: Initial height of the object (default 0.015m for cube)
         object_cfg: Configuration for the object
         
     Returns:
-        Boolean tensor indicating if object is above minimal_height
+        Boolean tensor indicating if object is above minimal_height (0.0 or 1.0)
     """
     object: RigidObject = env.scene[object_cfg.name]
     
     # Get object height (z position in world frame)
     object_height = object.data.root_pos_w[:, 2]  # [num_envs]
     
-    lifted = object_height > minimal_height
+    # Check if object is lifted to at least minimal_height above initial position
+    lifted = object_height >= (initial_height + minimal_height)
     
     return lifted.float()  # Convert to float (0.0 or 1.0)

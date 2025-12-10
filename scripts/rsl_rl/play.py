@@ -140,6 +140,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # wrap around environment for rsl-rl
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
+    # Ensure SO_100 is available in namespace for RSL-RL's eval() calls
+    # RSL-RL uses eval() internally to dynamically load custom ActorCritic classes.
+    # We need to ensure SO_100 modules are accessible in that context.
+    import SO_100.policies.graph_dit_rsl_rl_actor_critic  # noqa: F401
+    import builtins
+    import sys
+    # Inject SO_100 into builtins so eval() can access it
+    # This ensures that when RSL-RL executes eval("SO_100.policies.graph_dit_rsl_rl_actor_critic.GraphDiTActorCritic"),
+    # it can find SO_100 in the namespace
+    if not hasattr(builtins, "SO_100"):
+        builtins.SO_100 = sys.modules["SO_100"]
+
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
     # load previously trained model
     if agent_cfg.class_name == "OnPolicyRunner":
@@ -170,25 +182,52 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     else:
         normalizer = None
 
-    # export policy to onnx/jit
-    export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-    export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
-    export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
+    # export policy to onnx/jit (skip if it takes too long or fails)
+    try:
+        export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
+        print("[INFO]: Exporting policy...")
+        export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
+        export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
+        print("[INFO]: Policy exported successfully.")
+    except Exception as e:
+        print(f"[WARNING]: Failed to export policy: {e}")
+        print("[INFO]: Continuing without export...")
 
     dt = env.unwrapped.step_dt
 
     # reset environment
+    print("[INFO]: Resetting environment...")
     obs = env.get_observations()
     timestep = 0
+    print("[INFO]: Starting simulation loop. Press Ctrl+C to stop.")
+    print(f"[INFO]: Action space: {env.action_space}")
     # simulate environment
+    step_count = 0
     while simulation_app.is_running():
         start_time = time.time()
         # run everything in inference mode
         with torch.inference_mode():
             # agent stepping
             actions = policy(obs)
+            # Debug: Print action info for first few steps
+            if step_count < 5:
+                if isinstance(actions, torch.Tensor):
+                    print(f"[DEBUG] Step {step_count}: actions shape={actions.shape}, mean={actions.mean().item():.4f}, std={actions.std().item():.4f}, min={actions.min().item():.4f}, max={actions.max().item():.4f}")
+                    print(f"[DEBUG] Step {step_count}: actions sample (first env)={actions[0].cpu().numpy()}")
+                elif isinstance(actions, dict):
+                    print(f"[DEBUG] Step {step_count}: actions dict keys={actions.keys()}")
+                    for k, v in actions.items():
+                        if isinstance(v, torch.Tensor):
+                            print(f"[DEBUG]   {k}: shape={v.shape}, mean={v.mean().item():.4f}, min={v.min().item():.4f}, max={v.max().item():.4f}")
+                else:
+                    print(f"[DEBUG] Step {step_count}: actions type={type(actions)}, value={actions}")
             # env stepping
             obs, _, _, _ = env.step(actions)
+        
+        step_count += 1
+        if step_count % 100 == 0:
+            print(f"[INFO]: Running step {step_count}...")
+        
         if args_cli.video:
             timestep += 1
             # Exit the play loop after recording one video

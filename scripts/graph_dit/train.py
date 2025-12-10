@@ -52,7 +52,7 @@ class HDF5Dataset(Dataset):
     Loads observations and actions from Isaac Lab HDF5 format.
     """
     
-    def __init__(self, hdf5_path: str, obs_keys: list[str], normalize_obs: bool = True, normalize_actions: bool = True):
+    def __init__(self, hdf5_path: str, obs_keys: list[str], normalize_obs: bool = True, normalize_actions: bool = True, action_history_length: int = 4):
         """Initialize dataset.
         
         Args:
@@ -60,11 +60,18 @@ class HDF5Dataset(Dataset):
             obs_keys: List of observation keys to load.
             normalize_obs: If True, normalize observations.
             normalize_actions: If True, normalize actions (recommended for IK Abs actions with different ranges).
+            action_history_length: Number of historical actions to collect (default: 4).
         """
         self.hdf5_path = hdf5_path
         self.obs_keys = obs_keys
         self.normalize_obs = normalize_obs
         self.normalize_actions = normalize_actions
+        self.action_history_length = action_history_length
+        
+        # Compute observation dimension for each key (for dynamic indexing)
+        # This allows skipping keys that are not in obs_keys (e.g., target_object_position)
+        self.obs_key_dims = {}  # Will store: {'joint_pos': 6, 'object_position': 3, ...}
+        self.obs_key_offsets = {}  # Will store offsets in concatenated obs: {'joint_pos': 0, 'object_position': 12, ...}
         
         # Load all episodes
         self.episodes = []
@@ -96,6 +103,31 @@ class HDF5Dataset(Dataset):
                     raise ValueError(f"Neither 'obs' nor 'observations' found in {demo_key}")
                 
                 obs_dict = {}
+                # Compute key dimensions and offsets (only need to do this once, from first demo)
+                if not self.obs_key_dims:
+                    offset = 0
+                    for key in obs_keys:
+                        if key in obs_container:
+                            key_data = np.array(obs_container[key])
+                            # Get dimension (handle different array shapes)
+                            # Examples:
+                            # - shape (N,): single value per timestep -> dim = 1
+                            # - shape (N, 3): 3D vector per timestep -> dim = 3
+                            # - shape (N, 6): 6D vector per timestep -> dim = 6
+                            if len(key_data.shape) == 1:
+                                # 1D array: single value per timestep
+                                key_dim = 1
+                            elif len(key_data.shape) == 2:
+                                # 2D array: (num_timesteps, feature_dim)
+                                key_dim = key_data.shape[1]
+                            else:
+                                # Higher dim: take last dimension (shouldn't happen)
+                                key_dim = key_data.shape[-1]
+                            self.obs_key_dims[key] = key_dim
+                            self.obs_key_offsets[key] = offset
+                            offset += key_dim
+                            print(f"[HDF5Dataset] Key '{key}': dim={key_dim}, offset={self.obs_key_offsets[key]}")
+                
                 for key in obs_keys:
                     if key in obs_container:
                         obs_dict[key] = np.array(obs_container[key])
@@ -122,12 +154,19 @@ class HDF5Dataset(Dataset):
                             subtask_stats[subtask_name]['total_steps'] += len(subtask_signals[subtask_name])
                             subtask_stats[subtask_name]['completed_steps'] += np.sum(subtask_signals[subtask_name])
                 
-                # Store subtask order for encoding
-                if not hasattr(self, 'subtask_order') and subtask_order:
+                # Store subtask order for encoding (set once from first demo with subtasks)
+                if not self.subtask_order and subtask_order:
                     self.subtask_order = subtask_order
                     print(f"[HDF5Dataset] Subtask order: {subtask_order}")
+                elif self.subtask_order and subtask_order:
+                    # Verify consistency: all demos should have the same subtask order
+                    if self.subtask_order != subtask_order:
+                        print(f"[HDF5Dataset] WARNING: Subtask order mismatch!")
+                        print(f"  Expected: {self.subtask_order}")
+                        print(f"  Found: {subtask_order}")
+                        print(f"  Using: {self.subtask_order}")
                 
-                # Store each (obs, action) pair
+                # Store each (obs, action_history, action) pair
                 for i in range(len(actions)):
                     # Concatenate observations
                     obs_vec = []
@@ -140,6 +179,76 @@ class HDF5Dataset(Dataset):
                                 obs_vec.append(np.array([obs_val]))
                     
                     obs = np.concatenate(obs_vec).astype(np.float32)
+                    
+                    # Collect action history (last action_history_length actions)
+                    action_history = []
+                    for j in range(max(0, i - self.action_history_length + 1), i + 1):
+                        action_history.append(actions[j].astype(np.float32))
+                    
+                    # Pad with first action if needed
+                    while len(action_history) < self.action_history_length:
+                        action_history.insert(0, actions[0].astype(np.float32))
+                    
+                    action_history = np.stack(action_history, axis=0)  # [action_history_length, action_dim]
+                    
+                    # Collect node features history (EE and Object pos/ori)
+                    # Extract from obs history (same indices as action history)
+                    node_history = []  # Will store [ee_node, object_node] pairs
+                    for j in range(max(0, i - self.action_history_length + 1), i + 1):
+                        # Extract node features from obs at time j
+                        obs_j_vec = []
+                        for key in obs_keys:
+                            if key in obs_dict:
+                                obs_j_val = obs_dict[key][j]
+                                if isinstance(obs_j_val, np.ndarray):
+                                    obs_j_vec.append(obs_j_val.flatten())
+                                else:
+                                    obs_j_vec.append(np.array([obs_j_val]))
+                        obs_j = np.concatenate(obs_j_vec).astype(np.float32)
+                        
+                        # Extract EE and Object node features dynamically based on obs_keys
+                        # This allows skipping target_object_position if it's not in obs_keys
+                        obj_pos_start = self.obs_key_offsets.get('object_position', 12)
+                        obj_pos = obs_j[obj_pos_start:obj_pos_start + self.obs_key_dims.get('object_position', 3)]
+                        
+                        obj_ori_start = self.obs_key_offsets.get('object_orientation', 15)
+                        obj_ori = obs_j[obj_ori_start:obj_ori_start + self.obs_key_dims.get('object_orientation', 4)]
+                        
+                        ee_pos_start = self.obs_key_offsets.get('ee_position', 19)
+                        ee_pos = obs_j[ee_pos_start:ee_pos_start + self.obs_key_dims.get('ee_position', 3)]
+                        
+                        ee_ori_start = self.obs_key_offsets.get('ee_orientation', 22)
+                        ee_ori = obs_j[ee_ori_start:ee_ori_start + self.obs_key_dims.get('ee_orientation', 4)]
+                        
+                        # Ensure correct shapes (pad if needed, truncate if too long)
+                        obj_pos = obj_pos[:3] if len(obj_pos) >= 3 else np.pad(obj_pos, (0, max(0, 3 - len(obj_pos))))
+                        obj_ori = obj_ori[:4] if len(obj_ori) >= 4 else np.pad(obj_ori, (0, max(0, 4 - len(obj_ori))))
+                        ee_pos = ee_pos[:3] if len(ee_pos) >= 3 else np.pad(ee_pos, (0, max(0, 3 - len(ee_pos))))
+                        ee_ori = ee_ori[:4] if len(ee_ori) >= 4 else np.pad(ee_ori, (0, max(0, 4 - len(ee_ori))))
+                        
+                        ee_node_j = np.concatenate([ee_pos, ee_ori])  # [7]
+                        object_node_j = np.concatenate([obj_pos, obj_ori])  # [7]
+                        
+                        node_history.append({
+                            'ee_node': ee_node_j.astype(np.float32),
+                            'object_node': object_node_j.astype(np.float32),
+                        })
+                    
+                    # Pad node history if needed (use first timestep's nodes)
+                    if len(node_history) < self.action_history_length:
+                        first_node = node_history[0] if len(node_history) > 0 else {
+                            'ee_node': np.zeros(7, dtype=np.float32),  # Fallback: zeros
+                            'object_node': np.zeros(7, dtype=np.float32),
+                        }
+                        while len(node_history) < self.action_history_length:
+                            node_history.insert(0, {
+                                'ee_node': first_node['ee_node'].copy(),
+                                'object_node': first_node['object_node'].copy(),
+                            })
+                    
+                    # Stack node history
+                    ee_node_history = np.stack([nh['ee_node'] for nh in node_history], axis=0)  # [history_length, 7]
+                    object_node_history = np.stack([nh['object_node'] for nh in node_history], axis=0)  # [history_length, 7]
                     
                     # Determine subtask condition (one-hot) if available
                     subtask_condition = None
@@ -161,10 +270,13 @@ class HDF5Dataset(Dataset):
                         subtask_condition = np.zeros(len(subtask_order), dtype=np.float32)
                         subtask_condition[active_subtask_idx] = 1.0
                     
-                    # Store episode data with subtask condition
+                    # Store episode data with subtask condition, action history, and node history
                     episode_data = {
                         'obs': obs,
                         'action': actions[i].astype(np.float32),
+                        'action_history': action_history,  # [action_history_length, action_dim]
+                        'ee_node_history': ee_node_history,  # [action_history_length, 7]
+                        'object_node_history': object_node_history,  # [action_history_length, 7]
                     }
                     if subtask_condition is not None:
                         episode_data['subtask_condition'] = subtask_condition
@@ -218,6 +330,9 @@ class HDF5Dataset(Dataset):
         episode = self.episodes[idx]
         obs = episode['obs'].copy()
         action = episode['action'].copy()
+        action_history = episode['action_history'].copy()  # [action_history_length, action_dim]
+        ee_node_history = episode['ee_node_history'].copy()  # [action_history_length, 7]
+        object_node_history = episode['object_node_history'].copy()  # [action_history_length, 7]
         
         # Normalize observations
         if self.normalize_obs and len(self.obs_stats) > 0:
@@ -226,13 +341,20 @@ class HDF5Dataset(Dataset):
         # Normalize actions
         if self.normalize_actions and len(self.action_stats) > 0:
             action = (action - self.action_stats['mean'].squeeze()) / self.action_stats['std'].squeeze()
+            # Normalize action history
+            action_history = (action_history - self.action_stats['mean'].squeeze()) / self.action_stats['std'].squeeze()
+        
+        # Node features are already extracted from raw obs, so we don't normalize them separately
+        # (They will be normalized as part of obs if normalize_obs=True, but we extract them before normalization)
+        # Actually, we should normalize them too if we want consistency
         
         # Get subtask condition if available
         subtask_condition = None
         if 'subtask_condition' in episode:
             subtask_condition = torch.from_numpy(episode['subtask_condition'].copy())
         
-        return torch.from_numpy(obs), torch.from_numpy(action), subtask_condition
+        return torch.from_numpy(obs), torch.from_numpy(action), torch.from_numpy(action_history), \
+               torch.from_numpy(ee_node_history), torch.from_numpy(object_node_history), subtask_condition
     
     def get_obs_stats(self):
         """Get observation normalization statistics.
@@ -258,6 +380,8 @@ def train_graph_dit_policy(
     obs_dim: int,
     action_dim: int,
     hidden_dims: list[int] = [256, 256, 128],
+    num_layers: int = 6,
+    num_heads: int = 8,
     batch_size: int = 256,
     num_epochs: int = 200,
     learning_rate: float = 1e-4,
@@ -266,6 +390,8 @@ def train_graph_dit_policy(
     save_dir: str = "./logs/graph_dit",
     log_dir: str = "./logs/graph_dit",
     resume_checkpoint: str | None = None,
+    action_history_length: int = 4,
+    mode: str = "ddpm",
 ):
     """Train Graph-DiT Policy.
     
@@ -286,11 +412,28 @@ def train_graph_dit_policy(
         resume_checkpoint: Path to checkpoint to resume from (optional).
     """
     
-    # Create directories
-    save_dir = Path(save_dir)
-    log_dir = Path(log_dir)
+    # Create directories with timestamp and mode suffix
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    
+    # Add mode suffix to save/log directories (e.g., reach_joint_ddpm, reach_joint_flow_matching)
+    base_save_dir = Path(save_dir)
+    base_log_dir = Path(log_dir)
+    
+    # Append mode suffix to the base directory name
+    # e.g., ./logs/graph_dit/reach_joint -> ./logs/graph_dit/reach_joint_ddpm
+    save_dir_with_mode = base_save_dir.parent / f"{base_save_dir.name}_{mode}"
+    log_dir_with_mode = base_log_dir.parent / f"{base_log_dir.name}_{mode}"
+    
+    # Add timestamp
+    save_dir = save_dir_with_mode / timestamp
+    log_dir = log_dir_with_mode / timestamp
+    
     save_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
+    
+    print(f"[Train] Save dir (with mode and timestamp): {save_dir}")
+    print(f"[Train] Log dir (with mode and timestamp): {log_dir}")
     
     # TensorBoard writer
     writer = SummaryWriter(log_dir=log_dir / "tensorboard")
@@ -298,20 +441,20 @@ def train_graph_dit_policy(
     print(f"[Train] ===== Graph-DiT Policy Training =====")
     print(f"[Train] Task: {task_name}")
     print(f"[Train] Dataset: {dataset_path}")
+    print(f"[Train] Mode: {mode.upper()} ({'50-100 steps' if mode == 'ddpm' else '1-10 steps, much faster!'})")
     print(f"[Train] Obs dim: {obs_dim}, Action dim: {action_dim}")
-    print(f"[Train] Save dir: {save_dir}")
-    print(f"[Train] Log dir: {log_dir}")
+    print(f"[Train] Action history length: {action_history_length}")
     
     # Load dataset
     print(f"\n[Train] Loading dataset...")
-    dataset = HDF5Dataset(dataset_path, obs_keys, normalize_obs=True, normalize_actions=True)
+    dataset = HDF5Dataset(dataset_path, obs_keys, normalize_obs=True, normalize_actions=True, action_history_length=action_history_length)
     
     # Get normalization stats for saving
     obs_stats = dataset.get_obs_stats()
     action_stats = dataset.get_action_stats()
     
     # Get actual observation dimension from dataset
-    sample_obs, sample_action = dataset[0]
+    sample_obs, sample_action, sample_action_history, sample_ee_history, sample_obj_history, sample_subtask = dataset[0]
     actual_obs_dim = sample_obs.shape[0]
     actual_action_dim = sample_action.shape[0]
     
@@ -334,29 +477,43 @@ def train_graph_dit_policy(
         print(f"[Train] Warning: action_dim mismatch ({action_dim} vs {actual_action_dim}), using {actual_action_dim}")
         action_dim = actual_action_dim
     
-    # Custom collate function to handle optional subtask_condition
+    # Custom collate function to handle optional subtask_condition, action_history, and node_history
     def collate_fn(batch):
-        """Collate function that handles optional subtask_condition."""
+        """Collate function that handles optional subtask_condition, action_history, and node_history."""
         # Check if subtask_condition is present
-        has_subtask = any(len(item) == 3 and item[2] is not None for item in batch)
+        has_subtask = any(len(item) == 6 and item[5] is not None for item in batch)
+        
+        obs_batch = default_collate([item[0] for item in batch])
+        action_batch = default_collate([item[1] for item in batch])
+        action_history_batch = default_collate([item[2] for item in batch])  # [batch, action_history_length, action_dim]
+        ee_node_history_batch = default_collate([item[3] for item in batch])  # [batch, action_history_length, 7]
+        object_node_history_batch = default_collate([item[4] for item in batch])  # [batch, action_history_length, 7]
         
         if has_subtask:
             # All items have subtask_condition (may be None)
-            obs_batch = default_collate([item[0] for item in batch])
-            action_batch = default_collate([item[1] for item in batch])
             subtask_batch = []
-            num_subtasks = len(dataset.subtask_order) if hasattr(dataset, 'subtask_order') and dataset.subtask_order else 2
+            # Get actual num_subtasks from dataset (should match model config)
+            num_subtasks = len(dataset.subtask_order) if hasattr(dataset, 'subtask_order') and dataset.subtask_order else 0
+            if num_subtasks == 0:
+                raise ValueError("Subtask condition found in batch but dataset.subtask_order is empty! "
+                               "This should not happen - check dataset loading.")
             for item in batch:
-                if len(item) == 3 and item[2] is not None:
-                    subtask_batch.append(item[2])
+                if len(item) == 6 and item[5] is not None:
+                    subtask_item = item[5]
+                    # Verify dimension matches
+                    if subtask_item.shape[0] != num_subtasks:
+                        raise ValueError(f"Subtask condition dimension mismatch: "
+                                       f"expected {num_subtasks}, got {subtask_item.shape[0]}. "
+                                       f"Check dataset and model config consistency.")
+                    subtask_batch.append(subtask_item)
                 else:
-                    # Create zero vector if missing
+                    # Create zero vector if missing (shouldn't happen if has_subtask=True)
                     subtask_batch.append(torch.zeros(num_subtasks))
             subtask_batch = default_collate(subtask_batch)
-            return obs_batch, action_batch, subtask_batch
+            return obs_batch, action_batch, action_history_batch, ee_node_history_batch, object_node_history_batch, subtask_batch
         else:
-            # No subtask_condition, return only obs and actions
-            return default_collate([(item[0], item[1]) for item in batch])
+            # No subtask_condition
+            return obs_batch, action_batch, action_history_batch, ee_node_history_batch, object_node_history_batch, None
     
     # Create dataloader
     dataloader = DataLoader(
@@ -373,20 +530,25 @@ def train_graph_dit_policy(
     num_subtasks = len(dataset.subtask_order) if hasattr(dataset, 'subtask_order') and dataset.subtask_order else 0
     
     # Create policy configuration
+    # IMPORTANT: num_subtasks must match the actual subtask_condition dimension in data
+    # If dataset has subtasks, use that number; otherwise disable subtask conditioning
     cfg = GraphDiTPolicyCfg(
         obs_dim=obs_dim,
         action_dim=action_dim,
         hidden_dim=hidden_dims[0] if hidden_dims else 256,
-        num_layers=6,
-        num_heads=8,
-        num_subtasks=num_subtasks if num_subtasks > 0 else 2,  # Default to 2 if not found
+        num_layers=num_layers,
+        num_heads=num_heads,
+        num_subtasks=num_subtasks,  # Use actual number from dataset (0 = no subtasks)
+        action_history_length=action_history_length,
+        mode=mode,  # "ddpm" or "flow_matching"
         device=device,
     )
     
     if num_subtasks > 0:
         print(f"[Train] Policy configured with {num_subtasks} subtasks: {dataset.subtask_order}")
+        print(f"[Train] Subtask conditioning will be used during training.")
     else:
-        print(f"[Train] Warning: No subtask info found, using default num_subtasks=2")
+        print(f"[Train] No subtask info found, subtask conditioning disabled (num_subtasks=0)")
     
     # Create policy network
     print(f"\n[Train] Creating Graph-DiT Policy...")
@@ -408,12 +570,22 @@ def train_graph_dit_policy(
         betas=(0.9, 0.999),
     )
     
-    # Learning rate scheduler (optional)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=num_epochs,
-        eta_min=learning_rate * 0.01,
-    )
+    # Learning rate scheduler with warmup + cosine annealing
+    # Warmup for first 10% of epochs, then cosine annealing
+    import math
+    warmup_epochs = max(1, int(num_epochs * 0.1))  # 10% warmup, at least 1 epoch
+    
+    def lr_lambda(epoch):
+        if epoch < warmup_epochs:
+            # Linear warmup: linearly increase from 0 to learning_rate
+            return (epoch + 1) / warmup_epochs
+        else:
+            # Cosine annealing after warmup
+            progress = (epoch - warmup_epochs) / (num_epochs - warmup_epochs)
+            return 0.5 * (1 + math.cos(math.pi * progress))
+    
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    print(f"[Train] Using warmup scheduler: {warmup_epochs} warmup epochs ({100*warmup_epochs/num_epochs:.1f}%), then cosine annealing")
     
     # Resume from checkpoint if specified
     start_epoch = 0
@@ -421,7 +593,8 @@ def train_graph_dit_policy(
     
     if resume_checkpoint and os.path.exists(resume_checkpoint):
         print(f"\n[Train] Resuming from checkpoint: {resume_checkpoint}")
-        checkpoint = torch.load(resume_checkpoint, map_location=device)
+        # weights_only=False is needed for PyTorch 2.6+ to load custom config classes
+        checkpoint = torch.load(resume_checkpoint, map_location=device, weights_only=False)
         policy.load_state_dict(checkpoint['policy_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
@@ -433,25 +606,47 @@ def train_graph_dit_policy(
     print(f"\n[Train] Starting training for {num_epochs} epochs...")
     policy.train()
     
+    # Track last epoch loss for final model
+    last_epoch_loss = None
+    
     for epoch in range(start_epoch, num_epochs):
         epoch_losses = []
         epoch_mse_losses = []
         
         pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}")
         for batch_idx, batch in enumerate(pbar):
-            # Handle subtask condition (may be present or not)
-            if len(batch) == 3:
-                obs, actions, subtask_condition = batch
-                subtask_condition = subtask_condition.to(device, non_blocking=True)
+            # Handle subtask condition, action_history, and node_history (may be present or not)
+            if len(batch) == 6:
+                obs, actions, action_history, ee_node_history, object_node_history, subtask_condition = batch
+                action_history = action_history.to(device, non_blocking=True)  # [batch, action_history_length, action_dim]
+                ee_node_history = ee_node_history.to(device, non_blocking=True)  # [batch, action_history_length, 7]
+                object_node_history = object_node_history.to(device, non_blocking=True)  # [batch, action_history_length, 7]
+                if subtask_condition is not None:
+                    subtask_condition = subtask_condition.to(device, non_blocking=True)
+            elif len(batch) == 5:
+                obs, actions, action_history, ee_node_history, object_node_history = batch
+                action_history = action_history.to(device, non_blocking=True)
+                ee_node_history = ee_node_history.to(device, non_blocking=True)
+                object_node_history = object_node_history.to(device, non_blocking=True)
+                subtask_condition = None
             else:
                 obs, actions = batch
+                action_history = None
+                ee_node_history = None
+                object_node_history = None
                 subtask_condition = None
             
             obs = obs.to(device, non_blocking=True)
             actions = actions.to(device, non_blocking=True)
             
-            # Forward pass
-            loss_dict = policy.loss(obs, actions, subtask_condition=subtask_condition)
+            # Forward pass (pass action_history and node_history if available)
+            loss_dict = policy.loss(
+                obs, actions, 
+                action_history=action_history,
+                ee_node_history=ee_node_history,
+                object_node_history=object_node_history,
+                subtask_condition=subtask_condition
+            )
             loss = loss_dict['total_loss']
             
             # Backward pass
@@ -489,24 +684,17 @@ def train_graph_dit_policy(
               f"LR: {optimizer.param_groups[0]['lr']:.6f}")
         
         # Log to tensorboard
+        # Log learning rate
+        current_lr = optimizer.param_groups[0]['lr']
+        
         writer.add_scalar('Epoch/AverageLoss', avg_loss, epoch)
         writer.add_scalar('Epoch/AverageMSE', avg_mse_loss, epoch)
+        writer.add_scalar('Epoch/LearningRate', current_lr, epoch)
         
-        # Save checkpoint
-        checkpoint_path = save_dir / f"checkpoint_epoch_{epoch+1}.pt"
-        torch.save({
-            'epoch': epoch,
-            'policy_state_dict': policy.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'scheduler_state_dict': scheduler.state_dict(),
-            'cfg': cfg,
-            'best_loss': best_loss,
-            'avg_loss': avg_loss,
-            'obs_stats': obs_stats,  # For observation normalization
-            'action_stats': action_stats,  # For action denormalization during inference
-        }, checkpoint_path)
+        # Track last epoch loss
+        last_epoch_loss = avg_loss
         
-        # Save best model
+        # Save best model only (overwrite if better)
         if avg_loss < best_loss:
             best_loss = avg_loss
             best_path = save_dir / "best_model.pt"
@@ -516,39 +704,27 @@ def train_graph_dit_policy(
                 'cfg': cfg,
                 'obs_stats': obs_stats,
                 'action_stats': action_stats,
+                'epoch': epoch,
+                'loss': avg_loss,
             }, str(best_path))
-            print(f"[Train] Saved best model (loss: {best_loss:.6f}) to: {best_path}")
-        
-        # Save latest model
-        latest_path = save_dir / "latest_model.pt"
-        torch.save({
-            'policy_state_dict': policy.state_dict(),
-            'cfg': cfg,
-            'obs_stats': obs_stats,
-            'action_stats': action_stats,
-        }, str(latest_path))
-        
-        # Save every N epochs
-        if (epoch + 1) % 10 == 0:
-            epoch_path = save_dir / f"model_epoch_{epoch+1}.pt"
-            torch.save({
-                'policy_state_dict': policy.state_dict(),
-                'cfg': cfg,
-                'obs_stats': obs_stats,
-                'action_stats': action_stats,
-            }, str(epoch_path))
+            print(f"[Train] ✅ Saved best model (loss: {best_loss:.6f}, epoch: {epoch+1}) to: {best_path}")
     
-    # Save final model
+    # Save final model (after all epochs)
+    final_loss = last_epoch_loss if last_epoch_loss is not None else best_loss
     final_path = save_dir / "final_model.pt"
     torch.save({
         'policy_state_dict': policy.state_dict(),
         'cfg': cfg,
         'obs_stats': obs_stats,
         'action_stats': action_stats,
+        'epoch': num_epochs - 1,
+        'loss': final_loss,
     }, str(final_path))
-    print(f"\n[Train] Training completed!")
-    print(f"[Train] Final model saved to: {final_path}")
-    print(f"[Train] Best model saved to: {save_dir / 'best_model.pt'}")
+    print(f"\n[Train] ===== Training Completed! =====")
+    print(f"[Train] ✅ Final model saved to: {final_path}")
+    print(f"[Train] ✅ Best model saved to: {save_dir / 'best_model.pt'}")
+    print(f"[Train] 📁 All models saved in: {save_dir}")
+    print(f"[Train] 📊 TensorBoard logs in: {log_dir / 'tensorboard'}")
     
     writer.close()
     return policy
@@ -563,7 +739,7 @@ def main():
     parser.add_argument("--dataset", type=str, required=True, help="HDF5 dataset path")
     
     # Model arguments
-    parser.add_argument("--obs_dim", type=int, default=72, help="Observation dimension")
+    parser.add_argument("--obs_dim", type=int, default=32, help="Observation dimension (reach task: 32 after removing redundant target_object_position)")
     parser.add_argument("--action_dim", type=int, default=8, help="Action dimension")
     parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden dimension")
     parser.add_argument("--num_layers", type=int, default=6, help="Number of transformer layers")
@@ -574,6 +750,9 @@ def main():
     parser.add_argument("--batch_size", type=int, default=256, help="Batch size")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=1e-5, help="Weight decay")
+    parser.add_argument("--action_history_length", type=int, default=4, help="Number of historical actions to use (default: 4)")
+    parser.add_argument("--mode", type=str, default="ddpm", choices=["ddpm", "flow_matching"], 
+                       help="Training mode: 'ddpm' (slower, 50-100 steps) or 'flow_matching' (faster, 1-10 steps)")
     
     # Paths
     parser.add_argument("--save_dir", type=str, default="./logs/graph_dit", help="Checkpoint save directory")
@@ -586,16 +765,17 @@ def main():
     args = parser.parse_args()
     
     # Observation keys (should match your dataset)
+    # For reach task, these keys match the observations in reach_env_cfg.py
+    # Note: Removed "target_object_position" (7 dims) as it's redundant with object_position + object_orientation
+    # In reach task, target is always the current object position, so command is not needed
     obs_keys = [
-        "actions",
         "joint_pos",
         "joint_vel",
-        "object",
-        "object_positions",
-        "object_orientations",
-        "eef_pos",
-        "eef_quat",
-        "gripper_pos",
+        "object_position",
+        "object_orientation",
+        "ee_position",
+        "ee_orientation",
+        "actions",  # last action for self-attention in Graph DiT
     ]
     
     # Start training
@@ -606,6 +786,8 @@ def main():
         obs_dim=args.obs_dim,
         action_dim=args.action_dim,
         hidden_dims=[args.hidden_dim],
+        num_layers=args.num_layers,
+        num_heads=args.num_heads,
         batch_size=args.batch_size,
         num_epochs=args.epochs,
         learning_rate=args.lr,
@@ -614,6 +796,8 @@ def main():
         save_dir=args.save_dir,
         log_dir=args.log_dir,
         resume_checkpoint=args.resume,
+        action_history_length=args.action_history_length,
+        mode=args.mode,
     )
 
 

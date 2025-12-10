@@ -8,10 +8,8 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-import isaaclab_tasks.manager_based.manipulation.lift.mdp as mdp
+from . import mdp
 from isaaclab.assets import RigidObjectCfg
-
-# from isaaclab.managers NotImplementedError
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import (
     FrameTransformerCfg,
     OffsetCfg,
@@ -20,8 +18,8 @@ from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
 from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
-from SO_100.robots import SO_ARM100_CFG, SO_ARM100_ROSCON_CFG, SO_ARM100_ROSCON_HIGH_PD_CFG# noqa: F401
-from SO_100.tasks.lift_old.lift_env_cfg import LiftEnvCfg
+from SO_100.robots import SO_ARM100_CFG, SO_ARM100_ROSCON_CFG, SO_ARM100_ROSCON_HIGH_PD_CFG  # noqa: F401
+from SO_100.tasks.reach.reach_env_cfg import ReachEnvCfg
 
 from isaaclab.markers.config import FRAME_MARKER_CFG  # isort: skip
 
@@ -31,34 +29,27 @@ from isaaclab.markers.config import FRAME_MARKER_CFG  # isort: skip
 
 
 @configclass
-class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
+class SoArm100ReachJointCubeEnvCfg(ReachEnvCfg):
     def __post_init__(self):
         # post init of parent
         super().__post_init__()
 
         # Set so arm as robot
-        # self.scene.robot = SO_ARM100_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.robot = SO_ARM100_ROSCON_HIGH_PD_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
         self.scene.robot.spawn.articulation_props.fix_root_link = True
         # override actions
         self.actions.arm_action = mdp.JointPositionActionCfg(
             asset_name="robot",
-            # joint_names=["Shoulder_Rotation", "Shoulder_Pitch", "Elbow", "Wrist_Pitch", "Wrist_Roll"],
             joint_names=["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_pitch_joint", "wrist_roll_joint"],
             scale=1,
             use_default_offset=True,
         )
         self.actions.gripper_action = mdp.BinaryJointPositionActionCfg(
             asset_name="robot",
-            # joint_names=["Gripper"],
-            # open_command_expr={"Gripper": 0.5},
-            # close_command_expr={"Gripper": 0.0},
             joint_names=["jaw_joint"],
             open_command_expr={"jaw_joint": 0.3},
             close_command_expr={"jaw_joint": 0.0002},
         )
-        # NOTE: commands.object_pose is not defined in parent LiftEnvCfg
-        # self.commands.object_pose.body_name = ["Fixed_Gripper"]
         self.commands.object_pose.body_name = ["wrist_2_link"]
         self.commands.object_pose.debug_vis = False  # Disable visual marker
 
@@ -90,7 +81,6 @@ class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
             visualizer_cfg=marker_cfg,
             target_frames=[
                 FrameTransformerCfg.FrameCfg(
-                    # prim_path="{ENV_REGEX_NS}/Robot/Fixed_Gripper",
                     prim_path="{ENV_REGEX_NS}/Robot/wrist_2_link",
                     name="end_effector",
                     offset=OffsetCfg(
@@ -121,7 +111,7 @@ class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
 
 
 @configclass
-class SoArm100LiftJointCubeEnvCfg_PLAY(SoArm100LiftJointCubeEnvCfg):
+class SoArm100ReachJointCubeEnvCfg_PLAY(SoArm100ReachJointCubeEnvCfg):
     def __post_init__(self):
         # post init of parent
         super().__post_init__()

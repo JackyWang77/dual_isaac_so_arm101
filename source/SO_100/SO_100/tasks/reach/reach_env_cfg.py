@@ -14,7 +14,6 @@ import math
 import isaaclab.sim as sim_utils
 
 from . import mdp
-# import isaaclab_tasks.manager_based.manipulation.lift.mdp as mdp
 from isaaclab.assets import (
     ArticulationCfg,
     AssetBaseCfg,
@@ -35,11 +34,6 @@ from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdF
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
-# from isaaclab.utils.offset import OffsetCfg
-# from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
-# from isaaclab.utils.visualizer import FRAME_MARKER_CFG
-# from isaaclab.utils.assets import RigidBodyPropertiesCfg
-
 
 ##
 # Scene definition
@@ -48,7 +42,7 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
 @configclass
 class ObjectTableSceneCfg(InteractiveSceneCfg):
-    """Configuration for the lift scene with a robot and a object.
+    """Configuration for the reach scene with a robot and a object.
     This is the abstract base implementation, the exact scene is defined in the derived classes
     which need to set the target object, robot and end-effector frames
     """
@@ -126,6 +120,9 @@ class ObservationsCfg:
         joint_pos = ObsTerm(func=mdp.joint_pos_rel)
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
         object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame)
+        object_orientation = ObsTerm(func=mdp.object_orientation)
+        ee_position = ObsTerm(func=mdp.ee_position_in_robot_root_frame)
+        ee_orientation = ObsTerm(func=mdp.ee_orientation)
         target_object_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "object_pose"})
         actions = ObsTerm(func=mdp.last_action)
 
@@ -137,14 +134,16 @@ class ObservationsCfg:
     class SubtaskCfg(ObsGroup):
         """Observations for subtask group."""
 
-        # Lift object - check if object is lifted to target height
-        # Note: This uses the observation function from mdp.observations, not the reward function
-        lift_object = ObsTerm(
-            func=mdp.object_is_lifted,
+        # Reach object - check if EE has reached object and gripper is closed
+        # Note: This uses the observation function from mdp.observations
+        reach_object = ObsTerm(
+            func=mdp.object_reached,
             params={
-                "minimal_height": 0.04,  # 4cm above initial position
-                "initial_height": 0.015,  # Initial height of cube
+                "distance_threshold": 0.01,  # 10mm distance threshold
+                "gripper_closed_threshold": 0.15,  # Gripper closed threshold
                 "object_cfg": SceneEntityCfg("object"),
+                "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+                "robot_cfg": SceneEntityCfg("robot"),
             },
         )
 
@@ -178,19 +177,11 @@ class EventCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
 
-    reaching_object = RewTerm(func=mdp.object_ee_distance, params={"std": 0.05}, weight=3.0)
+    reaching_object = RewTerm(func=mdp.object_ee_distance, params={"std": 0.05}, weight=10.0)
 
-    lifting_object = RewTerm(func=mdp.object_is_lifted, params={"minimal_height": 0.04}, weight=15.0)
-
-    object_goal_tracking = RewTerm(
-        func=mdp.object_goal_distance,
-        params={"std": 0.3, "minimal_height": 0.04, "command_name": "object_pose"},
-        weight=16.0,
-    )
-
-    object_goal_tracking_fine_grained = RewTerm(
-        func=mdp.object_goal_distance,
-        params={"std": 0.05, "minimal_height": 0.04, "command_name": "object_pose"},
+    gripper_closing = RewTerm(
+        func=mdp.gripper_closing_reward,
+        params={"std": 0.05},
         weight=5.0,
     )
 
@@ -214,16 +205,17 @@ class TerminationsCfg:
         func=mdp.root_height_below_minimum, params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("object")}
     )
 
-    # Success condition: object lifted to target height
+    # Success condition: EE reached object and gripper closed
     # This is important for mimic recording to know when a demo is complete
     # Named "success" so that record_demos.py can automatically detect task completion
-    # Check if object is lifted to at least 0.08m above initial position (0.015m)
     success = DoneTerm(
-        func=mdp.object_is_lifted,
+        func=mdp.reach_success,
         params={
-            "minimal_height": 0.1,  # 8cm above initial position (higher threshold)
-            "initial_height": 0.015,  # Initial height of cube
+            "distance_threshold": 0.01,  # 10mm distance threshold
+            "gripper_closed_threshold": 0.15,  # Gripper closed threshold
             "object_cfg": SceneEntityCfg("object"),
+            "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+            "robot_cfg": SceneEntityCfg("robot"),
         },
     )
 
@@ -247,8 +239,8 @@ class CurriculumCfg:
 
 
 @configclass
-class LiftEnvCfg(ManagerBasedRLEnvCfg):
-    """Configuration for the lifting environment."""
+class ReachEnvCfg(ManagerBasedRLEnvCfg):
+    """Configuration for the reaching environment."""
 
     # Scene settings
     scene: ObjectTableSceneCfg = ObjectTableSceneCfg(num_envs=4096, env_spacing=2.5)

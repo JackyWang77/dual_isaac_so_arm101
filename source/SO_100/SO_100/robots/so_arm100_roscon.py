@@ -45,8 +45,8 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
             enabled_self_collisions=True,
-            solver_position_iteration_count=8,
-            solver_velocity_iteration_count=0,
+            solver_position_iteration_count=16,
+            solver_velocity_iteration_count=2,
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
@@ -66,7 +66,7 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
             "elbow_joint": 0,  # Changed to fit joint limits
             "wrist_pitch_joint": 0,  # Changed to fit joint limits
             "wrist_roll_joint": 0,  # From real robot ROS2
-            "jaw_joint": 0.7,  # From real robot ROS2, clamped to limit [-0.175, 1.745]
+            "jaw_joint": 0.5,  # From real robot ROS2, clamped to limit [-0.175, 1.745]
         },
         # Set initial joint velocities to zero
         joint_vel={".*": 0.0},
@@ -80,8 +80,8 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
         # Jaw               moves: Only moving jaw              (~0.034kg)
         "arm": ImplicitActuatorCfg(
             joint_names_expr=["shoulder_.*", "elbow_joint", "wrist_.*"],
-            effort_limit_sim=1.9,
-            velocity_limit_sim=1.5,
+            effort_limit_sim=5,
+            velocity_limit_sim=10,
             stiffness={
                 "shoulder_pan_joint": 200.0,  # Highest - moves all mass
                 "shoulder_lift_joint": 170.0,  # Slightly less than rotation
@@ -99,10 +99,10 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
         ),
         "gripper": ImplicitActuatorCfg(
             joint_names_expr=["jaw_joint"],
-            effort_limit_sim=2.5,  # Increased from 1.9 to 2.5 for stronger grip
-            velocity_limit_sim=1.5,
-            stiffness=60.0,  # Increased from 25.0 to 60.0 for more reliable closing
-            damping=20.0,  # Increased from 10.0 to 20.0 for stability
+            effort_limit_sim=4,  # Increased from 1.9 to 2.5 for stronger grip
+            velocity_limit_sim=20,
+            stiffness=120.0,  # Increased from 25.0 to 60.0 for more reliable closing
+            damping=50.0,  # Increased from 10.0 to 20.0 for stability
         ),
     },
     soft_joint_pos_limit_factor=1.0,
@@ -113,11 +113,11 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
 SO_ARM100_ROSCON_HIGH_PD_CFG = SO_ARM100_ROSCON_CFG.copy()
 SO_ARM100_ROSCON_HIGH_PD_CFG.spawn.rigid_props.disable_gravity = False
 SO_ARM100_ROSCON_HIGH_PD_CFG.actuators["arm"].stiffness = {
-    "shoulder_pan_joint": 500.0,  # Highest - moves all mass
-    "shoulder_lift_joint": 500.0,  # Slightly less than rotation
-    "elbow_joint": 400.0,  # Reduced based on less mass
-    "wrist_pitch_joint": 300.0,  # Reduced for less mass
-    "wrist_roll_joint": 300.0,  # Low mass to move
+    "shoulder_pan_joint": 800.0,  # Highest - moves all mass
+    "shoulder_lift_joint": 800.0,  # Slightly less than rotation
+    "elbow_joint": 600.0,  # Reduced based on less mass
+    "wrist_pitch_joint": 500.0,  # Reduced for less mass
+    "wrist_roll_joint": 500.0,  # Low mass to move
 }
 # SO_ARM100_ROSCON_HIGH_PD_CFG.actuators["arm"].damping = {
 #     "shoulder_pan_joint": 150.0,

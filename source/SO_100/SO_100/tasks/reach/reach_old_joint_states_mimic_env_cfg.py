@@ -6,13 +6,13 @@
 from isaaclab.envs.mimic_env_cfg import MimicEnvCfg, SubTaskConfig
 from isaaclab.utils import configclass
 
-from .joint_pos_env_cfg import SoArm100LiftJointCubeEnvCfg
+from .joint_pos_env_cfg import SoArm100ReachJointCubeEnvCfg
 
 
 @configclass
-class SoArm100LiftJointStatesMimicEnvCfg(SoArm100LiftJointCubeEnvCfg, MimicEnvCfg):
+class SoArm100ReachJointStatesMimicEnvCfg(SoArm100ReachJointCubeEnvCfg, MimicEnvCfg):
     """
-    Isaac Lab Mimic environment config class for recording joint states directly for lift task.
+    Isaac Lab Mimic environment config class for recording joint states directly for reach task.
     
     This environment:
     - Accepts joint_states control (can be controlled by real robot)
@@ -30,7 +30,7 @@ class SoArm100LiftJointStatesMimicEnvCfg(SoArm100LiftJointCubeEnvCfg, MimicEnvCf
         self.observations.policy.enable_corruption = False
 
         # Override the existing values
-        self.datagen_config.name = "demo_src_lift_joint_states_D0"
+        self.datagen_config.name = "demo_src_reach_joint_states_D0"
         self.datagen_config.generation_guarantee = True
         self.datagen_config.generation_keep_failed = True
         self.datagen_config.generation_num_trials = 10
@@ -41,14 +41,14 @@ class SoArm100LiftJointStatesMimicEnvCfg(SoArm100LiftJointCubeEnvCfg, MimicEnvCf
         self.datagen_config.max_num_failures = 25
         self.datagen_config.seed = 1
 
-        # Subtask configuration for the LIFT task
+        # Subtask configuration for the REACH task
         subtask_configs = []
         
-        # Subtask: Lift object to target height
+        # Subtask: Reach object (EE close to object and gripper closed)
         subtask_configs.append(
             SubTaskConfig(
                 object_ref="object",  # Reference to the cube object
-                subtask_term_signal="lift_object",  # Termination signal name
+                subtask_term_signal="reach_object",  # Termination signal name
                 subtask_term_offset_range=(0, 0),  # Final subtask, no offset
                 selection_strategy="nearest_neighbor_object",
                 selection_strategy_kwargs={"nn_k": 3},
@@ -56,9 +56,8 @@ class SoArm100LiftJointStatesMimicEnvCfg(SoArm100LiftJointCubeEnvCfg, MimicEnvCf
                 num_interpolation_steps=5,
                 num_fixed_steps=0,
                 apply_noise_during_interpolation=False,
-                description="Lift object to target height",
+                description="Reach object with EE and close gripper",
             )
         )
         
         self.subtask_configs["end_effector"] = subtask_configs
-
