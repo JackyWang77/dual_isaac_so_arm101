@@ -22,7 +22,7 @@ class ReachCubePPORunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 1500
     save_interval = 100
     experiment_name = "reach"
-    empirical_normalization = True
+    empirical_normalization = False
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=0.5,
         actor_hidden_dims=[256, 128, 64],
@@ -38,7 +38,7 @@ class ReachCubePPORunnerCfg(RslRlOnPolicyRunnerCfg):
         num_mini_batches=4,
         learning_rate=3.0e-4,
         schedule="fixed",
-        gamma=0.98,
+        gamma=0.99,
         lam=0.95,
         desired_kl=0.01,
         max_grad_norm=1.0,
