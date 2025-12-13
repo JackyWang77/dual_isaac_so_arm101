@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2025, SO-ARM100 Project
+# Copyright (c) 2024-2025, SO-ARM101 Project
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause

@@ -55,7 +55,7 @@ class ReachCubeGraphDiTRLRunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 1500
     save_interval = 100
     experiment_name = "reach_graph_dit_rl"
-    empirical_normalization = True
+    empirical_normalization = False
 
     # Use Graph DiT ActorCritic wrapper
     # Note: class_name can be either:

@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2025, SO-ARM100 Project
+# Copyright (c) 2024-2025, SO-ARM101 Project
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -35,6 +35,26 @@ class GraphDiTPolicyCfg:
     
     action_dim: int = MISSING
     """Action dimension (output from policy)."""
+    
+    # Observation structure indices (for backward compatibility with flattened obs)
+    # CRITICAL: These should match the actual observation structure
+    # Default assumes: [joint_pos(6), joint_vel(6), object_pos(3), object_ori(4),
+    #                  ee_pos(3), ee_ori(4), target_object_position(7), actions(6)]
+    obs_structure: dict[str, tuple[int, int]] | None = None
+    """
+    Observation structure mapping for flattened observations.
+    If None, uses default indices. If provided, should be a dict like:
+    {
+        'joint_pos': (0, 6),
+        'joint_vel': (6, 12),
+        'object_position': (12, 15),
+        'object_orientation': (15, 19),
+        'ee_position': (19, 22),
+        'ee_orientation': (22, 26),
+        'target_object_position': (26, 33),
+        'actions': (33, 39),
+    }
+    """
     
     # Graph-DiT specific parameters
     hidden_dim: int = 256
@@ -78,6 +98,21 @@ class GraphDiTPolicyCfg:
     # Action history
     action_history_length: int = 4
     """Number of historical actions to use for self-attention."""
+    
+    # Edge-Conditioned Modulation (ECC-style)
+    use_edge_modulation: bool = True
+    """
+    Whether to use Edge-Conditioned Modulation (ECC-style).
+    
+    When True (recommended):
+    - Edge features generate gates/scales that directly control Value transformation
+    - Edge acts as "controller" rather than just "participant"
+    - Stronger inductive bias: Edge directly controls information flow
+    
+    When False (baseline):
+    - Edge features only used as attention bias
+    - Network must learn how to use edge information
+    """
 
 
 class AdaptiveLayerNorm(nn.Module):
@@ -103,7 +138,7 @@ class AdaptiveLayerNorm(nn.Module):
         # Split into 6 parts (could be used for different modulations)
         # For simplicity, we use the first hidden_dim for scale and next for shift
         scale = condition_embed[:, :x.shape[-1]].unsqueeze(1)  # [batch, 1, hidden_dim]
-        shift = condition_embed[:, x.shape[-1]:2*x.shape[-1]].unsqueeze(1)  # [batch, 1, hidden_dim]
+        shift = condition_embed[:, x.shape[-1]:2 * x.shape[-1]].unsqueeze(1)  # [batch, 1, hidden_dim]
         
         # Normalize and modulate
         x_norm = self.norm(x)
@@ -112,13 +147,26 @@ class AdaptiveLayerNorm(nn.Module):
 
 
 class GraphAttentionWithEdgeBias(nn.Module):
-    """Graph attention layer with edge features as attention bias."""
+    """
+    Graph attention layer with edge features as attention bias.
     
-    def __init__(self, hidden_dim: int, num_heads: int, edge_dim: int = 128):
+    ARCHITECTURE EVOLUTION: This class implements Edge-Conditioned Modulation (ECC-style),
+    where Edge features act as "controllers" rather than just "participants".
+    
+    Key Innovation:
+    - Baseline: Edge → Bias (added to attention scores) - Edge is "participant"
+    - ECC: Edge → Gate/Scale/Shift (modulates Value) - Edge is "controller"
+    
+    This provides stronger inductive bias: Edge directly controls information flow,
+    rather than requiring the network to learn how to use edge information.
+    """
+    
+    def __init__(self, hidden_dim: int, num_heads: int, edge_dim: int = 128, use_edge_modulation: bool = True):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
         self.head_dim = hidden_dim // num_heads
+        self.use_edge_modulation = use_edge_modulation
         
         assert hidden_dim % num_heads == 0, "hidden_dim must be divisible by num_heads"
         
@@ -128,8 +176,30 @@ class GraphAttentionWithEdgeBias(nn.Module):
         self.v_proj = nn.Linear(hidden_dim, hidden_dim)
         self.out_proj = nn.Linear(hidden_dim, hidden_dim)
         
-        # Edge feature to attention bias
+        # Edge feature to attention bias (baseline method - kept for backward compatibility)
         self.edge_to_bias = nn.Linear(edge_dim, num_heads)
+        
+        # CRITICAL INNOVATION: Edge-Conditioned Modulation
+        # Edge features generate gates/scales that directly control Value transformation
+        if use_edge_modulation:
+            # Option 1: Gate mechanism (sigmoid gate controls information flow)
+            self.edge_to_gate = nn.Sequential(
+                nn.Linear(edge_dim, hidden_dim),
+                nn.Sigmoid()  # Gate in [0, 1]
+            )
+            
+            # Option 2: Scale and Shift (like AdaLN, but conditioned on Edge)
+            self.edge_to_scale = nn.Sequential(
+                nn.Linear(edge_dim, hidden_dim),
+                nn.Tanh()  # Scale in [-1, 1], can be expanded
+            )
+            self.edge_to_shift = nn.Linear(edge_dim, hidden_dim)
+            
+            # Option 3: Per-head modulation (more fine-grained control)
+            self.edge_to_head_scale = nn.Sequential(
+                nn.Linear(edge_dim, num_heads),
+                nn.Tanh()
+            )
 
         self.dropout = nn.Dropout(0.1)
         self.scale = 1.0 / math.sqrt(self.head_dim)
@@ -161,6 +231,29 @@ class GraphAttentionWithEdgeBias(nn.Module):
         K = self.k_proj(node_features)  # [batch, seq_len, hidden_dim]
         V = self.v_proj(node_features)  # [batch, seq_len, hidden_dim]
         
+        # CRITICAL INNOVATION: Edge-Conditioned Value Modulation
+        # Edge features control how Value is transformed BEFORE attention
+        if self.use_edge_modulation:
+            # Generate modulation signals from edge features
+            # Gate: controls information flow [batch, hidden_dim]
+            edge_gate = self.edge_to_gate(edge_features)  # [batch, hidden_dim]
+            
+            # Scale and Shift: fine-grained modulation [batch, hidden_dim]
+            edge_scale = self.edge_to_scale(edge_features)  # [batch, hidden_dim]
+            edge_shift = self.edge_to_shift(edge_features)  # [batch, hidden_dim]
+            
+            # Apply modulation to V BEFORE attention
+            # Physical meaning:
+            # - Gate: "How much information can flow?" (based on distance/orientation)
+            # - Scale: "Amplify or dampen specific features" (based on spatial relationship)
+            # - Shift: "Bias the feature space" (based on relative pose)
+            V_modulated = V * (1.0 + edge_scale.unsqueeze(1)) + edge_shift.unsqueeze(1)  # [batch, seq_len, hidden_dim]
+            V_modulated = V_modulated * edge_gate.unsqueeze(1)  # Apply gate
+            
+            # Use modulated V for attention
+            V = V_modulated
+        # If modulation disabled, use original V (backward compatibility)
+        
         # Reshape for multi-head attention
         Q = Q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)  # [batch, heads, seq_len, head_dim]
         K = K.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
@@ -169,22 +262,38 @@ class GraphAttentionWithEdgeBias(nn.Module):
         # Compute attention scores
         scores = torch.matmul(Q, K.transpose(-2, -1)) * self.scale  # [batch, heads, seq_len, seq_len]
         
-        # Add edge bias
+        # Add edge bias (baseline method - still useful for attention scores)
         # Edge features -> bias for each head
         edge_bias = self.edge_to_bias(edge_features)  # [batch, num_heads]
         
+        # Additional per-head modulation (optional, fine-grained control)
+        if self.use_edge_modulation:
+            head_scale = self.edge_to_head_scale(edge_features)  # [batch, num_heads]
+            # Modulate attention scores per head
+            scores = scores * (1.0 + head_scale.unsqueeze(-1).unsqueeze(-1))  # [batch, heads, seq_len, seq_len]
+        
         if temporal_mode:
             # For temporal mode: create attention bias for spatial connections (EE <-> Object) across all time steps
+            # PERFORMANCE FIX: Use vectorized operations instead of Python loop
             attention_bias = torch.zeros(
                 batch_size, self.num_heads, seq_len, seq_len,
                 device=node_features.device, dtype=node_features.dtype
             )
             # EE and Object connect across all time steps
-            for t in range(history_length):
-                ee_idx = t  # EE node at time t
-                obj_idx = history_length + t  # Object node at time t
-                attention_bias[:, :, ee_idx, obj_idx] = edge_bias  # EE -> Object
-                attention_bias[:, :, obj_idx, ee_idx] = edge_bias  # Object -> EE
+            # PERFORMANCE FIX: Use vectorized indexing instead of Python loop
+            t_indices = torch.arange(history_length, device=node_features.device)
+            ee_indices = t_indices  # [history_length]
+            obj_indices = history_length + t_indices  # [history_length]
+            
+            # Vectorized assignment: set bias for all timesteps at once
+            # Expand edge_bias: [batch, num_heads] -> [batch, num_heads, history_length]
+            edge_bias_expanded = edge_bias.unsqueeze(-1).expand(-1, -1, history_length)  # [batch, num_heads, history_length]
+            
+            # Use advanced indexing to set all connections at once
+            # EE -> Object connections
+            attention_bias[:, :, ee_indices, obj_indices] = edge_bias_expanded.permute(0, 1, 2)  # [batch, num_heads, history_length]
+            # Object -> EE connections (symmetric)
+            attention_bias[:, :, obj_indices, ee_indices] = edge_bias_expanded.permute(0, 1, 2)
         else:
             # Non-temporal: simple 2-node graph
             attention_bias = torch.zeros(
@@ -229,7 +338,7 @@ class GraphDiTUnit(nn.Module):
     3. Cross-attention (a_new × node_features_new) → noise_pred
     """
     
-    def __init__(self, hidden_dim: int, num_heads: int, edge_dim: int = 128):
+    def __init__(self, hidden_dim: int, num_heads: int, edge_dim: int = 128, use_edge_modulation: bool = True):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
@@ -238,8 +347,10 @@ class GraphDiTUnit(nn.Module):
         self.action_self_attn = nn.MultiheadAttention(
             hidden_dim, num_heads, batch_first=True, dropout=0.1
         )
-        self.action_norm1 = nn.LayerNorm(hidden_dim)
-        self.action_norm2 = nn.LayerNorm(hidden_dim)
+        # CRITICAL FIX: Use AdaLN instead of LayerNorm for better diffusion performance
+        # AdaLN dynamically adjusts scale and shift based on timestep condition
+        self.action_norm1 = AdaptiveLayerNorm(hidden_dim, hidden_dim)  # condition_dim = hidden_dim
+        self.action_norm2 = AdaptiveLayerNorm(hidden_dim, hidden_dim)
         self.action_ff = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim * 4),
             nn.GELU(),
@@ -249,9 +360,14 @@ class GraphDiTUnit(nn.Module):
         )
         
         # Step 2: Graph attention with edge features
-        self.graph_attention = GraphAttentionWithEdgeBias(hidden_dim, num_heads, edge_dim)
-        self.node_norm1 = nn.LayerNorm(hidden_dim)
-        self.node_norm2 = nn.LayerNorm(hidden_dim)
+        # CRITICAL INNOVATION: Use Edge-Conditioned Modulation (ECC-style)
+        # Edge features control Value transformation, not just attention bias
+        self.graph_attention = GraphAttentionWithEdgeBias(
+            hidden_dim, num_heads, edge_dim, use_edge_modulation=use_edge_modulation
+        )
+        # Use AdaLN for node features as well
+        self.node_norm1 = AdaptiveLayerNorm(hidden_dim, hidden_dim)
+        self.node_norm2 = AdaptiveLayerNorm(hidden_dim, hidden_dim)
         self.node_ff = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim * 4),
             nn.GELU(),
@@ -264,8 +380,9 @@ class GraphDiTUnit(nn.Module):
         self.cross_attn = nn.MultiheadAttention(
             hidden_dim, num_heads, batch_first=True, dropout=0.1
         )
-        self.cross_norm1 = nn.LayerNorm(hidden_dim)
-        self.cross_norm2 = nn.LayerNorm(hidden_dim)
+        # Use AdaLN for cross-attention
+        self.cross_norm1 = AdaptiveLayerNorm(hidden_dim, hidden_dim)
+        self.cross_norm2 = AdaptiveLayerNorm(hidden_dim, hidden_dim)
         self.cross_ff = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim * 4),
             nn.GELU(),
@@ -294,10 +411,20 @@ class GraphDiTUnit(nn.Module):
         if len(action.shape) == 2:
             action = action.unsqueeze(1)  # [batch, hidden_dim] -> [batch, 1, hidden_dim]
         
+        # Prepare condition embedding for AdaLN (timestep embedding)
+        # CRITICAL FIX: AdaLN requires condition embedding for proper diffusion conditioning
+        condition_emb = timestep_embed if timestep_embed is not None else None
+        
         # Step 1: Action self-attention (now meaningful with action sequence)
         # action: [batch, seq_len, hidden_dim] where seq_len is action_history_length
         action_residual = action
-        action = self.action_norm1(action)
+        # Use AdaLN with condition embedding
+        if condition_emb is not None:
+            action = self.action_norm1(action, condition_emb)
+        else:
+            # Fallback: use zero condition if no timestep provided
+            zero_condition = torch.zeros(action.shape[0], self.hidden_dim, device=action.device, dtype=action.dtype)
+            action = self.action_norm1(action, zero_condition)
         a_new, _ = self.action_self_attn(action, action, action)  # [batch, seq_len, hidden_dim]
         a_new = a_new + action_residual
         
@@ -307,7 +434,11 @@ class GraphDiTUnit(nn.Module):
             a_new = a_new[:, -1:, :]  # Take last action [batch, 1, hidden_dim]
         
         action_residual = a_new
-        a_new = self.action_norm2(a_new)
+        if condition_emb is not None:
+            a_new = self.action_norm2(a_new, condition_emb)
+        else:
+            zero_condition = torch.zeros(a_new.shape[0], self.hidden_dim, device=a_new.device, dtype=a_new.dtype)
+            a_new = self.action_norm2(a_new, zero_condition)
         a_new = self.action_ff(a_new) + action_residual
         
         # Step 2: Node attention with edge features
@@ -322,7 +453,27 @@ class GraphDiTUnit(nn.Module):
             # Add temporal dimension for consistency
             node_features_for_attn = node_features.unsqueeze(2)  # [batch, 2, 1, hidden_dim]
         
-        node_features_for_attn = self.node_norm1(node_features_for_attn)
+        # Use AdaLN for node features
+        if condition_emb is not None:
+            # For temporal features, we need to handle the condition properly
+            if len(node_features_for_attn.shape) == 4:
+                # [batch, 2, history_length, hidden_dim] - expand condition
+                condition_expanded = condition_emb.unsqueeze(1).unsqueeze(1)  # [batch, 1, 1, hidden_dim]
+                node_features_for_attn = self.node_norm1(node_features_for_attn, condition_expanded)
+            else:
+                condition_expanded = condition_emb.unsqueeze(1)  # [batch, 1, hidden_dim]
+                node_features_for_attn = self.node_norm1(node_features_for_attn, condition_expanded)
+        else:
+            zero_condition = torch.zeros(
+                node_features_for_attn.shape[0], self.hidden_dim,
+                device=node_features_for_attn.device, dtype=node_features_for_attn.dtype
+            )
+            if len(node_features_for_attn.shape) == 4:
+                zero_condition = zero_condition.unsqueeze(1).unsqueeze(1)
+            else:
+                zero_condition = zero_condition.unsqueeze(1)
+            node_features_for_attn = self.node_norm1(node_features_for_attn, zero_condition)
+        
         node_features_new = self.graph_attention(node_features_for_attn, edge_features)  # [batch, 2, hidden_dim]
         
         # Add residual
@@ -333,19 +484,36 @@ class GraphDiTUnit(nn.Module):
             node_features_new = node_features_new
         
         node_residual = node_features_new
-        node_features_new = self.node_norm2(node_features_new)
+        if condition_emb is not None:
+            condition_expanded = condition_emb.unsqueeze(1)  # [batch, 1, hidden_dim]
+            node_features_new = self.node_norm2(node_features_new, condition_expanded)
+        else:
+            zero_condition = torch.zeros(
+                node_features_new.shape[0], self.hidden_dim,
+                device=node_features_new.device, dtype=node_features_new.dtype
+            ).unsqueeze(1)
+            node_features_new = self.node_norm2(node_features_new, zero_condition)
         node_features_new = self.node_ff(node_features_new) + node_residual
         
         # Step 3: Cross-attention (a_new as query, node_features_new as key/value)
         cross_residual = a_new
-        a_new_norm = self.cross_norm1(a_new)
+        # Use AdaLN for cross-attention
+        if condition_emb is not None:
+            a_new_norm = self.cross_norm1(a_new, condition_emb)
+        else:
+            zero_condition = torch.zeros(a_new.shape[0], self.hidden_dim, device=a_new.device, dtype=a_new.dtype)
+            a_new_norm = self.cross_norm1(a_new, zero_condition)
         # Note: We don't modify node_features_new in cross-attention, only use it as key/value
         node_features_new_norm = node_features_new  # Use original node features (or could normalize separately)
         noise_embed, _ = self.cross_attn(a_new_norm, node_features_new_norm, node_features_new_norm)
         noise_embed = noise_embed + cross_residual
         
         cross_residual = noise_embed
-        noise_embed = self.cross_norm2(noise_embed)
+        if condition_emb is not None:
+            noise_embed = self.cross_norm2(noise_embed, condition_emb)
+        else:
+            zero_condition = torch.zeros(noise_embed.shape[0], self.hidden_dim, device=noise_embed.device, dtype=noise_embed.dtype)
+            noise_embed = self.cross_norm2(noise_embed, zero_condition)
         noise_embed = self.cross_ff(noise_embed) + cross_residual
         
         # Return noise prediction (squeeze sequence dimension)
@@ -468,7 +636,10 @@ class GraphDiTPolicy(nn.Module):
         
         # Graph DiT units (stacked layers)
         self.graph_dit_units = nn.ModuleList([
-            GraphDiTUnit(cfg.hidden_dim, cfg.num_heads, cfg.graph_edge_dim)
+            GraphDiTUnit(
+                cfg.hidden_dim, cfg.num_heads, cfg.graph_edge_dim,
+                use_edge_modulation=cfg.use_edge_modulation
+            )
             for _ in range(cfg.num_layers)
         ])
         
@@ -513,10 +684,8 @@ class GraphDiTPolicy(nn.Module):
         """
         Extract node features from concatenated observations.
         
-        Assumes obs is concatenated as:
-        [joint_pos(6), joint_vel(6), object_position(3), object_orientation(4),
-         ee_position(3), ee_orientation(4), target_object_position(7), actions(6)]
-        Total: 6+6+3+4+3+4+7+6 = 39
+        CRITICAL FIX: Uses configurable indices instead of hardcoded slicing.
+        This prevents silent failures when observation structure changes.
         
         Args:
             obs: [batch, obs_dim]
@@ -524,15 +693,24 @@ class GraphDiTPolicy(nn.Module):
             ee_node: [batch, 7] - EE position + orientation
             object_node: [batch, 7] - Object position + orientation
         """
-        # Parse indices (based on obs_keys order in train.py)
-        # joint_pos: [0:6], joint_vel: [6:12], object_position: [12:15], 
-        # object_orientation: [15:19], ee_position: [19:22], 
-        # ee_orientation: [22:26], target_object_position: [26:33], actions: [33:39]
-        
-        object_position = obs[:, 12:15]  # [batch, 3]
-        object_orientation = obs[:, 15:19]  # [batch, 4]
-        ee_position = obs[:, 19:22]  # [batch, 3]
-        ee_orientation = obs[:, 22:26]  # [batch, 4]
+        # Use configurable indices if provided, otherwise use defaults
+        if self.cfg.obs_structure is not None:
+            # Use configured structure
+            obs_struct = self.cfg.obs_structure
+            object_position = obs[:, obs_struct['object_position'][0]:obs_struct['object_position'][1]]
+            object_orientation = obs[:, obs_struct['object_orientation'][0]:obs_struct['object_orientation'][1]]
+            ee_position = obs[:, obs_struct['ee_position'][0]:obs_struct['ee_position'][1]]
+            ee_orientation = obs[:, obs_struct['ee_orientation'][0]:obs_struct['ee_orientation'][1]]
+        else:
+            # Default structure (backward compatibility)
+            # WARNING: These hardcoded indices assume a specific observation structure!
+            # If your observation structure changes, you MUST update obs_structure in config
+            # Default assumes: [joint_pos(6), joint_vel(6), object_pos(3), object_ori(4),
+            #                  ee_pos(3), ee_ori(4), target_object_position(7), actions(6)]
+            object_position = obs[:, 12:15]  # [batch, 3]
+            object_orientation = obs[:, 15:19]  # [batch, 4]
+            ee_position = obs[:, 19:22]  # [batch, 3]
+            ee_orientation = obs[:, 22:26]  # [batch, 4]
         
         # Construct nodes
         ee_node = torch.cat([ee_position, ee_orientation], dim=-1)  # [batch, 7]
@@ -629,15 +807,16 @@ class GraphDiTPolicy(nn.Module):
             node_features = node_features.transpose(1, 2)  # [batch, 2, history_length, hidden_dim]
             
             # Compute edge features for each timestep in history
-            # Reshape for edge computation: [batch * history_length, 7]
-            edge_features_raw_list = []
-            for t in range(history_length):
-                ee_t = ee_node_history[:, t, :]  # [batch, 7]
-                obj_t = object_node_history[:, t, :]  # [batch, 7]
-                edge_t = self._compute_edge_features(ee_t, obj_t)  # [batch, 2]
-                edge_features_raw_list.append(edge_t)
-            edge_features_raw = torch.stack(edge_features_raw_list, dim=1)  # [batch, history_length, 2]
-            # Use average edge features or last timestep (we'll use average for now)
+            # PERFORMANCE FIX: Use vectorized operations instead of Python loop
+            # Reshape to [batch * history_length, 7] for batch processing
+            ee_history_flat = ee_node_history.view(-1, self.node_dim)  # [batch * history_length, 7]
+            obj_history_flat = object_node_history.view(-1, self.node_dim)  # [batch * history_length, 7]
+            
+            # Vectorized edge computation for all timesteps at once
+            edge_features_raw_all = self._compute_edge_features(ee_history_flat, obj_history_flat)  # [batch * history_length, 2]
+            edge_features_raw = edge_features_raw_all.view(batch_size, history_length, 2)  # [batch, history_length, 2]
+            
+            # Use average edge features across history (or could use last timestep)
             edge_features_raw = edge_features_raw.mean(dim=1)  # [batch, 2]
             
         else:
@@ -656,24 +835,43 @@ class GraphDiTPolicy(nn.Module):
         # Embed edge features
         edge_features_embed = self.edge_embedding(edge_features_raw)  # [batch, graph_edge_dim]
         
-        # Embed action history (use noisy_action if provided, otherwise use action history)
+        # Embed action: noisy_action (for diffusion) + action_history (as context)
+        # CRITICAL FIX: Action history should be used as context even when noisy_action is provided
+        # This preserves temporal information that is crucial for action prediction
+        
+        # Step 1: Embed noisy_action (the target we want to denoise)
         if noisy_action is not None:
-            # For diffusion training: use noisy_action as single action
+            # For diffusion training: use noisy_action as the main action to denoise
             action_input = noisy_action  # [batch, action_dim]
-            action_embed = self.action_embedding(action_input)  # [batch, hidden_dim]
-            action_embed = action_embed.unsqueeze(1)  # [batch, 1, hidden_dim]
-        elif action_history is not None:
-            # Use provided action history [batch, action_history_length, action_dim]
-            # Embed each action in history
+            noisy_action_embed = self.action_embedding(action_input)  # [batch, hidden_dim]
+            noisy_action_embed = noisy_action_embed.unsqueeze(1)  # [batch, 1, hidden_dim]
+        else:
+            # Inference mode: extract last action from obs or use action_history
+            if action_history is not None and action_history.shape[1] > 0:
+                # Use the last action from history
+                noisy_action_embed = self.action_embedding(action_history[:, -1, :])  # [batch, hidden_dim]
+                noisy_action_embed = noisy_action_embed.unsqueeze(1)  # [batch, 1, hidden_dim]
+            else:
+                # Fallback: extract last action from obs (backward compatibility)
+                last_action = obs[:, -self.cfg.action_dim:]  # [batch, action_dim]
+                noisy_action_embed = self.action_embedding(last_action)  # [batch, hidden_dim]
+                noisy_action_embed = noisy_action_embed.unsqueeze(1)  # [batch, 1, hidden_dim]
+        
+        # Step 2: Embed action_history as context (CRITICAL: preserve temporal information)
+        # Even when noisy_action is provided, we should use history as context
+        if action_history is not None and action_history.shape[1] > 0:
+            # Embed action history [batch, action_history_length, action_dim]
             batch_size, seq_len, action_dim = action_history.shape
             action_history_flat = action_history.view(-1, action_dim)  # [batch * seq_len, action_dim]
-            action_embed_flat = self.action_embedding(action_history_flat)  # [batch * seq_len, hidden_dim]
-            action_embed = action_embed_flat.view(batch_size, seq_len, self.cfg.hidden_dim)  # [batch, seq_len, hidden_dim]
+            history_embed_flat = self.action_embedding(action_history_flat)  # [batch * seq_len, hidden_dim]
+            history_embed = history_embed_flat.view(batch_size, seq_len, self.cfg.hidden_dim)  # [batch, seq_len, hidden_dim]
+            
+            # Concatenate history with noisy_action: [batch, seq_len+1, hidden_dim]
+            # This allows self-attention to see both history and current noisy action
+            action_embed = torch.cat([history_embed, noisy_action_embed], dim=1)  # [batch, seq_len+1, hidden_dim]
         else:
-            # Fallback: extract last action from obs (backward compatibility)
-            last_action = obs[:, -self.cfg.action_dim:]  # [batch, action_dim]
-            action_embed = self.action_embedding(last_action)  # [batch, hidden_dim]
-            action_embed = action_embed.unsqueeze(1)  # [batch, 1, hidden_dim]
+            # No history available, use only noisy_action
+            action_embed = noisy_action_embed  # [batch, 1, hidden_dim]
         
         # Get timestep embedding (if provided)
         timestep_embed = None
@@ -704,10 +902,14 @@ class GraphDiTPolicy(nn.Module):
                 # Expand subtask embed and project
                 # Pad with zeros to match expected input size for condition_proj
                 batch_size = obs.shape[0]
-                expanded_embed = torch.cat([torch.zeros(batch_size, 3 * subtask_embed.shape[-1], 
-                                                       device=subtask_embed.device, 
-                                                       dtype=subtask_embed.dtype), 
-                                           subtask_embed], dim=-1)
+                expanded_embed = torch.cat([
+                    torch.zeros(
+                        batch_size, 3 * subtask_embed.shape[-1],
+                        device=subtask_embed.device,
+                        dtype=subtask_embed.dtype
+                    ),
+                    subtask_embed
+                ], dim=-1)
                 condition_embed = self.condition_proj(expanded_embed)  # [batch, hidden_dim]
             
             # Add condition to action and nodes
@@ -863,18 +1065,23 @@ class GraphDiTPolicy(nn.Module):
             batch_size = obs.shape[0]
             device = obs.device
             
-            # Initialize with random noise (t=1)
-            action_t = torch.randn(batch_size, self.cfg.action_dim, device=device)
-            t = torch.ones(batch_size, device=device)  # Start from t=1 (noise)
+            # CRITICAL FIX: Flow Matching integration direction
+            # In Flow Matching, we integrate from noise (t=0) to data (t=1)
+            # Velocity field: v_t = x_1 - x_0 (points from noise to data)
+            # ODE: dx/dt = v_t, so x_{t+dt} = x_t + dt * v_t
             
-            # ODE solving: Euler method
-            dt = 1.0 / num_steps  # Step size
+            # Initialize with random noise (t=0, not t=1!)
+            action_t = torch.randn(batch_size, self.cfg.action_dim, device=device)
+            t = torch.zeros(batch_size, device=device)  # Start from t=0 (noise)
+            
+            # ODE solving: Euler method (forward integration from t=0 to t=1)
+            dt = 1.0 / num_steps  # Step size (positive, going forward)
             
             for step in range(num_steps):
                 # Convert t (in [0, 1]) to timesteps (in [0, diffusion_steps-1])
-                timesteps = (t * (self.cfg.diffusion_steps - 1)).long()
+                timesteps = (t * (self.cfg.diffusion_steps - 1)).long().clamp(0, self.cfg.diffusion_steps - 1)
                 
-                # Predict velocity field
+                # Predict velocity field (points from noise to data)
                 velocity = self.forward(
                     obs,
                     noisy_action=action_t,
@@ -883,11 +1090,12 @@ class GraphDiTPolicy(nn.Module):
                     object_node_history=object_node_history,
                     subtask_condition=subtask_condition,
                     timesteps=timesteps
-                )  # Network outputs velocity field
+                )  # Network outputs velocity field: v_t = data - noise
                 
-                # Euler step: x_{t-dt} = x_t - dt * v_t
-                action_t = action_t - dt * velocity
-                t = t - dt
+                # Euler forward step: x_{t+dt} = x_t + dt * v_t
+                # This moves from noise (t=0) towards data (t=1)
+                action_t = action_t + dt * velocity
+                t = t + dt  # Move forward in time
             
             if not deterministic:
                 # Add small noise for exploration
@@ -1006,6 +1214,8 @@ class GraphDiTPolicy(nn.Module):
         x_t = (1 - t.view(-1, 1)) * actions + t.view(-1, 1) * noise  # [batch_size, action_dim]
         
         # Ground truth velocity field: v_t = x_1 - x_0 (direction from noise to data)
+        # In Flow Matching: v_t(x_t) = x_1 - x_0 where x_1=data, x_0=noise
+        # This is the vector pointing from noise (t=0) to data (t=1)
         v_t = actions - noise  # [batch_size, action_dim]
         
         # Convert t to timesteps format for forward (scale to [0, diffusion_steps-1])
