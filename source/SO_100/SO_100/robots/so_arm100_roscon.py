@@ -66,7 +66,7 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
             "elbow_joint": 0,  # Changed to fit joint limits
             "wrist_pitch_joint": 0,  # Changed to fit joint limits
             "wrist_roll_joint": 0,  # From real robot ROS2
-            "jaw_joint": 0.0,  # From real robot ROS2, clamped to limit [-0.175, 1.745]
+            "jaw_joint": 0.4,  # From real robot ROS2, clamped to limit [-0.175, 1.745]
         },
         # Set initial joint velocities to zero
         joint_vel={".*": 0.0},
