@@ -195,11 +195,11 @@ class RewardsCfg:
     )
 
     # action penalty
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-4)
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-3)
 
     joint_vel = RewTerm(
         func=mdp.joint_vel_l2,
-        weight=-1e-4,
+        weight=-1e-3,
         params={"asset_cfg": SceneEntityCfg("robot")},
     )
 
@@ -208,9 +208,9 @@ class RewardsCfg:
     # Negative weight makes this a penalty (strong penalty to avoid collisions)
     ee_floor_collision = RewTerm(
         func=mdp.ee_floor_collision_penalty,
-        weight=-10.0,  # Strong penalty to prevent table collisions
+        weight=-1.0,  # Strong penalty to prevent table collisions
         params={
-            "threshold": 0.02,  # 2cm above table (table is at z=0, object initial height is 0.015)
+            "threshold": 0.005,  # 2cm above table (table is at z=0, object initial height is 0.015)
             "ee_frame_cfg": SceneEntityCfg("ee_frame"),
         },
     )
@@ -245,11 +245,11 @@ class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     action_rate = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -1e-3, "num_steps": 5000}
+        func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -1e-2, "num_steps": 5000}
     )
 
     joint_vel = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "joint_vel", "weight": -1e-3, "num_steps": 5000}
+        func=mdp.modify_reward_weight, params={"term_name": "joint_vel", "weight": -1e-2, "num_steps": 5000}
     )
 
 
