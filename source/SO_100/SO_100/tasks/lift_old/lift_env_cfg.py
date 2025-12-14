@@ -219,7 +219,7 @@ class TerminationsCfg:
     # Named "success" so that record_demos.py can automatically detect task completion
     # Check if object is lifted to at least 0.08m above initial position (0.015m)
     success = DoneTerm(
-        func=mdp.object_is_lifted,
+        func=mdp.object_lifted_termination,
         params={
             "minimal_height": 0.1,  # 8cm above initial position (higher threshold)
             "initial_height": 0.015,  # Initial height of cube
