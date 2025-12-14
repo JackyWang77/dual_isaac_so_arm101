@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
-from isaaclab.assets import RigidObject
+from isaaclab.assets import Articulation, RigidObject
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import FrameTransformer
 from isaaclab.utils.math import combine_frame_transforms
@@ -117,3 +117,77 @@ def object_ee_distance_and_lifted(
     lift_reward = object_is_lifted(env, minimal_height, object_cfg)
     # Combine rewards multiplicatively
     return reach_reward * lift_reward
+
+
+def open_gripper_reward_conditional(
+    env: ManagerBasedRLEnv,
+    proximity_threshold: float = 0.1,
+    lift_height_threshold: float = 0.02,
+    initial_height: float = 0.015,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """
+    Conditionally reward opening the gripper when approaching the object.
+    
+    This reward follows the "Gemini logic" to solve the gripper control problem:
+    1. When object is NOT lifted AND EE is close to object: STRONGLY reward opening gripper
+       (This prevents EE from pushing the object away)
+    2. When object IS lifted: This reward becomes ZERO (gives way to lifting reward)
+       (Physics will force gripper to close, or lifting reward will encourage closing)
+    
+    The key insight: By making lifting reward (15.0) >> opening reward (2.0), the agent
+    learns to open when approaching (to avoid pushing), but close when ready to lift
+    (to get the huge lifting reward).
+    
+    Args:
+        env: The environment.
+        proximity_threshold: Distance threshold to start rewarding gripper opening (default 0.1m = 10cm).
+        lift_height_threshold: Height above initial position to consider object "lifted" (default 0.02m = 2cm).
+        initial_height: Initial height of the object (default 0.015m = 1.5cm).
+        object_cfg: The object configuration.
+        ee_frame_cfg: The end-effector configuration.
+        robot_cfg: The robot configuration.
+        
+    Returns:
+        Reward tensor: 
+        - When object NOT lifted AND close to object: reward proportional to gripper opening (0-1)
+        - When object IS lifted: 0 (no reward, let lifting reward take over)
+        - When far from object: 0 (no reward)
+    """
+    # Get objects
+    object: RigidObject = env.scene[object_cfg.name]
+    ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
+    robot: Articulation = env.scene[robot_cfg.name]
+    
+    # Get object and EE positions
+    object_pos = object.data.root_pos_w[:, :3]  # [num_envs, 3]
+    ee_pos = ee_frame.data.target_pos_w[..., 0, :]  # [num_envs, 3]
+    
+    # Calculate distance between EE and object
+    distance = torch.norm(object_pos - ee_pos, dim=1)  # [num_envs]
+    
+    # Check if object is lifted (above initial height + threshold)
+    object_height = object.data.root_pos_w[:, 2]  # [num_envs]
+    is_lifted = object_height > (initial_height + lift_height_threshold)
+    
+    # Get gripper joint position (jaw_joint is the last joint)
+    # jaw_joint: ~0.3-0.4 when open, ~0.0 when closed
+    gripper_pos = robot.data.joint_pos[:, -1]  # [num_envs]
+    
+    # Normalize gripper opening: 0 when closed, 1 when fully open
+    # Assuming max open position is around 0.4 (adjust based on your robot)
+    max_open_pos = 0.4
+    gripper_open_amount = torch.clamp(gripper_pos / max_open_pos, 0.0, 1.0)
+    
+    # Core logic: Only reward opening when:
+    # 1. Object is NOT lifted (not yet successful)
+    # 2. EE is close to object (within proximity threshold)
+    is_close = distance < proximity_threshold
+    should_reward_opening = is_close & (~is_lifted)
+    
+    # Reward: proportional to gripper opening, but only when conditions are met
+    reward = should_reward_opening.float() * gripper_open_amount
+    
+    return reward

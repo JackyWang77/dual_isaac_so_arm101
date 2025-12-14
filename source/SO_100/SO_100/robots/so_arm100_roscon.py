@@ -142,7 +142,7 @@ SO_ARM100_ROSCON_HIGH_PD_CFG.actuators["gripper"].velocity_limit_sim = 10.0
 # Or keep 5Hz for stability. Here we use 5Hz:
 SO_ARM100_ROSCON_HIGH_PD_CFG.actuators["gripper"].stiffness = 40.0  # Mass 0.034 * 1000 = 34 -> rounded to 40
 # Damping calculation: 2 * sqrt(0.034 * 40) = 2 * 1.16 = 2.3
-SO_ARM100_ROSCON_HIGH_PD_CFG.actuators["gripper"].damping = 2.5  # Slightly higher (2.5) to prevent any tiny jitter
+SO_ARM100_ROSCON_HIGH_PD_CFG.actuators["gripper"].damping = 2  # Slightly higher (2.5) to prevent any tiny jitter
 # Physical contact parameters (must add, otherwise can't grasp)
 SO_ARM100_ROSCON_HIGH_PD_CFG.actuators["gripper"].friction = 0.1
 SO_ARM100_ROSCON_HIGH_PD_CFG.actuators["gripper"].armature = 0.005  # Must add this virtual inertia for very small mass objects!

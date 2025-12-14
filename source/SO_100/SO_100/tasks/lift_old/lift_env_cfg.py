@@ -182,6 +182,26 @@ class RewardsCfg:
 
     lifting_object = RewTerm(func=mdp.object_is_lifted, params={"minimal_height": 0.04}, weight=15.0)
 
+    # Conditional gripper opening reward (Gemini logic)
+    # Reward opening gripper when approaching object (to avoid pushing it away)
+    # BUT: This reward becomes ZERO once object is lifted (gives way to lifting reward)
+    # Key insight: Lifting reward (15.0) >> Opening reward (2.0), so agent learns:
+    # - Open when approaching (to avoid pushing) -> get small reward (2.0)
+    # - Close when ready to lift -> get huge reward (15.0)
+    # Physics enforces: can't lift without closing, so agent must close to get lifting reward
+    open_gripper_conditional = RewTerm(
+        func=mdp.open_gripper_reward_conditional,
+        weight=2.0,  # Small reward compared to lifting (15.0), but enough to guide behavior
+        params={
+            "proximity_threshold": 0.1,  # 10cm: start rewarding when close to object
+            "lift_height_threshold": 0.02,  # 2cm: consider object "lifted" when 2cm above initial
+            "initial_height": 0.015,  # Initial object height
+            "object_cfg": SceneEntityCfg("object"),
+            "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+            "robot_cfg": SceneEntityCfg("robot"),
+        },
+    )
+
     object_goal_tracking = RewTerm(
         func=mdp.object_goal_distance,
         params={"std": 0.3, "minimal_height": 0.04, "command_name": "object_pose"},
