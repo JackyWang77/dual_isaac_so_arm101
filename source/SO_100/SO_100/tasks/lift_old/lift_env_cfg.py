@@ -203,6 +203,18 @@ class RewardsCfg:
         params={"asset_cfg": SceneEntityCfg("robot")},
     )
 
+    # EE floor collision penalty: prevent end-effector from hitting the table
+    # Threshold: 0.02m (2cm) above table surface. If EE goes below this, penalty activates.
+    # Negative weight makes this a penalty (strong penalty to avoid collisions)
+    ee_floor_collision = RewTerm(
+        func=mdp.ee_floor_collision_penalty,
+        weight=-10.0,  # Strong penalty to prevent table collisions
+        params={
+            "threshold": 0.02,  # 2cm above table (table is at z=0, object initial height is 0.015)
+            "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+        },
+    )
+
 
 @configclass
 class TerminationsCfg:

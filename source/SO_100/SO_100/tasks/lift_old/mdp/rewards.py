@@ -117,3 +117,43 @@ def object_ee_distance_and_lifted(
     lift_reward = object_is_lifted(env, minimal_height, object_cfg)
     # Combine rewards multiplicatively
     return reach_reward * lift_reward
+
+
+def ee_floor_collision_penalty(
+    env: ManagerBasedRLEnv,
+    threshold: float,
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+) -> torch.Tensor:
+    """
+    Penalize the agent if the end-effector is too close to or below the table/floor.
+    
+    This penalty prevents the end-effector from pushing against the table, which can cause
+    multiple collisions and lead to Isaac Sim errors.
+    
+    Args:
+        env: The environment.
+        threshold: The height threshold (z-axis) below which the penalty activates.
+                   Set this to table_height + safety_margin (e.g., 0.0 + 0.02 = 0.02).
+                   Recommended: 0.01-0.03 (1-3cm above table surface).
+        ee_frame_cfg: The end-effector configuration.
+        
+    Returns:
+        The violation distance. If ee_z < threshold, returns (threshold - ee_z).
+        Otherwise returns 0.
+        
+    Note: Apply a NEGATIVE weight to this reward in your config to make it a penalty.
+          Example: weight=-10.0 means strong penalty for hitting the table.
+    """
+    # Extract the end-effector frame
+    ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
+    
+    # Get the current Z position (height) of the end-effector
+    # shape: (num_envs,)
+    ee_z = ee_frame.data.target_pos_w[..., 0, 2]
+    
+    # Calculate violation: difference between threshold and current height
+    # We only care if the EE is BELOW the threshold
+    violation = threshold - ee_z
+    
+    # Clamp values less than 0 to 0 (no penalty if above threshold)
+    return torch.clamp(violation, min=0.0)
