@@ -94,7 +94,7 @@ class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
                     prim_path="{ENV_REGEX_NS}/Robot/wrist_2_link",
                     name="end_effector",
                     offset=OffsetCfg(
-                        pos=[0.0, 0.0, -0.1],
+                        pos=[0.01, 0.0, -0.1],
                     ),
                 ),
             ],
