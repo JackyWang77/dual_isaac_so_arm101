@@ -143,7 +143,7 @@ class ObservationsCfg:
             func=mdp.object_is_lifted,
             params={
                 "minimal_height": 0.04,  # 4cm above initial position
-                "initial_height": 0.015,  # Initial height of cube
+                "initial_height": 0.05,  # Initial height of cube
                 "object_cfg": SceneEntityCfg("object"),
             },
         )
@@ -182,26 +182,6 @@ class RewardsCfg:
 
     lifting_object = RewTerm(func=mdp.object_is_lifted, params={"minimal_height": 0.04}, weight=15.0)
 
-    # Conditional gripper opening reward (Gemini logic)
-    # Reward opening gripper when approaching object (to avoid pushing it away)
-    # BUT: This reward becomes ZERO once object is lifted (gives way to lifting reward)
-    # Key insight: Lifting reward (15.0) >> Opening reward (2.0), so agent learns:
-    # - Open when approaching (to avoid pushing) -> get small reward (2.0)
-    # - Close when ready to lift -> get huge reward (15.0)
-    # Physics enforces: can't lift without closing, so agent must close to get lifting reward
-    open_gripper_conditional = RewTerm(
-        func=mdp.open_gripper_reward_conditional,
-        weight=2.0,  # Small reward compared to lifting (15.0), but enough to guide behavior
-        params={
-            "proximity_threshold": 0.1,  # 10cm: start rewarding when close to object
-            "lift_height_threshold": 0.02,  # 2cm: consider object "lifted" when 2cm above initial
-            "initial_height": 0.015,  # Initial object height
-            "object_cfg": SceneEntityCfg("object"),
-            "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-            "robot_cfg": SceneEntityCfg("robot"),
-        },
-    )
-
     object_goal_tracking = RewTerm(
         func=mdp.object_goal_distance,
         params={"std": 0.3, "minimal_height": 0.04, "command_name": "object_pose"},
@@ -223,17 +203,6 @@ class RewardsCfg:
         params={"asset_cfg": SceneEntityCfg("robot")},
     )
 
-    # EE floor collision penalty: prevent end-effector from hitting the table
-    # Threshold: 0.02m (2cm) above table surface. If EE goes below this, penalty activates.
-    # Negative weight makes this a penalty (strong penalty to avoid collisions)
-    ee_floor_collision = RewTerm(
-        func=mdp.ee_floor_collision_penalty,
-        weight=-1.0,  # Strong penalty to prevent table collisions
-        params={
-            "threshold": 0.005,  # 2cm above table (table is at z=0, object initial height is 0.015)
-            "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-        },
-    )
 
 
 @configclass
@@ -296,13 +265,11 @@ class LiftEnvCfg(ManagerBasedRLEnvCfg):
 
     def __post_init__(self):
         """Post initialization."""
-        # general settings
-        # 90Hz golden setup (physics:render:display = 1:1:1)
-        self.decimation = 1
+        self.decimation = 4
         self.episode_length_s = 5.0
         self.viewer.eye = (2.5, 2.5, 1.5)
         # simulation settings
-        self.sim.dt = 1.0 / 90  # 90Hz (same as pick_place for smooth teleoperation)
+        self.sim.dt = 1.0 / 200  
         # Render interval should match decimation to avoid rendering intermediate physics steps
         self.sim.render_interval = self.decimation
 

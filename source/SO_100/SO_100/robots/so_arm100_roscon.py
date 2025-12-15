@@ -99,10 +99,10 @@ SO_ARM100_ROSCON_CFG = ArticulationCfg(
         ),
         "gripper": ImplicitActuatorCfg(
             joint_names_expr=["jaw_joint"],
-            effort_limit_sim=4,  # Increased from 1.9 to 2.5 for stronger grip
+            effort_limit_sim=4,
             velocity_limit_sim=15,
-            stiffness=80.0,  # Increased from 25.0 to 60.0 for more reliable closing
-            damping=0.5,  # Increased from 10.0 to 20.0 for stability
+            stiffness=40.0,  # Increased from 25.0 to 60.0 for more reliable closing
+            damping=2,  # Increased from 10.0 to 20.0 for stability
         ),
     },
     soft_joint_pos_limit_factor=1.0,
