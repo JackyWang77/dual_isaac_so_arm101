@@ -45,7 +45,7 @@ class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
             asset_name="robot",
             # joint_names=["Shoulder_Rotation", "Shoulder_Pitch", "Elbow", "Wrist_Pitch", "Wrist_Roll"],
             joint_names=["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_pitch_joint", "wrist_roll_joint"],
-            scale=0.5,
+            scale=1,
             use_default_offset=True,
         )
         self.actions.gripper_action = mdp.BinaryJointPositionActionCfg(
