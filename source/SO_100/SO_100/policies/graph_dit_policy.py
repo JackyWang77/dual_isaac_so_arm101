@@ -908,43 +908,43 @@ class GraphDiTUnit(nn.Module):
         # Step 1: State-action sequence self-attention
         # Concatenate joint_states and action at each timestep, then do self-attention
         if joint_states_history is not None and self.joint_states_encoder is not None:
+            # CRITICAL FIX: Preserve noisy_action token by padding joint states to match action sequence length
             # joint_states_history: [batch, history_length, joint_dim]
             # action: [batch, seq_len, hidden_dim] (already embedded)
             # Note: action may contain [history + noisy_action] (seq_len = history_length + 1)
             #       or just [history] (seq_len = history_length)
             batch_size, history_length, joint_dim = joint_states_history.shape
+            seq_len = action.shape[1] if len(action.shape) > 1 else 1
             
-            # Ensure action matches history_length
-            # If action contains history + noisy_action, use only history part
+            # Ensure action is 3D
             if len(action.shape) == 2:
-                # Single action, expand to match history
-                action_for_concat = action.unsqueeze(1).expand(-1, history_length, -1)  # [batch, history_length, hidden_dim]
-            elif action.shape[1] == history_length + 1:
-                # Action contains history + noisy_action, use only history part
-                action_for_concat = action[:, :-1, :]  # [batch, history_length, hidden_dim]
-            elif action.shape[1] == history_length:
-                # Action matches history_length exactly
-                action_for_concat = action  # [batch, history_length, hidden_dim]
+                action = action.unsqueeze(1)  # [batch, hidden_dim] -> [batch, 1, hidden_dim]
+                seq_len = 1
+            
+            # CRITICAL FIX: Pad joint states to match action sequence length (preserve noisy_action token)
+            # If action has history + noisy_action (seq_len = history_length + 1),
+            # pad joint states with the last joint state to match
+            if seq_len > history_length:
+                # Action has more tokens than joint history: pad joint states
+                last_joint_state = joint_states_history[:, -1:, :]  # [batch, 1, joint_dim]
+                padding = last_joint_state.expand(-1, seq_len - history_length, -1)  # [batch, seq_len - history_length, joint_dim]
+                joint_states_padded = torch.cat([joint_states_history, padding], dim=1)  # [batch, seq_len, joint_dim]
+            elif seq_len < history_length:
+                # Action has fewer tokens: truncate joint states (shouldn't happen in normal flow)
+                joint_states_padded = joint_states_history[:, :seq_len, :]  # [batch, seq_len, joint_dim]
             else:
-                # Mismatch: pad or truncate to match history_length
-                if action.shape[1] < history_length:
-                    # Pad with last action
-                    last_action = action[:, -1:, :]  # [batch, 1, hidden_dim]
-                    padding = last_action.expand(-1, history_length - action.shape[1], -1)
-                    action_for_concat = torch.cat([action, padding], dim=1)  # [batch, history_length, hidden_dim]
-                else:
-                    # Truncate to history_length
-                    action_for_concat = action[:, :history_length, :]  # [batch, history_length, hidden_dim]
+                # Lengths match exactly
+                joint_states_padded = joint_states_history  # [batch, seq_len, joint_dim]
             
-            # Encode joint states: [batch, history_length, joint_dim] -> [batch, history_length, hidden_dim]
-            joint_states_embed = self.joint_states_encoder(joint_states_history)  # [batch, history_length, hidden_dim]
+            # Encode joint states: [batch, seq_len, joint_dim] -> [batch, seq_len, hidden_dim]
+            joint_states_embed = self.joint_states_encoder(joint_states_padded)  # [batch, seq_len, hidden_dim]
             
-            # Concatenate joint_states and action at each timestep
-            # [batch, history_length, hidden_dim * 2]
-            state_action_seq = torch.cat([joint_states_embed, action_for_concat], dim=-1)  # [batch, history_length, hidden_dim * 2]
+            # Concatenate joint_states and action at each timestep (now aligned)
+            # [batch, seq_len, hidden_dim * 2]
+            state_action_seq = torch.cat([joint_states_embed, action], dim=-1)  # [batch, seq_len, hidden_dim * 2]
             
             # Project to hidden_dim for self-attention
-            state_action_seq = self.state_action_proj(state_action_seq)  # [batch, history_length, hidden_dim]
+            state_action_seq = self.state_action_proj(state_action_seq)  # [batch, seq_len, hidden_dim]
         else:
             # Fallback: use only action (backward compatibility)
             if len(action.shape) == 2:
@@ -1095,12 +1095,22 @@ class NoiseScheduler:
         return self.alphas.to(t.device)[t]
     
     def get_alpha_bar_t(self, t: torch.Tensor):
-        """Get alpha_bar_t (alphas_cumprod) for timestep t."""
-        return self.alphas_cumprod.to(t.device)[t]
+        """Get alpha_bar_t (alphas_cumprod) for timestep t.
+        
+        CRITICAL FIX: Clamp to prevent division by near-zero values in DDPM prediction.
+        """
+        alpha_bar = self.alphas_cumprod.to(t.device)[t]
+        # Clamp to prevent numerical explosion when alpha_bar is very close to 0
+        return alpha_bar.clamp(min=1e-5)
     
     def get_alpha_bar_t_prev(self, t: torch.Tensor):
-        """Get alpha_bar_t_prev for timestep t."""
-        return self.alphas_cumprod_prev.to(t.device)[t]
+        """Get alpha_bar_t_prev for timestep t.
+        
+        CRITICAL FIX: Clamp to prevent division by near-zero values in DDPM prediction.
+        """
+        alpha_bar_prev = self.alphas_cumprod_prev.to(t.device)[t]
+        # Clamp to prevent numerical explosion when alpha_bar_prev is very close to 0
+        return alpha_bar_prev.clamp(min=1e-5)
 
 
 class GraphDiTPolicy(nn.Module):
@@ -1429,8 +1439,8 @@ class GraphDiTPolicy(nn.Module):
             # Compute edge features for each timestep in history
             # PERFORMANCE FIX: Use vectorized operations instead of Python loop
             # Reshape to [batch * history_length, 7] for batch processing
-            ee_history_flat = ee_node_history.view(-1, self.node_dim)  # [batch * history_length, 7]
-            obj_history_flat = object_node_history.view(-1, self.node_dim)  # [batch * history_length, 7]
+            ee_history_flat = ee_node_history.view(-1, node_dim)  # [batch * history_length, 7]
+            obj_history_flat = object_node_history.view(-1, node_dim)  # [batch * history_length, 7]
             
             # Vectorized edge computation for all timesteps at once
             edge_features_raw_all = self._compute_edge_features(ee_history_flat, obj_history_flat)  # [batch * history_length, 2]
@@ -1569,17 +1579,22 @@ class GraphDiTPolicy(nn.Module):
                 else:
                     node_features = node_features + condition_embed.unsqueeze(1).unsqueeze(1)
         
+        # CRITICAL FIX: Use unified condition_embed for AdaLN (includes both timestep and subtask)
+        # This ensures subtask information is properly injected through AdaLN modulation
+        condition_for_adaln = condition_embed if condition_embed is not None else timestep_embed
+        
         # Process through Graph DiT units
         # CRITICAL FIX: Preserve action sequence across layers for multi-layer temporal modeling
         # Each layer updates the action sequence, but maintains the temporal structure
         for unit in self.graph_dit_units:
             # Each unit processes: action (with joint_states), nodes, edges
             # Pass joint_states_history for state-action sequence self-attention
+            # CRITICAL FIX: Pass condition_embed (not just timestep_embed) to AdaLN
             noise_embed = unit(
                 action_embed, 
                 node_features, 
                 edge_features_embed, 
-                timestep_embed,
+                condition_for_adaln,  # Use unified condition (timestep + subtask)
                 joint_states_history=joint_states_history
             )
             # Update action_embed for next layer while preserving sequence structure
@@ -1664,12 +1679,26 @@ class GraphDiTPolicy(nn.Module):
             batch_size = obs.shape[0]
             device = obs.device
             
+            # CRITICAL FIX: Resample timesteps from T-1 to 0 for proper sparse inference
+            # Instead of using first num_steps timesteps, create a linspace from T-1 to 0
+            # This ensures proper coverage of the noise schedule even with fewer steps
+            training_steps = self.cfg.diffusion_steps
+            if num_steps < training_steps:
+                # Create timestep schedule: from T-1 down to 0, evenly spaced
+                timestep_schedule = torch.linspace(
+                    training_steps - 1, 0, num_steps, device=device, dtype=torch.long
+                )  # [num_steps]
+            else:
+                # Use all timesteps if num_steps >= training_steps
+                timestep_schedule = torch.arange(training_steps - 1, -1, -1, device=device, dtype=torch.long)
+            
             # Initialize with random noise
             action_t = torch.randn(batch_size, self.cfg.action_dim, device=device)
             
             # Iterative denoising
             for step in range(num_steps):
-                t = torch.full((batch_size,), num_steps - step - 1, device=device, dtype=torch.long)
+                # Use resampled timestep schedule
+                t = timestep_schedule[step].expand(batch_size)  # [batch_size]
                 
                 # Predict noise
                 noise_pred = self.forward(
@@ -1876,12 +1905,13 @@ class GraphDiTPolicy(nn.Module):
         # Sample noise
         noise = torch.randn_like(actions)  # [batch_size, action_dim]
         
-        # Linear interpolation path: x_t = (1-t) * x_1 + t * x_0
-        # x_1 = actions (data), x_0 = noise
-        x_t = (1 - t.view(-1, 1)) * actions + t.view(-1, 1) * noise  # [batch_size, action_dim]
+        # CRITICAL FIX: Linear interpolation path: x_t = (1-t) * x_0 + t * x_1
+        # x_0 = noise (t=0), x_1 = actions (data, t=1)
+        # This matches the inference direction: integrate from noise (t=0) to data (t=1)
+        x_t = (1 - t.view(-1, 1)) * noise + t.view(-1, 1) * actions  # [batch_size, action_dim]
         
         # Ground truth velocity field: v_t = x_1 - x_0 (direction from noise to data)
-        # In Flow Matching: v_t(x_t) = x_1 - x_0 where x_1=data, x_0=noise
+        # In Flow Matching: v_t(x_t) = x_1 - x_0 where x_0=noise, x_1=data
         # This is the vector pointing from noise (t=0) to data (t=1)
         v_t = actions - noise  # [batch_size, action_dim]
         
