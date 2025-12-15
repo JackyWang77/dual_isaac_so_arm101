@@ -114,11 +114,13 @@ class ActionHistoryBuffer:
         if self.history_length == 1:
             return self.buffer
         
+        # CRITICAL FIX: Use 0 when not filled yet, otherwise use write_idx
+        # This ensures correct chronological order even when buffer is not fully filled
+        start = torch.where(self.filled, self.write_idx, torch.zeros_like(self.write_idx))  # [num_envs]
+        
         # Create index array for reordering
-        # For each env, we want: [write_idx, write_idx+1, ..., history_length-1, 0, ..., write_idx-1]
-        indices = torch.arange(self.history_length, device=self.device).unsqueeze(0)  # [1, history_length]
-        indices = indices + self.write_idx.unsqueeze(1)  # [num_envs, history_length]
-        indices = indices % self.history_length  # [num_envs, history_length]
+        base = torch.arange(self.history_length, device=self.device).unsqueeze(0)  # [1, history_length]
+        indices = (base + start.unsqueeze(1)) % self.history_length  # [num_envs, history_length]
         
         # Reorder buffer using advanced indexing
         reordered = self.buffer[env_indices.unsqueeze(1), indices, :]  # [num_envs, history_length, action_dim]
@@ -268,10 +270,13 @@ class NodeHistoryBuffer:
         if self.history_length == 1:
             return self.ee_buffer, self.object_buffer
         
+        # CRITICAL FIX: Use 0 when not filled yet, otherwise use write_idx
+        # This ensures correct chronological order even when buffer is not fully filled
+        start = torch.where(self.filled, self.write_idx, torch.zeros_like(self.write_idx))  # [num_envs]
+        
         # Create index array for reordering
-        indices = torch.arange(self.history_length, device=self.device).unsqueeze(0)  # [1, history_length]
-        indices = indices + self.write_idx.unsqueeze(1)  # [num_envs, history_length]
-        indices = indices % self.history_length  # [num_envs, history_length]
+        base = torch.arange(self.history_length, device=self.device).unsqueeze(0)  # [1, history_length]
+        indices = (base + start.unsqueeze(1)) % self.history_length  # [num_envs, history_length]
         
         # Reorder buffers using advanced indexing
         ee_reordered = self.ee_buffer[env_indices.unsqueeze(1), indices, :]  # [num_envs, history_length, node_dim]
@@ -410,10 +415,13 @@ class JointStateHistoryBuffer:
         if self.history_length == 1:
             return self.buffer
         
+        # CRITICAL FIX: Use 0 when not filled yet, otherwise use write_idx
+        # This ensures correct chronological order even when buffer is not fully filled
+        start = torch.where(self.filled, self.write_idx, torch.zeros_like(self.write_idx))  # [num_envs]
+        
         # Create index array for reordering
-        indices = torch.arange(self.history_length, device=self.device).unsqueeze(0)  # [1, history_length]
-        indices = indices + self.write_idx.unsqueeze(1)  # [num_envs, history_length]
-        indices = indices % self.history_length  # [num_envs, history_length]
+        base = torch.arange(self.history_length, device=self.device).unsqueeze(0)  # [1, history_length]
+        indices = (base + start.unsqueeze(1)) % self.history_length  # [num_envs, history_length]
         
         # Reorder buffer using advanced indexing
         reordered = self.buffer[env_indices.unsqueeze(1), indices, :]  # [num_envs, history_length, joint_dim]
@@ -1537,6 +1545,7 @@ class GraphDiTPolicy(nn.Module):
         
         # Get timestep embedding (if provided)
         timestep_embed = None
+        condition_embed = None  # CRITICAL FIX: ensure always defined
         if timesteps is not None:
             timestep_embed = self._get_timestep_embed(timesteps)  # [batch, hidden_dim]
             # Add timestep embedding to action
@@ -1684,10 +1693,11 @@ class GraphDiTPolicy(nn.Module):
             # This ensures proper coverage of the noise schedule even with fewer steps
             training_steps = self.cfg.diffusion_steps
             if num_steps < training_steps:
+                # CRITICAL FIX: Use float linspace then round to long (safer than dtype=torch.long)
                 # Create timestep schedule: from T-1 down to 0, evenly spaced
                 timestep_schedule = torch.linspace(
-                    training_steps - 1, 0, num_steps, device=device, dtype=torch.long
-                )  # [num_steps]
+                    training_steps - 1, 0, steps=num_steps, device=device
+                ).round().long()  # [num_steps]
             else:
                 # Use all timesteps if num_steps >= training_steps
                 timestep_schedule = torch.arange(training_steps - 1, -1, -1, device=device, dtype=torch.long)
@@ -1712,23 +1722,23 @@ class GraphDiTPolicy(nn.Module):
                     timesteps=t
                 )
                 
-                # Denoise step (DDPM)
+                # CRITICAL FIX: DDIM-style deterministic jump for sparse timestep schedule
+                # Use t_next from schedule instead of t-1 (which doesn't work for sparse schedules)
+                alpha_bar_t = self.noise_scheduler.get_alpha_bar_t(t).unsqueeze(-1)  # [batch, 1]
+                
+                # Predict x_0 (clean action)
+                pred_x0 = (action_t - torch.sqrt(1.0 - alpha_bar_t) * noise_pred) / torch.sqrt(alpha_bar_t)
+                
                 if step < num_steps - 1:
-                    alpha_bar_t = self.noise_scheduler.get_alpha_bar_t(t)
-                    alpha_bar_t_prev = self.noise_scheduler.get_alpha_bar_t_prev(t)
+                    # Get next timestep from schedule (not t-1!)
+                    t_next = timestep_schedule[step + 1].expand(batch_size)
+                    alpha_bar_next = self.noise_scheduler.get_alpha_bar_t(t_next).unsqueeze(-1)  # [batch, 1]
                     
-                    # Predict x_0 (clean action)
-                    pred_x0 = (action_t - torch.sqrt(1 - alpha_bar_t.unsqueeze(-1)) * noise_pred) / torch.sqrt(alpha_bar_t.unsqueeze(-1))
-                    
-                    # Compute coefficients
-                    pred_dir = torch.sqrt(1 - alpha_bar_t_prev.unsqueeze(-1)) * noise_pred
-                    pred_prev = torch.sqrt(alpha_bar_t_prev.unsqueeze(-1)) * pred_x0 + pred_dir
-                    
-                    action_t = pred_prev
+                    # DDIM-style deterministic jump: x_{t_next} = sqrt(alpha_bar_next) * x0 + sqrt(1 - alpha_bar_next) * eps
+                    action_t = torch.sqrt(alpha_bar_next) * pred_x0 + torch.sqrt(1.0 - alpha_bar_next) * noise_pred
                 else:
-                    # Last step: directly predict
-                    alpha_bar_t = self.noise_scheduler.get_alpha_bar_t(t)
-                    action_t = (action_t - torch.sqrt(1 - alpha_bar_t.unsqueeze(-1)) * noise_pred) / torch.sqrt(alpha_bar_t.unsqueeze(-1))
+                    # Last step: use predicted x0 directly
+                    action_t = pred_x0
             
             if not deterministic:
                 # Add small noise for exploration
