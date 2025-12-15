@@ -20,7 +20,7 @@ from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
 from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
-from SO_100.robots import SO_ARM100_CFG, SO_ARM100_ROSCON_CFG, SO_ARM100_ROSCON_HIGH_PD_CFG# noqa: F401
+from SO_100.robots import SO_ARM100_CFG, SO_ARM100_ROSCON_CFG, SO_ARM100_ROSCON_HIGH_PD_CFG  # noqa: F401
 from SO_100.tasks.lift_old.lift_env_cfg import LiftEnvCfg
 
 from isaaclab.markers.config import FRAME_MARKER_CFG  # isort: skip
@@ -45,7 +45,7 @@ class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
             asset_name="robot",
             # joint_names=["Shoulder_Rotation", "Shoulder_Pitch", "Elbow", "Wrist_Pitch", "Wrist_Roll"],
             joint_names=["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_pitch_joint", "wrist_roll_joint"],
-            scale=1,
+            scale=0.5,
             use_default_offset=True,
         )
         self.actions.gripper_action = mdp.BinaryJointPositionActionCfg(
@@ -57,10 +57,6 @@ class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
             open_command_expr={"jaw_joint": 0.4},
             close_command_expr={"jaw_joint": 0.0002},
         )
-        # NOTE: commands.object_pose is not defined in parent LiftEnvCfg
-        # self.commands.object_pose.body_name = ["Fixed_Gripper"]
-        self.commands.object_pose.body_name = ["wrist_2_link"]
-        self.commands.object_pose.debug_vis = False  # Disable visual marker
 
         # Set Cube as object
         self.scene.object = RigidObjectCfg(
@@ -99,7 +95,7 @@ class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
                 ),
             ],
         )
-        
+
         # Visual marker for cube object
         object_marker_cfg = FRAME_MARKER_CFG.copy()
         object_marker_cfg.markers["frame"].scale = (0.05, 0.05, 0.05)

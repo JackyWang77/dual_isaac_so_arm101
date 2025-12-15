@@ -226,25 +226,38 @@ class GraphDiTRLPolicy(nn.Module):
             self.graph_dit.eval()
 
         # IMPORTANT: Graph DiT was trained on 32-dim obs (without target_object_position command)
-        # But environment now returns 39-dim obs (with target_object_position at indices 26:33)
-        # We need to remove target_object_position before passing to Graph DiT
+        # After removing commands, environment now returns 30-dim obs (5 joints instead of 6)
+        # Obs structure (with commands, 39-dim): [joint_pos(6), joint_vel(6), object_pos(3), object_ori(4),
+        #                                          ee_pos(3), ee_ori(4), target_object_position(7), actions(6)]
+        # Obs structure (without commands, 30-dim): [joint_pos(5), joint_vel(5), object_pos(3), object_ori(4),
+        #                                            ee_pos(3), ee_ori(4), actions(6)]
+        # Target (32-dim): [joint_pos(6), joint_vel(6), object_pos(3), object_ori(4),
+        #                    ee_pos(3), ee_ori(4), actions(6)]
         obs_dim = obs.shape[-1]
         expected_graph_dit_obs_dim = self.graph_dit_cfg.obs_dim
         
         if obs_dim != expected_graph_dit_obs_dim:
-            # Remove target_object_position (7 dims at indices 26:33)
-            # Obs structure: [joint_pos(6), joint_vel(6), object_pos(3), object_ori(4),
-            #                  ee_pos(3), ee_ori(4), target_object_position(7), actions(6)]
-            # Target: [joint_pos(6), joint_vel(6), object_pos(3), object_ori(4),
-            #          ee_pos(3), ee_ori(4), actions(6)] = 32 dims
             if obs_dim == 39 and expected_graph_dit_obs_dim == 32:
-                # Remove target_object_position (indices 26:33)
+                # Remove target_object_position (7 dims at indices 26:33)
                 obs_for_graph_dit = torch.cat([obs[:, :26], obs[:, 33:]], dim=-1)
+            elif obs_dim == 30 and expected_graph_dit_obs_dim == 32:
+                # Current obs: [joint_pos(5), joint_vel(5), object_pos(3), object_ori(4),
+                #               ee_pos(3), ee_ori(4), actions(6)] = 30 dims
+                # Need to pad with zeros to match 32 dims (add 1 dim to joint_pos and joint_vel)
+                # Insert zeros after joint_pos (index 5) and joint_vel (index 10)
+                joint_pos = obs[:, :5]  # 5 dims
+                joint_vel = obs[:, 5:10]  # 5 dims
+                rest = obs[:, 10:]  # 20 dims (3+4+3+4+6)
+                # Pad joint_pos and joint_vel to 6 dims each
+                joint_pos_padded = torch.cat([joint_pos, torch.zeros_like(joint_pos[:, :1])], dim=-1)  # 6 dims
+                joint_vel_padded = torch.cat([joint_vel, torch.zeros_like(joint_vel[:, :1])], dim=-1)  # 6 dims
+                obs_for_graph_dit = torch.cat([joint_pos_padded, joint_vel_padded, rest], dim=-1)  # 32 dims
             else:
                 raise ValueError(
                     f"Observation dimension mismatch: got {obs_dim}, "
                     f"expected {expected_graph_dit_obs_dim} for Graph DiT. "
-                    f"Please check observation structure."
+                    f"Please check observation structure. "
+                    f"Supported conversions: 39->32 (remove target_object_position), 30->32 (pad joints)."
                 )
         else:
             obs_for_graph_dit = obs

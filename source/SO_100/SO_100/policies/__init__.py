@@ -5,7 +5,7 @@
 
 """Custom policy networks for SO-ARM100 tasks."""
 
-from .graph_dit_policy import GraphDiTPolicy, GraphDiTPolicyCfg
+from .graph_dit_policy import ActionHistoryBuffer, GraphDiTPolicy, GraphDiTPolicyCfg, JointStateHistoryBuffer, NodeHistoryBuffer
 from .graph_dit_rl_policy import GraphDiTRLPolicy, GraphDiTRLPolicyCfg
 
 # Conditionally import RSL-RL ActorCritic (only needed for RSL-RL training)
@@ -20,6 +20,9 @@ except (ImportError, ModuleNotFoundError):
     GraphDiTActorCriticCfg = None
 
 __all__ = [
+    "ActionHistoryBuffer",
+    "JointStateHistoryBuffer",
+    "NodeHistoryBuffer",
     "GraphDiTPolicy",
     "GraphDiTPolicyCfg",
     "GraphDiTRLPolicy",

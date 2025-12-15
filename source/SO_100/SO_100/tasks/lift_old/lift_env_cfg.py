@@ -9,7 +9,6 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from dataclasses import MISSING
-import math
 
 import isaaclab.sim as sim_utils
 
@@ -87,26 +86,6 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
 
 
 @configclass
-class CommandsCfg:
-    """Command terms for the MDP."""
-
-    object_pose = mdp.UniformPoseCommandCfg(
-        asset_name="robot",
-        body_name=MISSING,  # will be set by agent env cfg
-        resampling_time_range=(5.0, 5.0),
-        debug_vis=True,
-        ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.0, 0.0),
-            pos_y=(0.0, 0.0),
-            pos_z=(0.35, 0.35),
-            roll=(math.pi, math.pi),
-            pitch=(0.0, 0.0),  # Fixed to π to make z-axis point downward
-            yaw=(math.pi, math.pi),
-        ),
-    )
-
-
-@configclass
 class ActionsCfg:
     """Action specifications for the MDP."""
 
@@ -126,7 +105,6 @@ class ObservationsCfg:
         joint_pos = ObsTerm(func=mdp.joint_pos_rel)
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
         object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame)
-        target_object_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "object_pose"})
         actions = ObsTerm(func=mdp.last_action)
 
         def __post_init__(self):
@@ -178,31 +156,10 @@ class EventCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
 
-    reaching_object = RewTerm(func=mdp.object_ee_distance, params={"std": 0.05}, weight=3.0)
-
     lifting_object = RewTerm(func=mdp.object_is_lifted, params={"minimal_height": 0.04}, weight=15.0)
-
-    object_goal_tracking = RewTerm(
-        func=mdp.object_goal_distance,
-        params={"std": 0.3, "minimal_height": 0.04, "command_name": "object_pose"},
-        weight=16.0,
-    )
-
-    object_goal_tracking_fine_grained = RewTerm(
-        func=mdp.object_goal_distance,
-        params={"std": 0.05, "minimal_height": 0.04, "command_name": "object_pose"},
-        weight=5.0,
-    )
-
-    # action penalty
+    reaching_object = RewTerm(func=mdp.object_ee_distance, params={"std": 0.05}, weight=1.0)
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-4)
-
-    joint_vel = RewTerm(
-        func=mdp.joint_vel_l2,
-        weight=-1e-4,
-        params={"asset_cfg": SceneEntityCfg("robot")},
-    )
-
+    joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-1e-4)
 
 
 @configclass
@@ -256,7 +213,7 @@ class LiftEnvCfg(ManagerBasedRLEnvCfg):
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
-    commands: CommandsCfg = CommandsCfg()
+    commands = None
     # MDP settings
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
@@ -269,7 +226,7 @@ class LiftEnvCfg(ManagerBasedRLEnvCfg):
         self.episode_length_s = 5.0
         self.viewer.eye = (2.5, 2.5, 1.5)
         # simulation settings
-        self.sim.dt = 1.0 / 200  
+        self.sim.dt = 1.0 / 200
         # Render interval should match decimation to avoid rendering intermediate physics steps
         self.sim.render_interval = self.decimation
 

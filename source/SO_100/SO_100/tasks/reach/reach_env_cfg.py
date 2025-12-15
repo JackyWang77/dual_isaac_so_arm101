@@ -9,7 +9,6 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from dataclasses import MISSING
-import math
 
 import isaaclab.sim as sim_utils
 
@@ -81,26 +80,6 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
 
 
 @configclass
-class CommandsCfg:
-    """Command terms for the MDP."""
-
-    object_pose = mdp.UniformPoseCommandCfg(
-        asset_name="robot",
-        body_name=MISSING,  # will be set by agent env cfg
-        resampling_time_range=(5.0, 5.0),
-        debug_vis=True,
-        ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.0, 0.0),
-            pos_y=(0.0, 0.0),
-            pos_z=(0.35, 0.35),
-            roll=(math.pi, math.pi),
-            pitch=(0.0, 0.0),  # Fixed to π to make z-axis point downward
-            yaw=(math.pi, math.pi),
-        ),
-    )
-
-
-@configclass
 class ActionsCfg:
     """Action specifications for the MDP."""
 
@@ -123,7 +102,6 @@ class ObservationsCfg:
         object_orientation = ObsTerm(func=mdp.object_orientation)
         ee_position = ObsTerm(func=mdp.ee_position_in_robot_root_frame)
         ee_orientation = ObsTerm(func=mdp.ee_orientation)
-        target_object_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "object_pose"})
         actions = ObsTerm(func=mdp.last_action)
 
         def __post_init__(self):
@@ -247,7 +225,7 @@ class ReachEnvCfg(ManagerBasedRLEnvCfg):
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
-    commands: CommandsCfg = CommandsCfg()
+    commands = None
     # MDP settings
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
@@ -258,11 +236,11 @@ class ReachEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # general settings
         # 90Hz golden setup (physics:render:display = 1:1:1)
-        self.decimation = 1
+        self.decimation = 4
         self.episode_length_s = 5.0
         self.viewer.eye = (2.5, 2.5, 1.5)
         # simulation settings
-        self.sim.dt = 1.0 / 90  # 90Hz (same as pick_place for smooth teleoperation)
+        self.sim.dt = 1 / 200  # 200Hz
         # Render interval should match decimation to avoid rendering intermediate physics steps
         self.sim.render_interval = self.decimation
 

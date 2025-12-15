@@ -50,8 +50,6 @@ class SoArm100ReachJointCubeEnvCfg(ReachEnvCfg):
             open_command_expr={"jaw_joint": 0.3},
             close_command_expr={"jaw_joint": 0.0002},
         )
-        self.commands.object_pose.body_name = ["wrist_2_link"]
-        self.commands.object_pose.debug_vis = False  # Disable visual marker
 
         # Set Cube as object
         self.scene.object = RigidObjectCfg(
