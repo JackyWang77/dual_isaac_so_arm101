@@ -13,8 +13,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
-from isaaclab.assets import RigidObject
+from isaaclab.assets import Articulation, RigidObject
 from isaaclab.managers import SceneEntityCfg
+from isaaclab.sensors import FrameTransformer
 from isaaclab.utils.math import subtract_frame_transforms
 
 if TYPE_CHECKING:
@@ -34,6 +35,53 @@ def object_position_in_robot_root_frame(
         robot.data.root_state_w[:, :3], robot.data.root_state_w[:, 3:7], object_pos_w
     )
     return object_pos_b
+
+
+def ee_position_in_robot_root_frame(
+    env: ManagerBasedRLEnv,
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+) -> torch.Tensor:
+    """The position of the end-effector in the robot's root frame.
+
+    Returns:
+        torch.Tensor: EE position in robot base frame [num_envs, 3]
+    """
+    robot: Articulation = env.scene[robot_cfg.name]
+    ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
+    ee_pos_w = ee_frame.data.target_pos_w[..., 0, :]  # [num_envs, 3]
+    ee_pos_b, _ = subtract_frame_transforms(
+        robot.data.root_state_w[:, :3], robot.data.root_state_w[:, 3:7], ee_pos_w
+    )
+    return ee_pos_b
+
+
+def ee_orientation(
+    env: ManagerBasedRLEnv,
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+) -> torch.Tensor:
+    """The orientation (quaternion) of the end-effector in world frame.
+
+    Returns:
+        torch.Tensor: EE orientation quaternion [num_envs, 4] (w, x, y, z)
+    """
+    ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
+    ee_quat_w = ee_frame.data.target_quat_w[..., 0, :]  # [num_envs, 4]
+    return ee_quat_w
+
+
+def object_orientation(
+    env: ManagerBasedRLEnv,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+) -> torch.Tensor:
+    """The orientation (quaternion) of the object in world frame.
+
+    Returns:
+        torch.Tensor: Object orientation quaternion [num_envs, 4] (w, x, y, z)
+    """
+    object: RigidObject = env.scene[object_cfg.name]
+    object_quat_w = object.data.root_quat_w  # [num_envs, 4]
+    return object_quat_w
 
 
 def object_is_lifted(
@@ -63,5 +111,5 @@ def object_is_lifted(
     
     # Check if object is lifted to at least minimal_height above initial position
     lifted = object_height >= (initial_height + minimal_height)
-    
+
     return lifted.float()  # Return float tensor (0.0 or 1.0) for observations

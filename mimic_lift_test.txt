@@ -1,0 +1,175 @@
+Creating window for environment.
+[INFO]: Completed setting up the environment...
+[Play] Observation space: Dict('policy': Box(-inf, inf, (2, 32), float32), 'subtask_terms': Dict('lift_object': Box(-inf, inf, (2,), float32)))
+[Play] Action space: Box(-inf, inf, (2, 6), float32)
+[Play] Obs dim: 32, Action dim: 6
+
+[Play] Loading policy from: ./logs/graph_dit/lift_joint_flow_matching/2025-12-17_21-22-22/best_model.pt
+[GraphDiTPolicy] Loaded model from: ./logs/graph_dit/lift_joint_flow_matching/2025-12-17_21-22-22/best_model.pt
+[Play] Policy mode: FLOW_MATCHING
+[Play] Using default diffusion steps for flow_matching: 10
+[Play] Loaded observation normalization stats
+[Play] Loaded action normalization stats
+
+[Play] Running 5 episodes...
+[Play] Action history length: 4
+
+[Play] Step 0 - Input Debug:
+  Obs normalized - mean: -0.1018, std: 1.6331, shape: torch.Size([2, 32])
+  Action history - mean: 0.0000, std: 0.0000, shape: torch.Size([2, 4, 6])
+  EE node history - mean: 0.0000, std: 0.0000
+  Object node history - mean: 0.0000, std: 0.0000
+
+[Play] Step 0 - Action Debug:
+  Normalized actions - mean: 0.0244, std: 0.1085, min: -0.1954, max: 0.1718
+  Normalized actions (first env): [ 0.15936564  0.1396521   0.17176418  0.08774285 -0.19537559 -0.06161403]
+  Denormalized actions - mean: 0.5197, std: 0.6386, min: -0.0167, max: 1.4843
+  Denormalized actions (first env): [0.09043261 0.09979691 0.06803634 1.366108   1.3280783  0.19158716]
+  Action stats (mean): [ 5.7064521e-04  5.1526662e-02 -1.5828812e-02  1.3425497e+00
+  1.4538878e+00  2.3537166e-01]
+  Action stats (std): [0.5638729  0.34564644 0.48825753 0.2684917  0.64393675 0.7106255 ]
+
+[Play] Step 50 - Action Debug:
+  Normalized actions - mean: 0.8112, std: 0.9519, min: -0.0943, max: 2.5298
+  Normalized actions (first env): [-0.057345   -0.09427112  0.23425372  1.5311034   2.1222756   0.7076435 ]
+  Denormalized actions - mean: 0.9404, std: 1.1536, min: -0.0319, max: 3.0829
+  Denormalized actions (first env): [-0.03176465  0.01894218  0.09854733  1.7536383   2.820499    0.7382412 ]
+  Action stats (mean): [ 5.7064521e-04  5.1526662e-02 -1.5828812e-02  1.3425497e+00
+  1.4538878e+00  2.3537166e-01]
+  Action stats (std): [0.5638729  0.34564644 0.48825753 0.2684917  0.64393675 0.7106255 ]
+2025-12-17T21:28:58Z [25,604ms] [Warning] [carb] Client gpu.foundation.plugin has acquired [gpu::unstable::IMemoryBudgetManagerFactory v0.1] 100 times. Consider accessing this interface with carb::getCachedInterface() (Performance warning)
+[Play] Step: 100, Episodes: 0/5, Avg reward (last 10): 0.000
+
+[Play] Step 100 - Action Debug:
+  Normalized actions - mean: 0.4095, std: 0.8125, min: -0.8822, max: 1.6011
+  Normalized actions (first env): [-0.37145498 -0.5780963   0.89877915  1.6010611   1.4640858   1.0514618 ]
+  Denormalized actions - mean: 0.7361, std: 0.9092, min: -0.4969, max: 2.3967
+  Denormalized actions (first env): [-0.20888275 -0.14829025  0.42300686  1.7724212   2.3966665   0.98256725]
+  Action stats (mean): [ 5.7064521e-04  5.1526662e-02 -1.5828812e-02  1.3425497e+00
+  1.4538878e+00  2.3537166e-01]
+  Action stats (std): [0.5638729  0.34564644 0.48825753 0.2684917  0.64393675 0.7106255 ]
+
+[Play] Step 150 - Action Debug:
+  Normalized actions - mean: 0.6726, std: 0.9099, min: -0.6303, max: 2.0656
+  Normalized actions (first env): [-0.6303126  -0.06954411  0.23634076  1.6237829   1.4200748   1.1829728 ]
+  Denormalized actions - mean: 0.8547, std: 1.0841, min: -0.3548, max: 2.7840
+  Denormalized actions (first env): [-0.35484552  0.02748899  0.09956635  1.7785219   2.3683262   1.0760224 ]
+  Action stats (mean): [ 5.7064521e-04  5.1526662e-02 -1.5828812e-02  1.3425497e+00
+  1.4538878e+00  2.3537166e-01]
+  Action stats (std): [0.5638729  0.34564644 0.48825753 0.2684917  0.64393675 0.7106255 ]
+[Play] Step: 200, Episodes: 0/5, Avg reward (last 10): 0.000
+
+[Play] Step 200 - Action Debug:
+  Normalized actions - mean: 0.4717, std: 0.7283, min: -0.8325, max: 1.6223
+  Normalized actions (first env): [-0.27371362 -0.14744802  0.28732237  1.3902428   1.6222824   0.5922885 ]
+  Denormalized actions - mean: 0.7462, std: 0.9604, min: -0.4689, max: 2.4985
+  Denormalized actions (first env): [-1.5376905e-01  5.6177750e-04  1.2445850e-01  1.7158183e+00
+  2.4985352e+00  6.5626699e-01]
+  Action stats (mean): [ 5.7064521e-04  5.1526662e-02 -1.5828812e-02  1.3425497e+00
+  1.4538878e+00  2.3537166e-01]
+  Action stats (std): [0.5638729  0.34564644 0.48825753 0.2684917  0.64393675 0.7106255 ]
+
+[Play] Step 250 - Action Debug:
+  Normalized actions - mean: 0.0347, std: 0.4900, min: -0.8622, max: 1.0971
+  Normalized actions (first env): [-0.1985335   1.0971369  -0.8621641   0.69273    -0.12178189  0.28500703]
+  Denormalized actions - mean: 0.5090, std: 0.7145, min: -0.4368, max: 1.5285
+  Denormalized actions (first env): [-0.11137701  0.4307481  -0.43678692  1.5285419   1.375468    0.43790495]
+  Action stats (mean): [ 5.7064521e-04  5.1526662e-02 -1.5828812e-02  1.3425497e+00
+  1.4538878e+00  2.3537166e-01]
+  Action stats (std): [0.5638729  0.34564644 0.48825753 0.2684917  0.64393675 0.7106255 ]
+[Play] Step: 300, Episodes: 2/5, Avg reward (last 10): 0.216
+
+[Play] Step 300 - Action Debug:
+  Normalized actions - mean: 0.6387, std: 0.8801, min: -0.7174, max: 2.2479
+  Normalized actions (first env): [-0.22830692 -0.1585654   0.413827    1.6043973   2.2478862   0.8972621 ]
+  Denormalized actions - mean: 0.8569, std: 1.0500, min: -0.2135, max: 2.9014
+  Denormalized actions (first env): [-0.12816544 -0.0032809   0.18622532  1.773317    2.9013844   0.872989  ]
+  Action stats (mean): [ 5.7064521e-04  5.1526662e-02 -1.5828812e-02  1.3425497e+00
+  1.4538878e+00  2.3537166e-01]
+  Action stats (std): [0.5638729  0.34564644 0.48825753 0.2684917  0.64393675 0.7106255 ]
+
+[Play] Step 350 - Action Debug:
+  Normalized actions - mean: 0.5638, std: 0.7963, min: -0.5014, max: 1.8478
+  Normalized actions (first env): [-0.3997317  -0.5014327   0.7139573   1.0846367   0.79768634  0.7928107 ]
+  Denormalized actions - mean: 0.8020, std: 0.9876, min: -0.2248, max: 2.6438
+  Denormalized actions (first env): [-0.22482722 -0.12179177  0.3327662   1.6337656   1.9675474   0.79876316]
+  Action stats (mean): [ 5.7064521e-04  5.1526662e-02 -1.5828812e-02  1.3425497e+00
+  1.4538878e+00  2.3537166e-01]
+  Action stats (std): [0.5638729  0.34564644 0.48825753 0.2684917  0.64393675 0.7106255 ]
+[Play] Step: 400, Episodes: 2/5, Avg reward (last 10): 0.216
+
+[Play] Step 400 - Action Debug:
+  Normalized actions - mean: 0.7288, std: 0.8970, min: -0.3663, max: 2.1426
+  Normalized actions (first env): [-0.36627585 -0.14402784  0.30082336  1.6430103   1.8264349   1.0652946 ]
+  Denormalized actions - mean: 0.8881, std: 1.1029, min: -0.2060, max: 2.8336
+  Denormalized actions (first env): [-2.0596237e-01  1.7439499e-03  1.3105045e-01  1.7836843e+00
+  2.6299963e+00  9.9239719e-01]
+  Action stats (mean): [ 5.7064521e-04  5.1526662e-02 -1.5828812e-02  1.3425497e+00
+  1.4538878e+00  2.3537166e-01]
+  Action stats (std): [0.5638729  0.34564644 0.48825753 0.2684917  0.64393675 0.7106255 ]
+
+[Play] Step 450 - Action Debug:
+  Normalized actions - mean: 0.6637, std: 0.8322, min: -0.4966, max: 2.2157
+  Normalized actions (first env): [ 0.14588943 -0.49658504  0.74789184  0.727784    1.7897576   0.4745888 ]
+  Denormalized actions - mean: 0.8725, std: 1.0652, min: -0.1201, max: 2.8807
+  Denormalized actions (first env): [ 0.08283374 -0.12011619  0.349335    1.5379536   2.6063786   0.5726266 ]
+  Action stats (mean): [ 5.7064521e-04  5.1526662e-02 -1.5828812e-02  1.3425497e+00
+  1.4538878e+00  2.3537166e-01]
+  Action stats (std): [0.5638729  0.34564644 0.48825753 0.2684917  0.64393675 0.7106255 ]
+[Play] Step: 500, Episodes: 4/5, Avg reward (last 10): 0.161
+
+[Play] Step 500 - Action Debug:
+  Normalized actions - mean: -0.0102, std: 0.0913, min: -0.1601, max: 0.1298
+  Normalized actions (first env): [-0.16009186 -0.12605661 -0.03679407 -0.00596747  0.12977996  0.01299245]
+  Denormalized actions - mean: 0.5076, std: 0.6927, min: -0.0897, max: 1.5375
+  Denormalized actions (first env): [-0.08970081  0.00795564 -0.03379379  1.3409475   1.537458    0.24460442]
+  Action stats (mean): [ 5.7064521e-04  5.1526662e-02 -1.5828812e-02  1.3425497e+00
+  1.4538878e+00  2.3537166e-01]
+  Action stats (std): [0.5638729  0.34564644 0.48825753 0.2684917  0.64393675 0.7106255 ]
+
+[Play] Step 550 - Action Debug:
+  Normalized actions - mean: 0.8253, std: 0.9995, min: -0.1786, max: 2.4587
+  Normalized actions (first env): [-0.17863366 -0.16999124  0.36048812  1.7447909   2.4587474   0.953341  ]
+  Denormalized actions - mean: 0.9440, std: 1.1767, min: -0.1002, max: 3.0372
+  Denormalized actions (first env): [-0.10015603 -0.0072302   0.16018222  1.8110116   3.0371656   0.9128401 ]
+  Action stats (mean): [ 5.7064521e-04  5.1526662e-02 -1.5828812e-02  1.3425497e+00
+  1.4538878e+00  2.3537166e-01]
+  Action stats (std): [0.5638729  0.34564644 0.48825753 0.2684917  0.64393675 0.7106255 ]
+[Play] Step: 600, Episodes: 4/5, Avg reward (last 10): 0.161
+
+[Play] Step 600 - Action Debug:
+  Normalized actions - mean: 0.6824, std: 0.8006, min: -0.1956, max: 2.1313
+  Normalized actions (first env): [-0.12678964  0.02218553 -0.09440397  1.7721137   2.1313043   1.254997  ]
+  Denormalized actions - mean: 0.8750, std: 1.0240, min: -0.1097, max: 2.8263
+  Denormalized actions (first env): [-0.07092259  0.05919501 -0.06192227  1.8183475   2.826313    1.1272047 ]
+  Action stats (mean): [ 5.7064521e-04  5.1526662e-02 -1.5828812e-02  1.3425497e+00
+  1.4538878e+00  2.3537166e-01]
+  Action stats (std): [0.5638729  0.34564644 0.48825753 0.2684917  0.64393675 0.7106255 ]
+
+[Play] Step 650 - Action Debug:
+  Normalized actions - mean: 0.7434, std: 0.8217, min: -0.3126, max: 2.0878
+  Normalized actions (first env): [-0.31259388  0.05345602  0.12298977  1.7018396   2.0878267   0.91760635]
+  Denormalized actions - mean: 0.9002, std: 1.0633, min: -0.1757, max: 2.7983
+  Denormalized actions (first env): [-0.17569257  0.07000355  0.04422186  1.7994795   2.7983162   0.88744617]
+  Action stats (mean): [ 5.7064521e-04  5.1526662e-02 -1.5828812e-02  1.3425497e+00
+  1.4538878e+00  2.3537166e-01]
+  Action stats (std): [0.5638729  0.34564644 0.48825753 0.2684917  0.64393675 0.7106255 ]
+[Play] Step: 700, Episodes: 4/5, Avg reward (last 10): 0.161
+
+[Play] Step 700 - Action Debug:
+  Normalized actions - mean: 0.7454, std: 0.9451, min: -0.7160, max: 1.8718
+  Normalized actions (first env): [-0.2797015  -0.05611921  0.2506758   1.4792184   1.838049    1.1555247 ]
+  Denormalized actions - mean: 0.9056, std: 1.1059, min: -0.4032, max: 2.6592
+  Denormalized actions (first env): [-0.15714546  0.03212926  0.10656554  1.7397075   2.637475    1.056517  ]
+  Action stats (mean): [ 5.7064521e-04  5.1526662e-02 -1.5828812e-02  1.3425497e+00
+  1.4538878e+00  2.3537166e-01]
+  Action stats (std): [0.5638729  0.34564644 0.48825753 0.2684917  0.64393675 0.7106255 ]
+
+[Play] ===== Final Statistics =====
+[Play] Total episodes: 5
+[Play] Average reward: 0.126
+[Play] Max reward: 0.421
+[Play] Min reward: -0.013
+
+[Play] Playback completed!
+[92.293s] Simulation App Shutting Down

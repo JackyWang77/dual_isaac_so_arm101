@@ -596,10 +596,22 @@ def train_graph_dit_policy(
         # weights_only=False is needed for PyTorch 2.6+ to load custom config classes
         checkpoint = torch.load(resume_checkpoint, map_location=device, weights_only=False)
         policy.load_state_dict(checkpoint['policy_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        start_epoch = checkpoint['epoch'] + 1
-        best_loss = checkpoint.get('best_loss', float('inf'))
+        
+        # Try to load optimizer and scheduler states (may not exist in best_model.pt)
+        if 'optimizer_state_dict' in checkpoint:
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            print(f"[Train] Loaded optimizer state from checkpoint")
+        else:
+            print(f"[Train] Warning: No optimizer state in checkpoint, starting with fresh optimizer")
+        
+        if 'scheduler_state_dict' in checkpoint:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            print(f"[Train] Loaded scheduler state from checkpoint")
+        else:
+            print(f"[Train] Warning: No scheduler state in checkpoint, starting with fresh scheduler")
+        
+        start_epoch = checkpoint.get('epoch', 0) + 1
+        best_loss = checkpoint.get('best_loss', checkpoint.get('loss', float('inf')))
         print(f"[Train] Resumed from epoch {start_epoch}, best loss: {best_loss:.6f}")
     
     # Training loop

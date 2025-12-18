@@ -46,7 +46,13 @@ parser.add_argument(
     ),
 )
 parser.add_argument(
-    "--dataset_file", type=str, default="./datasets/dataset.hdf5", help="File path to export recorded demos."
+    "--dataset_file",
+    type=str,
+    default=None,
+    help=(
+        "File path to export recorded demos. "
+        "If not specified, will automatically generate filename based on task name (e.g., 'reach_dataset.hdf5' for Reach task)."
+    ),
 )
 parser.add_argument("--step_hz", type=int, default=30, help="Environment stepping rate in Hz.")
 parser.add_argument(
@@ -98,6 +104,35 @@ else:
             f"Using '{normalized_task}' instead."
         )
         args_cli.task = normalized_task
+
+# Auto-generate dataset filename if not specified
+if args_cli.dataset_file is None:
+    # Extract task name from task string (e.g., "SO-ARM101-Reach-Cube-v0" -> "reach")
+    task_name = args_cli.task.split(":")[-1]  # Get the task part after ":"
+    # Remove version suffix (e.g., "-v0") and convert to lowercase
+    task_base = re.sub(r"-v\d+$", "", task_name).lower()
+    # Extract meaningful part (e.g., "so-arm101-reach-cube" -> "reach")
+    # Try to find common task keywords
+    task_keywords = ["reach", "lift", "pick", "place", "manipulate"]
+    task_identifier = None
+    for keyword in task_keywords:
+        # Check if keyword exists as a separate word in task_base
+        if f"-{keyword}-" in task_base or task_base.startswith(f"{keyword}-") or task_base.endswith(f"-{keyword}"):
+            task_identifier = keyword
+            break
+        # Also check if task_base exactly equals keyword (for simple task names)
+        if task_base == keyword:
+            task_identifier = keyword
+            break
+    # If no keyword found, use the full task base name (sanitized)
+    if task_identifier is None:
+        # Remove common prefixes like "so-arm100-", "so-arm101-", "isaac-"
+        task_identifier = re.sub(r"^(so-arm\d+-|isaac-)", "", task_base)
+        # Replace remaining hyphens with underscores for filename safety
+        task_identifier = re.sub(r"-", "_", task_identifier)
+    # Generate default filename
+    args_cli.dataset_file = f"./datasets/{task_identifier}_dataset.hdf5"
+    print(f"[record_demos] Auto-generated dataset filename: {args_cli.dataset_file}")
 
 app_launcher_args = vars(args_cli)
 

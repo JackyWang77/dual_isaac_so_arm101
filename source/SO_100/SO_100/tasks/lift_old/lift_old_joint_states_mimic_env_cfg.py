@@ -30,7 +30,7 @@ class SoArm100LiftJointStatesMimicEnvCfg(SoArm100LiftJointCubeEnvCfg, MimicEnvCf
         self.observations.policy.enable_corruption = False
 
         # Override the existing values
-        self.datagen_config.name = "demo_src_lift_joint_states_D0"
+        self.datagen_config.name = "lift"
         self.datagen_config.generation_guarantee = True
         self.datagen_config.generation_keep_failed = True
         self.datagen_config.generation_num_trials = 10

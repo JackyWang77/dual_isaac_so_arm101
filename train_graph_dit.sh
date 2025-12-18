@@ -24,18 +24,18 @@ echo "Mode: $MODE"
 echo "========================================"
 
 python scripts/graph_dit/train.py \
-    --task SO-ARM101-Reach-Cube-v0 \
-    --dataset ./datasets/dataset.hdf5 \
+    --task SO-ARM101-Lift-Cube-v0 \
+    --dataset ./datasets/lift_annotated_dataset.hdf5 \
     --obs_dim 32 \
     --action_dim 6 \
     --action_history_length 4 \
     --mode "$MODE" \
-    --epochs 100 \
+    --epochs 500 \
     --batch_size 256 \
     --lr 1e-4 \
-    --hidden_dim 256 \
-    --num_layers 6 \
-    --num_heads 8 \
+    --hidden_dim 128 \
+    --num_layers 3 \
+    --num_heads 4 \
     --device cuda \
-    --save_dir ./logs/graph_dit/reach_joint_${MODE} \
-    --log_dir ./logs/graph_dit/reach_joint_${MODE}
+    --save_dir ./logs/graph_dit/lift_joint \
+    --log_dir ./logs/graph_dit/lift_joint

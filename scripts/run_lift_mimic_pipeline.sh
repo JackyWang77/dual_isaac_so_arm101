@@ -9,7 +9,7 @@ TASK_ANNOTATE="SO-ARM101-Lift-Joint-States-Mimic-v0"
 # Generation uses IK Abs env (to output EEF pose actions for IK Abs policy training)
 TASK_GENERATE="SO-ARM101-Lift-IK-Abs-Mimic-v0"
 
-INPUT_FILE="./datasets/dataset.hdf5"
+INPUT_FILE="./datasets/lift_dataset.hdf5"
 ANNOTATED_FILE="./datasets/lift_annotated_dataset.hdf5"
 OUTPUT_FILE="./datasets/lift_generated_dataset_ik_abs.hdf5"
 DEVICE="cpu"

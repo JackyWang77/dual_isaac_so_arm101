@@ -105,6 +105,9 @@ class ObservationsCfg:
         joint_pos = ObsTerm(func=mdp.joint_pos_rel)
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
         object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame)
+        object_orientation = ObsTerm(func=mdp.object_orientation)
+        ee_position = ObsTerm(func=mdp.ee_position_in_robot_root_frame)
+        ee_orientation = ObsTerm(func=mdp.ee_orientation)
         actions = ObsTerm(func=mdp.last_action)
 
         def __post_init__(self):

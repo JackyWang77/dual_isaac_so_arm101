@@ -381,13 +381,16 @@ def play_graph_dit_policy(
                 actions = actions_normalized * action_std + action_mean  # [num_envs, action_dim]
             else:
                 actions = actions_normalized  # [num_envs, action_dim]
+                if step_count == 0:
+                    print(f"[Play] Warning: No action normalization stats, using normalized actions directly")
             
             # Update history buffers (shift and add new)
+            # IMPORTANT: Store normalized actions in history buffer, as policy expects normalized action_history
             for env_id in range(num_envs):
-                # Shift action history (actions is already a tensor)
+                # Shift action history (use normalized actions, not denormalized!)
                 action_history_buffers[env_id] = torch.cat([
                     action_history_buffers[env_id][1:],
-                    actions[env_id:env_id+1]  # [1, action_dim]
+                    actions_normalized[env_id:env_id+1]  # [1, action_dim] - Use normalized actions!
                 ], dim=0)
                 
                 # Shift node histories
