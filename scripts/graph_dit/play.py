@@ -158,11 +158,13 @@ def play_graph_dit_policy(
         mode = getattr(cfg, 'mode', 'ddpm')
         print(f"[Play] Policy mode: {mode.upper()}")
         # Set default steps based on mode if not provided
+        # CRITICAL FIX: For 50Hz control, use minimal steps for real-time performance
+        # Flow Matching can generate high-quality actions in 2-4 steps
         if num_diffusion_steps is None:
             if mode == "flow_matching":
-                num_diffusion_steps = 10  # Flow Matching: 1-10 steps
+                num_diffusion_steps = 2  # Flow Matching: 2-4 steps for 50Hz real-time control
             else:
-                num_diffusion_steps = 50  # DDPM: 50-100 steps
+                num_diffusion_steps = 10  # DDPM: Reduced from 50 for faster inference (but consider flow_matching for real-time)
             print(f"[Play] Using default diffusion steps for {mode}: {num_diffusion_steps}")
     else:
         if num_diffusion_steps is None:
@@ -201,22 +203,68 @@ def play_graph_dit_policy(
         action_mean = None
         action_std = None
     
-    # Get action_history_length from policy config
+    # CRITICAL FIX: Load node feature normalization stats
+    node_stats = checkpoint.get('node_stats', None)
+    if node_stats is not None:
+        print(f"[Play] Loaded node feature normalization stats")
+        # Handle both numpy arrays and torch tensors
+        if isinstance(node_stats['ee_mean'], np.ndarray):
+            ee_node_mean = torch.from_numpy(node_stats['ee_mean']).squeeze().to(device)
+            ee_node_std = torch.from_numpy(node_stats['ee_std']).squeeze().to(device)
+            object_node_mean = torch.from_numpy(node_stats['object_mean']).squeeze().to(device)
+            object_node_std = torch.from_numpy(node_stats['object_std']).squeeze().to(device)
+        else:
+            ee_node_mean = node_stats['ee_mean'].squeeze().to(device)
+            ee_node_std = node_stats['ee_std'].squeeze().to(device)
+            object_node_mean = node_stats['object_mean'].squeeze().to(device)
+            object_node_std = node_stats['object_std'].squeeze().to(device)
+    else:
+        print(f"[Play] Warning: No node stats found, node features will NOT be normalized!")
+        print(f"[Play] This may cause poor performance - retrain with node normalization!")
+        ee_node_mean = None
+        ee_node_std = None
+        object_node_mean = None
+        object_node_std = None
+    
+    # Get config values from policy
     action_history_length = policy.cfg.action_history_length if hasattr(policy.cfg, 'action_history_length') else 4
+    joint_dim = policy.cfg.joint_dim if hasattr(policy.cfg, "joint_dim") else None
+    pred_horizon = policy.cfg.pred_horizon if hasattr(policy.cfg, 'pred_horizon') else 16
+    exec_horizon = policy.cfg.exec_horizon if hasattr(policy.cfg, 'exec_horizon') else 8
     
     # Run episodes
     print(f"\n[Play] Running {num_episodes} episodes...")
     print(f"[Play] Action history length: {action_history_length}")
+    print(f"[Play] ACTION CHUNKING: pred_horizon={pred_horizon}, exec_horizon={exec_horizon}")
+    print(f"[Play] Inference frequency: every {exec_horizon} steps (vs every step without chunking)")
     
     obs, info = env.reset()
     episode_count = 0
     episode_rewards = []
     current_episode_rewards = torch.zeros(num_envs, device=device)
     
-    # Initialize action and node history buffers for each environment
+    # Initialize action, node, and joint history buffers for each environment
     action_history_buffers = [torch.zeros(action_history_length, action_dim, device=device) for _ in range(num_envs)]
     ee_node_history_buffers = [torch.zeros(action_history_length, 7, device=device) for _ in range(num_envs)]
     object_node_history_buffers = [torch.zeros(action_history_length, 7, device=device) for _ in range(num_envs)]
+    joint_state_history_buffers = [
+        torch.zeros(action_history_length, joint_dim, device=device) for _ in range(num_envs)
+    ] if joint_dim is not None else None
+    
+    # ==========================================================================
+    # RECEDING HORIZON CONTROL (RHC) - Action Buffers
+    # ==========================================================================
+    # Instead of predicting one action per step, we predict pred_horizon actions,
+    # execute exec_horizon of them, then re-predict.
+    # This provides:
+    # 1. Temporal consistency (actions within a chunk are smooth)
+    # 2. Lower computational load (predict every exec_horizon steps, not every step)
+    # 3. Better real-time performance for 50Hz control
+    
+    # Action buffer for each environment: stores predicted trajectory
+    # Shape: [exec_horizon, action_dim] - we only store exec_horizon actions to execute
+    action_buffers = [[] for _ in range(num_envs)]  # List of lists for dynamic management
+    action_buffers_normalized = [[] for _ in range(num_envs)]  # Normalized versions for history
     
     step_count = 0
     
@@ -241,6 +289,16 @@ def play_graph_dit_policy(
         ee_node = torch.cat([ee_pos, ee_ori], dim=-1)  # [batch, 7]
         object_node = torch.cat([obj_pos, obj_ori], dim=-1)  # [batch, 7]
         return ee_node, object_node
+    
+    def _extract_joint_states_from_obs(obs_tensor):
+        """Extract joint position and velocity from concatenated obs.
+        
+        Assumes layout:
+            joint_pos: 0-6, joint_vel: 6-12
+        """
+        joint_pos = obs_tensor[:, 0:6]
+        joint_vel = obs_tensor[:, 6:12]
+        return torch.cat([joint_pos, joint_vel], dim=-1)
     
     with torch.inference_mode():
         while simulation_app.is_running() and episode_count < num_episodes:
@@ -345,44 +403,98 @@ def play_graph_dit_policy(
             #          ee_position[19:22], ee_orientation[22:26], actions[26:32]
             ee_node_current, object_node_current = _extract_node_features_from_obs(obs_tensor)  # [num_envs, 7]
             
-            # Build action and node histories for batch
+            # Extract current joint states (position + velocity) from raw obs
+            if joint_dim is not None:
+                joint_states_current = _extract_joint_states_from_obs(obs_tensor)  # [num_envs, joint_dim]
+            
+            # Build action, node, and joint histories for batch
             action_history_batch = []
             ee_node_history_batch = []
             object_node_history_batch = []
+            joint_state_history_batch = [] if joint_dim is not None else None
             
             for env_id in range(num_envs):
                 # Get histories for this environment
                 action_history_batch.append(action_history_buffers[env_id].clone())  # [history_length, action_dim]
                 ee_node_history_batch.append(ee_node_history_buffers[env_id].clone())  # [history_length, 7]
                 object_node_history_batch.append(object_node_history_buffers[env_id].clone())  # [history_length, 7]
+                if joint_dim is not None and joint_state_history_batch is not None:
+                    joint_state_history_batch.append(joint_state_history_buffers[env_id].clone())  # [H, joint_dim]
             
             # Stack into batch format
             action_history_tensor = torch.stack(action_history_batch, dim=0).to(device)  # [num_envs, history_length, action_dim]
             ee_node_history_tensor = torch.stack(ee_node_history_batch, dim=0).to(device)  # [num_envs, history_length, 7]
             object_node_history_tensor = torch.stack(object_node_history_batch, dim=0).to(device)  # [num_envs, history_length, 7]
+            if joint_dim is not None and joint_state_history_batch is not None:
+                joint_states_history_tensor = torch.stack(joint_state_history_batch, dim=0).to(device)  # [num_envs, H, joint_dim]
+            else:
+                joint_states_history_tensor = None
+            
+            # CRITICAL FIX: Normalize node features (same as during training)
+            # This is essential for Transformer attention to work properly
+            if ee_node_mean is not None and ee_node_std is not None:
+                ee_node_history_tensor = (ee_node_history_tensor - ee_node_mean) / ee_node_std
+                object_node_history_tensor = (object_node_history_tensor - object_node_mean) / object_node_std
             
             # Get subtask condition (optional)
             subtask_condition = None
             
-            # Get actions from policy (output is normalized)
-            actions_normalized = policy.predict(
-                obs_tensor_normalized,
-                action_history=action_history_tensor,
-                ee_node_history=ee_node_history_tensor,
-                object_node_history=object_node_history_tensor,
-                subtask_condition=subtask_condition,
-                num_diffusion_steps=num_diffusion_steps,
-                deterministic=True
-            )  # [num_envs, action_dim]
+            # ==========================================================================
+            # RECEDING HORIZON CONTROL: Check if we need to re-plan
+            # ==========================================================================
+            # We only call the policy when action buffer is empty
+            # This dramatically reduces inference frequency (every exec_horizon steps vs every step)
             
-            # Denormalize actions (if stats available)
-            # Keep as torch.Tensor (Isaac Lab expects tensor, not numpy array)
-            if action_mean is not None and action_std is not None:
-                actions = actions_normalized * action_std + action_mean  # [num_envs, action_dim]
-            else:
-                actions = actions_normalized  # [num_envs, action_dim]
-                if step_count == 0:
-                    print(f"[Play] Warning: No action normalization stats, using normalized actions directly")
+            # Check if any environment needs re-planning (empty buffer)
+            needs_replan = any(len(action_buffers[env_id]) == 0 for env_id in range(num_envs))
+            
+            if needs_replan:
+                # Predict action trajectory for ALL environments (batched inference)
+                # Output: [num_envs, pred_horizon, action_dim]
+                action_trajectory_normalized = policy.predict(
+                    obs_tensor_normalized,
+                    action_history=action_history_tensor,
+                    ee_node_history=ee_node_history_tensor,
+                    object_node_history=object_node_history_tensor,
+                    joint_states_history=joint_states_history_tensor,
+                    subtask_condition=subtask_condition,
+                    num_diffusion_steps=num_diffusion_steps,
+                    deterministic=True,
+                )  # [num_envs, pred_horizon, action_dim]
+                
+                # Denormalize trajectory
+                if action_mean is not None and action_std is not None:
+                    # Broadcast mean/std for trajectory: [action_dim] -> [1, 1, action_dim]
+                    action_trajectory = action_trajectory_normalized * action_std.unsqueeze(0) + action_mean.unsqueeze(0)
+                else:
+                    action_trajectory = action_trajectory_normalized
+                    if step_count == 0:
+                        print(f"[Play] Warning: No action normalization stats, using normalized actions directly")
+                
+                # Fill action buffers with first exec_horizon actions
+                for env_id in range(num_envs):
+                    if len(action_buffers[env_id]) == 0:
+                        # Store exec_horizon actions in buffer (as list for easy pop)
+                        for t in range(min(exec_horizon, pred_horizon)):
+                            action_buffers[env_id].append(action_trajectory[env_id, t, :])
+                            action_buffers_normalized[env_id].append(action_trajectory_normalized[env_id, t, :])
+            
+            # Pop the first action from each buffer
+            actions_list = []
+            actions_normalized_list = []
+            for env_id in range(num_envs):
+                if len(action_buffers[env_id]) > 0:
+                    actions_list.append(action_buffers[env_id].pop(0))
+                    actions_normalized_list.append(action_buffers_normalized[env_id].pop(0))
+                else:
+                    # Fallback: should not happen if logic is correct
+                    print(f"[Play] WARNING: Empty action buffer for env {env_id}, using zeros!")
+                    actions_list.append(torch.zeros(action_dim, device=device))
+                    actions_normalized_list.append(torch.zeros(action_dim, device=device))
+            
+            # Stack into batch tensors
+            actions = torch.stack(actions_list, dim=0)  # [num_envs, action_dim]
+            actions_normalized = torch.stack(actions_normalized_list, dim=0)  # [num_envs, action_dim]
             
             # Update history buffers (shift and add new)
             # IMPORTANT: Store normalized actions in history buffer, as policy expects normalized action_history
@@ -403,6 +515,15 @@ def play_graph_dit_policy(
                     object_node_history_buffers[env_id][1:],
                     object_node_current[env_id:env_id+1]
                 ], dim=0)
+                
+                if joint_dim is not None and joint_state_history_buffers is not None:
+                    joint_state_history_buffers[env_id] = torch.cat(
+                        [
+                            joint_state_history_buffers[env_id][1:],
+                            joint_states_current[env_id:env_id+1],
+                        ],
+                        dim=0,
+                    )
             
             # Step environment
             obs, rewards, terminated, truncated, info = env.step(actions)
@@ -413,7 +534,7 @@ def play_graph_dit_policy(
             else:
                 current_episode_rewards += rewards.to(device) if hasattr(rewards, 'to') else torch.tensor(rewards, device=device)
             
-            # Check for episode completion and reset history buffers
+            # Check for episode completion and reset history buffers + action buffers
             done = terminated | truncated
             if done.any():
                 for i in range(num_envs):
@@ -426,6 +547,13 @@ def play_graph_dit_policy(
                         action_history_buffers[i].zero_()
                         ee_node_history_buffers[i].zero_()
                         object_node_history_buffers[i].zero_()
+                        if joint_dim is not None and joint_state_history_buffers is not None:
+                            joint_state_history_buffers[i].zero_()
+                        
+                        # CRITICAL: Clear action buffer on episode reset!
+                        # This forces re-planning at the start of each new episode
+                        action_buffers[i].clear()
+                        action_buffers_normalized[i].clear()
                         
                         if episode_count >= num_episodes:
                             break

@@ -32,7 +32,7 @@ python scripts/graph_dit/train.py \
     --mode "$MODE" \
     --epochs 500 \
     --batch_size 256 \
-    --lr 1e-4 \
+    --lr 3e-4 \
     --hidden_dim 128 \
     --num_layers 3 \
     --num_heads 4 \

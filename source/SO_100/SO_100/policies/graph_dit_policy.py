@@ -543,6 +543,25 @@ class GraphDiTPolicyCfg:
     action_history_length: int = 4
     """Number of historical actions to use for self-attention."""
     
+    # Action Chunking (Receding Horizon Control)
+    pred_horizon: int = 16
+    """Prediction horizon: number of future action steps to predict at once.
+    
+    This is the core of Diffusion Policy's "Action Chunking" mechanism.
+    The model predicts pred_horizon steps of actions in one forward pass.
+    Typical values: 16 for 50Hz control (320ms lookahead).
+    """
+    
+    exec_horizon: int = 8
+    """Execution horizon: number of predicted actions to actually execute.
+    
+    After predicting pred_horizon steps, we execute the first exec_horizon steps,
+    then re-predict. This is the "Receding Horizon Control" (RHC) mechanism.
+    
+    Rule of thumb: exec_horizon = pred_horizon // 2
+    This provides temporal consistency while allowing course correction.
+    """
+    
     # Edge-Conditioned Modulation (ECC-style)
     use_edge_modulation: bool = True
     """
@@ -830,18 +849,34 @@ class GraphDiTUnit(nn.Module):
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
         self.joint_dim = joint_dim
+        self.joint_pos_dim: int | None = None
+        self.joint_vel_dim: int | None = None
         
         # Joint states encoder (if joint_dim is provided)
         if joint_dim is not None:
-            self.joint_states_encoder = nn.Sequential(
-                nn.Linear(joint_dim, hidden_dim),
+            # By default, assume joint_dim = joint_pos_dim + joint_vel_dim
+            # For joint control with 6 DoF: joint_pos_dim = 6, joint_vel_dim = 6
+            self.joint_pos_dim = joint_dim // 2
+            self.joint_vel_dim = joint_dim - self.joint_pos_dim
+            
+            # Encode joint positions and velocities for state-action self-attention TOGETHER
+            # joint_pos: first half, joint_vel: second half
+            self.joint_pos_encoder = nn.Sequential(
+                nn.Linear(self.joint_pos_dim, hidden_dim),
                 nn.LayerNorm(hidden_dim),
                 nn.GELU(),
             )
-            # Projection for concatenated (joint_states, action) sequence
-            self.state_action_proj = nn.Linear(hidden_dim * 2, hidden_dim)
+            self.joint_vel_encoder = nn.Sequential(
+                nn.Linear(self.joint_vel_dim, hidden_dim),
+                nn.LayerNorm(hidden_dim),
+                nn.GELU(),
+            )
+            # Projection for concatenated (joint_pos_embed, joint_vel_embed, action_embed) sequence
+            # 3 * hidden_dim -> hidden_dim
+            self.state_action_proj = nn.Linear(hidden_dim * 3, hidden_dim)
         else:
-            self.joint_states_encoder = None
+            self.joint_pos_encoder = None
+            self.joint_vel_encoder = None
             self.state_action_proj = None
         
         # Step 1: State-action sequence self-attention
@@ -877,7 +912,7 @@ class GraphDiTUnit(nn.Module):
             nn.Dropout(0.1),
         )
         
-        # Step 3: Cross-attention (action queries node features)
+        # Step 3: Cross-attention (action queries node features + joint velocity memory)
         self.cross_attn = nn.MultiheadAttention(
             hidden_dim, num_heads, batch_first=True, dropout=0.1
         )
@@ -913,50 +948,61 @@ class GraphDiTUnit(nn.Module):
         # Prepare condition embedding for AdaLN (timestep embedding)
         condition_emb = timestep_embed if timestep_embed is not None else None
         
+        # Ensure action is 3D: [batch, seq_len, hidden_dim]
+        if len(action.shape) == 2:
+            action = action.unsqueeze(1)  # [batch, hidden_dim] -> [batch, 1, hidden_dim]
+        seq_len = action.shape[1]
+        
         # Step 1: State-action sequence self-attention
-        # Concatenate joint_states and action at each timestep, then do self-attention
-        if joint_states_history is not None and self.joint_states_encoder is not None:
-            # CRITICAL FIX: Preserve noisy_action token by padding joint states to match action sequence length
-            # joint_states_history: [batch, history_length, joint_dim]
-            # action: [batch, seq_len, hidden_dim] (already embedded)
-            # Note: action may contain [history + noisy_action] (seq_len = history_length + 1)
-            #       or just [history] (seq_len = history_length)
-            batch_size, history_length, joint_dim = joint_states_history.shape
-            seq_len = action.shape[1] if len(action.shape) > 1 else 1
+        # Design (UPDATED):
+        #   - Self-attn uses joint positions + joint velocities + action history
+        #   - Noisy action token is kept separate (not concatenated with joint states)
+        if joint_states_history is not None and self.joint_pos_encoder is not None and self.joint_pos_dim is not None:
+            # Split joint states into position and velocity
+            joint_pos = joint_states_history[..., : self.joint_pos_dim]  # [batch, T, joint_pos_dim]
+            joint_vel = joint_states_history[..., self.joint_pos_dim :]  # [batch, T, joint_vel_dim]
             
-            # Ensure action is 3D
-            if len(action.shape) == 2:
-                action = action.unsqueeze(1)  # [batch, hidden_dim] -> [batch, 1, hidden_dim]
-                seq_len = 1
+            batch_size, history_length, _ = joint_pos.shape
             
-            # CRITICAL FIX: Pad joint states to match action sequence length (preserve noisy_action token)
-            # If action has history + noisy_action (seq_len = history_length + 1),
-            # pad joint states with the last joint state to match
+            # Encode joint positions / velocities: [batch, T, dim] -> [batch, T, hidden_dim]
+            joint_pos_embed = self.joint_pos_encoder(joint_pos)  # [batch, T, hidden_dim]
+            joint_vel_embed = self.joint_vel_encoder(joint_vel)  # [batch, T, hidden_dim]
+            
+            # Determine how many history tokens we have in the action sequence
+            # Typical case: seq_len = history_length + 1 (H history + 1 noisy_action)
             if seq_len > history_length:
-                # Action has more tokens than joint history: pad joint states
-                last_joint_state = joint_states_history[:, -1:, :]  # [batch, 1, joint_dim]
-                padding = last_joint_state.expand(-1, seq_len - history_length, -1)  # [batch, seq_len - history_length, joint_dim]
-                joint_states_padded = torch.cat([joint_states_history, padding], dim=1)  # [batch, seq_len, joint_dim]
-            elif seq_len < history_length:
-                # Action has fewer tokens: truncate joint states (shouldn't happen in normal flow)
-                joint_states_padded = joint_states_history[:, :seq_len, :]  # [batch, seq_len, joint_dim]
+                # Split action into history and noisy_action
+                action_history_embed = action[:, :history_length, :]  # [batch, history_length, hidden_dim]
+                noisy_action_embed = action[:, history_length:, :]    # [batch, 1, hidden_dim]
             else:
-                # Lengths match exactly
-                joint_states_padded = joint_states_history  # [batch, seq_len, joint_dim]
+                # No explicit noisy_action token: treat entire action sequence as history
+                action_history_embed = action[:, :history_length, :]
+                noisy_action_embed = action[:, 0:0, :]  # empty sequence
             
-            # Encode joint states: [batch, seq_len, joint_dim] -> [batch, seq_len, hidden_dim]
-            joint_states_embed = self.joint_states_encoder(joint_states_padded)  # [batch, seq_len, hidden_dim]
+            # Align joint_pos_embed with action history length (use most recent timesteps if needed)
+            if history_length > action_history_embed.shape[1]:
+                # Trim joint history to match action history length
+                trim_len = action_history_embed.shape[1]
+                joint_pos_embed = joint_pos_embed[:, -trim_len:, :]
+                history_length = trim_len
+            elif history_length < action_history_embed.shape[1]:
+                # Trim action history to match joint history length (use most recent)
+                trim_len = history_length
+                action_history_embed = action_history_embed[:, -trim_len:, :]
+                history_length = trim_len
             
-            # Concatenate joint_states and action at each timestep (now aligned)
-            # [batch, seq_len, hidden_dim * 2]
-            state_action_seq = torch.cat([joint_states_embed, action], dim=-1)  # [batch, seq_len, hidden_dim * 2]
+            # Concatenate joint pos + joint vel + action history (NOT with noisy_action token)
+            # [batch, history_length, hidden_dim * 3] -> [batch, history_length, hidden_dim]
+            state_action_history = torch.cat([joint_pos_embed, joint_vel_embed, action_history_embed], dim=-1)
+            state_action_history = self.state_action_proj(state_action_history)
             
-            # Project to hidden_dim for self-attention
-            state_action_seq = self.state_action_proj(state_action_seq)  # [batch, seq_len, hidden_dim]
+            # Re-attach noisy_action token (if it exists)
+            if noisy_action_embed.shape[1] > 0:
+                state_action_seq = torch.cat([state_action_history, noisy_action_embed], dim=1)  # [batch, seq_len, hidden_dim]
+            else:
+                state_action_seq = state_action_history  # [batch, history_length, hidden_dim]
         else:
-            # Fallback: use only action (backward compatibility)
-            if len(action.shape) == 2:
-                action = action.unsqueeze(1)  # [batch, hidden_dim] -> [batch, 1, hidden_dim]
+            # Fallback: use only action (no joint states available)
             state_action_seq = action  # [batch, seq_len, hidden_dim]
         
         # Self-attention on state-action sequence
@@ -1029,7 +1075,7 @@ class GraphDiTUnit(nn.Module):
             node_features_new = self.node_norm2(node_features_new, zero_condition)
         node_features_new = self.node_ff(node_features_new) + node_residual
         
-        # Step 3: Cross-attention (a_new as query, node_features_new as key/value)
+        # Step 3: Cross-attention (a_new as query, node_features_new + joint_vel memory as key/value)
         cross_residual = a_new
         # Use AdaLN for cross-attention
         if condition_emb is not None:
@@ -1037,9 +1083,30 @@ class GraphDiTUnit(nn.Module):
         else:
             zero_condition = torch.zeros(a_new.shape[0], self.hidden_dim, device=a_new.device, dtype=a_new.dtype)
             a_new_norm = self.cross_norm1(a_new, zero_condition)
-        # Note: We don't modify node_features_new in cross-attention, only use it as key/value
-        node_features_new_norm = node_features_new  # Use original node features (or could normalize separately)
-        noise_embed, _ = self.cross_attn(a_new_norm, node_features_new_norm, node_features_new_norm)
+        
+        # Prepare key/value memory:
+        #   - Graph nodes ONLY (EE / Object):
+        #       * temporal mode: [batch, 2, history_length, hidden_dim]
+        #       * non-temporal mode: [batch, 2, hidden_dim] (history_length = 1)
+        #   - NOTE: joint velocities are NOW used in self-attention with joint positions,
+        #     and are no longer concatenated with node features here (previous design proved ineffective).
+        if node_features_new.dim() == 4:
+            B, num_nodes, history_length, D = node_features_new.shape
+            graph_nodes = node_features_new.view(B, num_nodes * history_length, D)  # [B, 2*H, D]
+        elif node_features_new.dim() == 3:
+            B, num_nodes, D = node_features_new.shape
+            history_length = 1
+            graph_nodes = node_features_new.view(B, num_nodes * history_length, D)  # [B, 2, D]
+        else:
+            raise ValueError(
+                f"Unexpected node_features_new shape {node_features_new.shape}, "
+                f"expected [B, 2, H, D] or [B, 2, D]"
+            )
+        
+        # FINAL DESIGN: Only graph nodes as memory for cross-attention
+        kv_memory = graph_nodes  # [B, 2*H, D]
+        
+        noise_embed, _ = self.cross_attn(a_new_norm, kv_memory, kv_memory)
         noise_embed = noise_embed + cross_residual
         
         cross_residual = noise_embed
@@ -1087,13 +1154,26 @@ class NoiseScheduler:
         self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - self.alphas_cumprod)
     
     def add_noise(self, x: torch.Tensor, noise: torch.Tensor, t: torch.Tensor):
-        """Add noise to x at timestep t."""
+        """Add noise to x at timestep t.
+        
+        Supports both single action [batch, action_dim] and trajectory [batch, pred_horizon, action_dim].
+        """
         # Move scheduler buffers to the same device as x
         sqrt_alphas_cumprod = self.sqrt_alphas_cumprod.to(x.device)
         sqrt_one_minus_alphas_cumprod = self.sqrt_one_minus_alphas_cumprod.to(x.device)
         
-        sqrt_alphas_cumprod_t = sqrt_alphas_cumprod[t].view(-1, 1)
-        sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[t].view(-1, 1)
+        sqrt_alphas_cumprod_t = sqrt_alphas_cumprod[t]  # [batch]
+        sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[t]  # [batch]
+        
+        # Reshape for broadcasting: handle both 2D [batch, dim] and 3D [batch, seq, dim]
+        if len(x.shape) == 2:
+            # Single action: [batch, action_dim]
+            sqrt_alphas_cumprod_t = sqrt_alphas_cumprod_t.view(-1, 1)
+            sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod_t.view(-1, 1)
+        elif len(x.shape) == 3:
+            # Trajectory: [batch, pred_horizon, action_dim]
+            sqrt_alphas_cumprod_t = sqrt_alphas_cumprod_t.view(-1, 1, 1)
+            sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod_t.view(-1, 1, 1)
         
         noisy_x = sqrt_alphas_cumprod_t * x + sqrt_one_minus_alphas_cumprod_t * noise
         return noisy_x
@@ -1141,9 +1221,11 @@ class GraphDiTPolicy(nn.Module):
             nn.GELU(),
         )
         
-        # Edge embedding: distance(1) + orientation_similarity(1) = 2 -> edge_dim
+        # Edge embedding: current(2) + delta(2) = 4 -> edge_dim
+        # CRITICAL FIX: Input is now [current_distance, current_alignment, delta_distance, delta_alignment]
+        # This includes velocity/trend information for better grasping behavior
         self.edge_embedding = nn.Sequential(
-            nn.Linear(cfg.edge_dim, cfg.graph_edge_dim),
+            nn.Linear(cfg.edge_dim * 2, cfg.graph_edge_dim),  # 4 inputs (current + delta)
             nn.LayerNorm(cfg.graph_edge_dim),
             nn.GELU(),
         )
@@ -1155,8 +1237,18 @@ class GraphDiTPolicy(nn.Module):
             nn.GELU(),
         )
         
-        # Action history length
+        # Action history length and prediction horizon
         self.action_history_length = cfg.action_history_length
+        self.pred_horizon = cfg.pred_horizon
+        self.exec_horizon = cfg.exec_horizon
+        
+        # CRITICAL: Prediction Horizon Position Embedding
+        # This tells the Transformer which timestep in the future each action token represents
+        # Without this, the model cannot distinguish t+1 from t+16
+        self.register_buffer(
+            'pred_horizon_pos_embed',
+            self._get_position_embedding(cfg.pred_horizon, cfg.hidden_dim)
+        )
         
         # Note: context_encoder removed - joint states are now handled via joint_states_history
         # which is processed in GraphDiTUnit through state-action sequence self-attention
@@ -1197,6 +1289,7 @@ class GraphDiTPolicy(nn.Module):
         ])
         
         # Final noise prediction head
+        # CRITICAL: Now outputs [batch, pred_horizon, action_dim] for trajectory prediction
         self.noise_head = nn.Sequential(
             nn.Linear(cfg.hidden_dim, cfg.hidden_dim),
             nn.LayerNorm(cfg.hidden_dim),
@@ -1212,7 +1305,7 @@ class GraphDiTPolicy(nn.Module):
         self._init_weights()
     
     def _get_timestep_embedding(self, num_steps: int, dim: int):
-        """Create sinusoidal timestep embeddings."""
+        """Create sinusoidal timestep embeddings for diffusion timesteps."""
         half_dim = dim // 2
         emb = math.log(10000) / (half_dim - 1)
         emb = torch.exp(torch.arange(half_dim, dtype=torch.float32) * -emb)
@@ -1221,6 +1314,22 @@ class GraphDiTPolicy(nn.Module):
         if dim % 2 == 1:
             emb = torch.cat([emb, torch.zeros(num_steps, 1)], dim=1)
         return emb  # [num_steps, hidden_dim]
+    
+    def _get_position_embedding(self, seq_len: int, dim: int):
+        """Create sinusoidal position embeddings for action trajectory positions.
+        
+        This tells the model which future timestep each action token represents.
+        Position 0 = t+1 (next step), Position H-1 = t+H (furthest future).
+        """
+        half_dim = dim // 2
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, dtype=torch.float32) * -emb)
+        pos = torch.arange(seq_len, dtype=torch.float32).unsqueeze(1)
+        emb = pos * emb.unsqueeze(0)
+        emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
+        if dim % 2 == 1:
+            emb = torch.cat([emb, torch.zeros(seq_len, 1)], dim=1)
+        return emb  # [seq_len, hidden_dim]
     
     def _init_weights(self):
         """Initialize network weights."""
@@ -1454,18 +1563,36 @@ class GraphDiTPolicy(nn.Module):
             
             # Vectorized edge computation for all timesteps at once
             edge_features_raw_all = self._compute_edge_features(ee_history_flat, obj_history_flat)  # [batch * history_length, 2]
-            edge_features_raw = edge_features_raw_all.view(batch_size, history_length, 2)  # [batch, history_length, 2]
+            edge_features_temporal = edge_features_raw_all.view(batch_size, history_length, 2)  # [batch, history_length, 2]
             
-            # CRITICAL FIX: Use last timestep edge (causal, more informative than mean)
-            # Mean pooling loses temporal information about contact/alignment moments
-            edge_features_raw = edge_features_raw[:, -1, :]  # [batch, 2] - use most recent timestep
+            # CRITICAL FIX: Include both current edge features AND delta (velocity/trend information)
+            # "Object is approaching" is more informative than "Object is at 0.5m"
+            # edge_features_temporal: [batch, history_length, 2] = (distance, alignment) per timestep
+            current_edge = edge_features_temporal[:, -1, :]  # [batch, 2] - current (most recent)
+            
+            if history_length > 1:
+                # Compute delta: current - previous (positive = increasing distance, negative = approaching)
+                prev_edge = edge_features_temporal[:, -2, :]  # [batch, 2] - previous timestep
+                edge_delta = current_edge - prev_edge  # [batch, 2] - velocity/trend
+                
+                # Concatenate current edge features with delta for richer information
+                # [batch, 4] = [current_distance, current_alignment, delta_distance, delta_alignment]
+                edge_features_raw = torch.cat([current_edge, edge_delta], dim=-1)  # [batch, 4]
+            else:
+                # Single timestep: pad with zeros for delta
+                edge_delta = torch.zeros_like(current_edge)  # [batch, 2]
+                edge_features_raw = torch.cat([current_edge, edge_delta], dim=-1)  # [batch, 4]
             
         else:
             # Fallback: extract from current obs (backward compatibility)
             ee_node, object_node = self._extract_node_features(obs)  # [batch, 7] each
             
             # Compute edge features
-            edge_features_raw = self._compute_edge_features(ee_node, object_node)  # [batch, 2]
+            current_edge = self._compute_edge_features(ee_node, object_node)  # [batch, 2]
+            
+            # Pad with zeros for delta (no history available)
+            edge_delta = torch.zeros_like(current_edge)  # [batch, 2]
+            edge_features_raw = torch.cat([current_edge, edge_delta], dim=-1)  # [batch, 4]
             
             # Embed nodes (single timestep)
             ee_node_embed = self.node_embedding(ee_node)  # [batch, hidden_dim]
@@ -1473,77 +1600,82 @@ class GraphDiTPolicy(nn.Module):
             # For compatibility: [batch, 2, 1, hidden_dim]
             node_features = torch.stack([ee_node_embed, object_node_embed], dim=1).unsqueeze(2)  # [batch, 2, 1, hidden_dim]
         
-        # Embed edge features
+        # Embed edge features (now [batch, 4] = current + delta)
         edge_features_embed = self.edge_embedding(edge_features_raw)  # [batch, graph_edge_dim]
         
         # Extract joint states history (for state-action sequence self-attention)
-        # If not provided, extract current joint states and create history matching action_history length
-        if joint_states_history is None and self.cfg.joint_dim is not None:
-            # Extract current joint states
-            current_joint_states = self._extract_joint_states(obs)  # [batch, joint_dim]
-            # Create history matching action_history length
-            if action_history is not None and action_history.shape[1] > 0:
-                history_length = action_history.shape[1]
-                # Repeat current joint states to match history length
-                joint_states_history = current_joint_states.unsqueeze(1).expand(-1, history_length, -1)  # [batch, history_length, joint_dim]
-            else:
-                # Single timestep
-                joint_states_history = current_joint_states.unsqueeze(1)  # [batch, 1, joint_dim]
-        elif joint_states_history is not None:
+        # IMPORTANT: Do NOT fabricate fake histories by repeating the current joint state.
+        # If no joint_states_history is provided, we simply skip joint-conditioned self-attention
+        # and let the model rely on action history + graph features.
+        if joint_states_history is not None:
             # Ensure joint_states_history has correct shape
             if len(joint_states_history.shape) == 2:
                 joint_states_history = joint_states_history.unsqueeze(1)  # [batch, 1, joint_dim]
             
-            # Ensure joint_states_history matches action_history length
+            # Optionally align length with action_history (only trim if longer; never pad)
             if action_history is not None and action_history.shape[1] > 0:
                 target_length = action_history.shape[1]
                 current_length = joint_states_history.shape[1]
-                if current_length < target_length:
-                    # Pad with last joint state
-                    last_joint_state = joint_states_history[:, -1:, :]  # [batch, 1, joint_dim]
-                    padding = last_joint_state.expand(-1, target_length - current_length, -1)
-                    joint_states_history = torch.cat([joint_states_history, padding], dim=1)
+                if current_length > target_length:
+                    # Keep the most recent timesteps to match action history
+                    joint_states_history = joint_states_history[:, -target_length:, :]
                 elif current_length > target_length:
                     # Truncate to match
                     joint_states_history = joint_states_history[:, :target_length, :]
         
-        # Embed action: noisy_action (for diffusion) + action_history (as context)
-        # CRITICAL FIX: Action history should be used as context even when noisy_action is provided
-        # This preserves temporal information that is crucial for action prediction
+        # ==========================================================================
+        # ACTION CHUNKING: Embed noisy_action trajectory + action_history
+        # ==========================================================================
+        # CRITICAL CHANGE: noisy_action is now [batch, pred_horizon, action_dim] (trajectory)
+        # instead of [batch, action_dim] (single step). This is the core of Diffusion Policy's
+        # "Action Chunking" mechanism that enables smooth, temporally consistent actions.
         
-        # Step 1: Embed noisy_action (the target we want to denoise)
+        batch_size = obs.shape[0]
+        
+        # Step 1: Embed noisy_action trajectory (the future actions we want to denoise)
         if noisy_action is not None:
-            # For diffusion training: use noisy_action as the main action to denoise
-            action_input = noisy_action  # [batch, action_dim]
-            noisy_action_embed = self.action_embedding(action_input)  # [batch, hidden_dim]
-            noisy_action_embed = noisy_action_embed.unsqueeze(1)  # [batch, 1, hidden_dim]
+            # For diffusion training/inference: noisy_action is [batch, pred_horizon, action_dim]
+            if len(noisy_action.shape) == 2:
+                # Backward compatibility: single action [batch, action_dim] -> expand to trajectory
+                noisy_action = noisy_action.unsqueeze(1).expand(-1, self.pred_horizon, -1)  # [batch, pred_horizon, action_dim]
+            
+            # Embed the action trajectory
+            pred_horizon = noisy_action.shape[1]
+            noisy_action_flat = noisy_action.reshape(-1, self.cfg.action_dim)  # [batch * pred_horizon, action_dim]
+            noisy_action_embed_flat = self.action_embedding(noisy_action_flat)  # [batch * pred_horizon, hidden_dim]
+            noisy_action_embed = noisy_action_embed_flat.view(batch_size, pred_horizon, self.cfg.hidden_dim)  # [batch, pred_horizon, hidden_dim]
+            
+            # CRITICAL: Add position embedding to distinguish future timesteps
+            # Position 0 = t+1 (next step), Position H-1 = t+H (furthest future)
+            pos_embed = self.pred_horizon_pos_embed[:pred_horizon, :].to(noisy_action_embed.device)  # [pred_horizon, hidden_dim]
+            noisy_action_embed = noisy_action_embed + pos_embed.unsqueeze(0)  # [batch, pred_horizon, hidden_dim]
         else:
-            # Inference mode: extract last action from obs or use action_history
-            if action_history is not None and action_history.shape[1] > 0:
-                # Use the last action from history
-                noisy_action_embed = self.action_embedding(action_history[:, -1, :])  # [batch, hidden_dim]
-                noisy_action_embed = noisy_action_embed.unsqueeze(1)  # [batch, 1, hidden_dim]
-            else:
-                # Fallback: extract last action from obs (backward compatibility)
-                last_action = obs[:, -self.cfg.action_dim:]  # [batch, action_dim]
-                noisy_action_embed = self.action_embedding(last_action)  # [batch, hidden_dim]
-                noisy_action_embed = noisy_action_embed.unsqueeze(1)  # [batch, 1, hidden_dim]
+            # Inference mode with no initial noise: start from random noise
+            # This shouldn't happen in normal inference, but handle for safety
+            pred_horizon = self.pred_horizon
+            noisy_action_embed = torch.zeros(
+                batch_size, pred_horizon, self.cfg.hidden_dim,
+                device=obs.device, dtype=obs.dtype
+            )
+            pos_embed = self.pred_horizon_pos_embed[:pred_horizon, :].to(obs.device)
+            noisy_action_embed = noisy_action_embed + pos_embed.unsqueeze(0)
         
         # Step 2: Embed action_history as context (CRITICAL: preserve temporal information)
-        # Even when noisy_action is provided, we should use history as context
+        # History provides context for predicting the future trajectory
         if action_history is not None and action_history.shape[1] > 0:
             # Embed action history [batch, action_history_length, action_dim]
-            batch_size, seq_len, action_dim = action_history.shape
-            action_history_flat = action_history.view(-1, action_dim)  # [batch * seq_len, action_dim]
-            history_embed_flat = self.action_embedding(action_history_flat)  # [batch * seq_len, hidden_dim]
-            history_embed = history_embed_flat.view(batch_size, seq_len, self.cfg.hidden_dim)  # [batch, seq_len, hidden_dim]
+            history_len = action_history.shape[1]
+            action_history_flat = action_history.reshape(-1, self.cfg.action_dim)  # [batch * history_len, action_dim]
+            history_embed_flat = self.action_embedding(action_history_flat)  # [batch * history_len, hidden_dim]
+            history_embed = history_embed_flat.view(batch_size, history_len, self.cfg.hidden_dim)  # [batch, history_len, hidden_dim]
             
-            # Concatenate history with noisy_action: [batch, seq_len+1, hidden_dim]
-            # This allows self-attention to see both history and current noisy action
-            action_embed = torch.cat([history_embed, noisy_action_embed], dim=1)  # [batch, seq_len+1, hidden_dim]
+            # Concatenate: [history] + [future trajectory to predict]
+            # Shape: [batch, history_len + pred_horizon, hidden_dim]
+            # Self-attention will see both history and all future tokens
+            action_embed = torch.cat([history_embed, noisy_action_embed], dim=1)
         else:
-            # No history available, use only noisy_action
-            action_embed = noisy_action_embed  # [batch, 1, hidden_dim]
+            # No history available, use only future trajectory
+            action_embed = noisy_action_embed  # [batch, pred_horizon, hidden_dim]
         
         # Get timestep embedding (if provided)
         timestep_embed = None
@@ -1609,26 +1741,39 @@ class GraphDiTPolicy(nn.Module):
                 joint_states_history=joint_states_history
             )
             # Update action_embed for next layer while preserving sequence structure
-            # noise_embed: [batch, seq_len, hidden_dim] where seq_len could be 1 or history_length+1
+            # noise_embed: [batch, seq_len, hidden_dim] where seq_len = history_len + pred_horizon
             action_embed = noise_embed  # [batch, seq_len, hidden_dim]
         
-        # Final noise prediction: use the last token (most recent/current action)
-        # This aggregates information from the entire sequence through multi-layer processing
-        if action_embed.shape[1] > 1:
-            noise_embed_final = action_embed[:, -1, :]  # [batch, hidden_dim] - last token
+        # ==========================================================================
+        # ACTION CHUNKING OUTPUT: Predict noise/velocity for entire trajectory
+        # ==========================================================================
+        # Extract the FUTURE tokens (last pred_horizon tokens) for noise prediction
+        # The history tokens were context, we only predict the future trajectory
+        history_len = self.action_history_length if (action_history is not None and action_history.shape[1] > 0) else 0
+        pred_horizon = self.pred_horizon
+        
+        if action_embed.shape[1] > pred_horizon:
+            # action_embed: [batch, history_len + pred_horizon, hidden_dim]
+            # Extract only the future tokens (last pred_horizon)
+            future_embed = action_embed[:, -pred_horizon:, :]  # [batch, pred_horizon, hidden_dim]
         else:
-            noise_embed_final = action_embed.squeeze(1)  # [batch, hidden_dim]
-        noise_pred = self.noise_head(noise_embed_final)  # [batch, action_dim]
+            # No history was concatenated, all tokens are future
+            future_embed = action_embed  # [batch, pred_horizon, hidden_dim]
+        
+        # Apply noise head to each future timestep
+        # Shape: [batch, pred_horizon, hidden_dim] -> [batch, pred_horizon, action_dim]
+        noise_pred_flat = self.noise_head(future_embed.reshape(-1, self.cfg.hidden_dim))  # [batch * pred_horizon, action_dim]
+        noise_pred = noise_pred_flat.view(batch_size, pred_horizon, self.cfg.action_dim)  # [batch, pred_horizon, action_dim]
         
         if return_dict:
             return {
-                "noise_pred": noise_pred,
+                "noise_pred": noise_pred,  # [batch, pred_horizon, action_dim]
                 "node_features": node_features,
                 "edge_features": edge_features_raw,
                 "action_embed": action_embed,
             }
         else:
-            return noise_pred
+            return noise_pred  # [batch, pred_horizon, action_dim]
     
     def predict(
         self, 
@@ -1642,13 +1787,19 @@ class GraphDiTPolicy(nn.Module):
         deterministic: bool = True
     ) -> torch.Tensor:
         """
-        Predict actions from observations (inference mode).
+        Predict action TRAJECTORY from observations (inference mode).
+        
+        ACTION CHUNKING: Returns pred_horizon steps of actions at once.
+        The caller should implement Receding Horizon Control (RHC):
+        - Execute first exec_horizon steps
+        - Then re-predict
         
         Args:
             obs: Observations [batch_size, obs_dim]
             action_history: Action history [batch_size, history_length, action_dim] (optional)
             ee_node_history: EE node history [batch_size, history_length, 7] (optional)
             object_node_history: Object node history [batch_size, history_length, 7] (optional)
+            joint_states_history: Joint states history [batch_size, history_length, joint_dim] (optional)
             subtask_condition: Subtask condition (one-hot) [batch_size, num_subtasks] (optional)
             num_diffusion_steps: Number of steps for inference 
                 - DDPM: default 50-100 steps
@@ -1656,7 +1807,8 @@ class GraphDiTPolicy(nn.Module):
             deterministic: If True, use deterministic prediction
             
         Returns:
-            actions: Predicted actions [batch_size, action_dim]
+            action_trajectory: Predicted actions [batch_size, pred_horizon, action_dim]
+                              First step is t+1, last step is t+pred_horizon
         """
         if self.cfg.mode == "flow_matching":
             return self._flow_matching_predict(
@@ -1682,71 +1834,66 @@ class GraphDiTPolicy(nn.Module):
         num_diffusion_steps: int | None,
         deterministic: bool,
     ) -> torch.Tensor:
-        """DDPM prediction: iterative denoising."""
+        """DDPM prediction: iterative denoising for action trajectory.
+        
+        With Action Chunking, returns [batch, pred_horizon, action_dim].
+        """
         self.eval()
         num_steps = num_diffusion_steps if num_diffusion_steps is not None else self.cfg.diffusion_steps
         
         with torch.no_grad():
             batch_size = obs.shape[0]
             device = obs.device
+            pred_horizon = self.pred_horizon
             
             # CRITICAL FIX: Resample timesteps from T-1 to 0 for proper sparse inference
-            # Instead of using first num_steps timesteps, create a linspace from T-1 to 0
-            # This ensures proper coverage of the noise schedule even with fewer steps
             training_steps = self.cfg.diffusion_steps
             if num_steps < training_steps:
-                # CRITICAL FIX: Use float linspace then round to long (safer than dtype=torch.long)
-                # Create timestep schedule: from T-1 down to 0, evenly spaced
                 timestep_schedule = torch.linspace(
                     training_steps - 1, 0, steps=num_steps, device=device
-                ).round().long()  # [num_steps]
+                ).round().long()
             else:
-                # Use all timesteps if num_steps >= training_steps
                 timestep_schedule = torch.arange(training_steps - 1, -1, -1, device=device, dtype=torch.long)
             
-            # Initialize with random noise
-            action_t = torch.randn(batch_size, self.cfg.action_dim, device=device)
+            # Initialize with random noise TRAJECTORY [batch, pred_horizon, action_dim]
+            action_t = torch.randn(batch_size, pred_horizon, self.cfg.action_dim, device=device)
             
             # Iterative denoising
             for step in range(num_steps):
-                # Use resampled timestep schedule
                 t = timestep_schedule[step].expand(batch_size)  # [batch_size]
                 
-                # Predict noise
+                # Predict noise for entire trajectory
                 noise_pred = self.forward(
                     obs,
-                    noisy_action=action_t,
+                    noisy_action=action_t,  # [batch, pred_horizon, action_dim]
                     action_history=action_history,
                     ee_node_history=ee_node_history,
                     object_node_history=object_node_history,
                     joint_states_history=joint_states_history,
                     subtask_condition=subtask_condition,
                     timesteps=t
-                )
+                )  # [batch, pred_horizon, action_dim]
                 
-                # CRITICAL FIX: DDIM-style deterministic jump for sparse timestep schedule
-                # Use t_next from schedule instead of t-1 (which doesn't work for sparse schedules)
-                alpha_bar_t = self.noise_scheduler.get_alpha_bar_t(t).unsqueeze(-1)  # [batch, 1]
+                # DDIM-style deterministic jump for sparse timestep schedule
+                # Reshape alpha for trajectory broadcasting: [batch, 1, 1]
+                alpha_bar_t = self.noise_scheduler.get_alpha_bar_t(t).view(-1, 1, 1)
                 
-                # Predict x_0 (clean action)
+                # Predict x_0 (clean trajectory)
                 pred_x0 = (action_t - torch.sqrt(1.0 - alpha_bar_t) * noise_pred) / torch.sqrt(alpha_bar_t)
                 
                 if step < num_steps - 1:
-                    # Get next timestep from schedule (not t-1!)
                     t_next = timestep_schedule[step + 1].expand(batch_size)
-                    alpha_bar_next = self.noise_scheduler.get_alpha_bar_t(t_next).unsqueeze(-1)  # [batch, 1]
+                    alpha_bar_next = self.noise_scheduler.get_alpha_bar_t(t_next).view(-1, 1, 1)
                     
-                    # DDIM-style deterministic jump: x_{t_next} = sqrt(alpha_bar_next) * x0 + sqrt(1 - alpha_bar_next) * eps
+                    # DDIM-style deterministic jump
                     action_t = torch.sqrt(alpha_bar_next) * pred_x0 + torch.sqrt(1.0 - alpha_bar_next) * noise_pred
                 else:
-                    # Last step: use predicted x0 directly
                     action_t = pred_x0
             
             if not deterministic:
-                # Add small noise for exploration
                 action_t = action_t + 0.05 * torch.randn_like(action_t)
             
-            return action_t
+            return action_t  # [batch, pred_horizon, action_dim]
     
     def _flow_matching_predict(
         self,
@@ -1759,7 +1906,11 @@ class GraphDiTPolicy(nn.Module):
         num_diffusion_steps: int | None,
         deterministic: bool,
     ) -> torch.Tensor:
-        """Flow Matching prediction: ODE solving (much faster!)."""
+        """Flow Matching prediction: ODE solving for action trajectory.
+        
+        With Action Chunking, returns [batch, pred_horizon, action_dim].
+        Flow Matching is MUCH faster than DDPM (2-4 steps vs 50-100).
+        """
         self.eval()
         # Flow Matching typically needs fewer steps (1-10) vs DDPM (50-100)
         num_steps = num_diffusion_steps if num_diffusion_steps is not None else max(1, self.cfg.diffusion_steps // 10)
@@ -1767,14 +1918,11 @@ class GraphDiTPolicy(nn.Module):
         with torch.no_grad():
             batch_size = obs.shape[0]
             device = obs.device
+            pred_horizon = self.pred_horizon
             
-            # CRITICAL FIX: Flow Matching integration direction
-            # In Flow Matching, we integrate from noise (t=0) to data (t=1)
-            # Velocity field: v_t = x_1 - x_0 (points from noise to data)
-            # ODE: dx/dt = v_t, so x_{t+dt} = x_t + dt * v_t
-            
-            # Initialize with random noise (t=0, not t=1!)
-            action_t = torch.randn(batch_size, self.cfg.action_dim, device=device)
+            # Initialize with random noise TRAJECTORY [batch, pred_horizon, action_dim]
+            # Flow Matching: integrate from noise (t=0) to data (t=1)
+            action_t = torch.randn(batch_size, pred_horizon, self.cfg.action_dim, device=device)
             t = torch.zeros(batch_size, device=device)  # Start from t=0 (noise)
             
             # ODE solving: Euler method (forward integration from t=0 to t=1)
@@ -1784,28 +1932,26 @@ class GraphDiTPolicy(nn.Module):
                 # Convert t (in [0, 1]) to timesteps (in [0, diffusion_steps-1])
                 timesteps = (t * (self.cfg.diffusion_steps - 1)).long().clamp(0, self.cfg.diffusion_steps - 1)
                 
-                # Predict velocity field (points from noise to data)
+                # Predict velocity field for entire trajectory
                 velocity = self.forward(
                     obs,
-                    noisy_action=action_t,
+                    noisy_action=action_t,  # [batch, pred_horizon, action_dim]
                     action_history=action_history,
                     ee_node_history=ee_node_history,
                     object_node_history=object_node_history,
                     joint_states_history=joint_states_history,
                     subtask_condition=subtask_condition,
                     timesteps=timesteps
-                )  # Network outputs velocity field: v_t = data - noise
+                )  # [batch, pred_horizon, action_dim]
                 
                 # Euler forward step: x_{t+dt} = x_t + dt * v_t
-                # This moves from noise (t=0) towards data (t=1)
                 action_t = action_t + dt * velocity
                 t = t + dt  # Move forward in time
             
             if not deterministic:
-                # Add small noise for exploration
                 action_t = action_t + 0.05 * torch.randn_like(action_t)
             
-            return action_t
+            return action_t  # [batch, pred_horizon, action_dim]
     
     def loss(
         self,
@@ -1852,21 +1998,32 @@ class GraphDiTPolicy(nn.Module):
         subtask_condition: torch.Tensor | None,
         timesteps: torch.Tensor | None,
     ) -> dict[str, torch.Tensor]:
-        """DDPM loss: predict noise."""
+        """DDPM loss: predict noise for action trajectory.
+        
+        With Action Chunking:
+        - actions: [batch, pred_horizon, action_dim] - target trajectory
+        - noise_pred: [batch, pred_horizon, action_dim] - predicted noise for trajectory
+        """
         batch_size = obs.shape[0]
         device = obs.device
         
-        # Sample timesteps if not provided
+        # Ensure actions is trajectory format [batch, pred_horizon, action_dim]
+        if len(actions.shape) == 2:
+            # Backward compatibility: single action -> repeat for trajectory
+            actions = actions.unsqueeze(1).expand(-1, self.pred_horizon, -1)
+        
+        # Sample timesteps if not provided (same timestep for all positions in trajectory)
         if timesteps is None:
             timesteps = torch.randint(0, self.cfg.diffusion_steps, (batch_size,), device=device)
         
-        # Sample noise
-        noise = torch.randn_like(actions)
+        # Sample noise (same shape as actions trajectory)
+        noise = torch.randn_like(actions)  # [batch, pred_horizon, action_dim]
         
-        # Add noise to actions
-        noisy_actions = self.noise_scheduler.add_noise(actions, noise, timesteps)
+        # Add noise to actions trajectory
+        # NoiseScheduler.add_noise handles trajectory shape automatically
+        noisy_actions = self.noise_scheduler.add_noise(actions, noise, timesteps)  # [batch, pred_horizon, action_dim]
         
-        # Predict noise
+        # Predict noise for entire trajectory
         noise_pred = self.forward(
             obs,
             noisy_action=noisy_actions,
@@ -1876,25 +2033,16 @@ class GraphDiTPolicy(nn.Module):
             joint_states_history=joint_states_history,
             subtask_condition=subtask_condition,
             timesteps=timesteps
-        )
+        )  # [batch, pred_horizon, action_dim]
         
-        # Compute loss (MSE between predicted and actual noise)
+        # Compute loss (MSE between predicted and actual noise for entire trajectory)
         mse_loss = F.mse_loss(noise_pred, noise)
         
-        # Optional: add velocity loss for smoothness
-        if batch_size > 1:
-            action_diff = actions[1:] - actions[:-1]
-            pred_diff = (actions - noise_pred)[1:] - (actions - noise_pred)[:-1]
-            smoothness_loss = F.mse_loss(pred_diff, action_diff)
-            total_loss = mse_loss + 0.01 * smoothness_loss
-        else:
-            smoothness_loss = torch.tensor(0.0, device=device)
-            total_loss = mse_loss
+        total_loss = mse_loss
         
         return {
             "total_loss": total_loss,
             "mse_loss": mse_loss,
-            "smoothness_loss": smoothness_loss,
         }
     
     def _flow_matching_loss(
@@ -1907,32 +2055,41 @@ class GraphDiTPolicy(nn.Module):
         joint_states_history: torch.Tensor | None,
         subtask_condition: torch.Tensor | None,
     ) -> dict[str, torch.Tensor]:
-        """Flow Matching loss: predict velocity field."""
+        """Flow Matching loss: predict velocity field for action trajectory.
+        
+        With Action Chunking:
+        - actions: [batch, pred_horizon, action_dim] - target trajectory
+        - v_pred: [batch, pred_horizon, action_dim] - predicted velocity for trajectory
+        """
         batch_size = obs.shape[0]
         device = obs.device
         
-        # Sample time t ~ U(0, 1) for flow matching
+        # Ensure actions is trajectory format [batch, pred_horizon, action_dim]
+        if len(actions.shape) == 2:
+            # Backward compatibility: single action -> repeat for trajectory
+            actions = actions.unsqueeze(1).expand(-1, self.pred_horizon, -1)
+        
+        pred_horizon = actions.shape[1]
+        
+        # Sample time t ~ U(0, 1) for flow matching (same t for entire trajectory)
         t = torch.rand(batch_size, device=device)  # [batch_size], each in [0, 1]
         
-        # Sample noise
-        noise = torch.randn_like(actions)  # [batch_size, action_dim]
+        # Sample noise (same shape as actions trajectory)
+        noise = torch.randn_like(actions)  # [batch, pred_horizon, action_dim]
         
         # CRITICAL FIX: Linear interpolation path: x_t = (1-t) * x_0 + t * x_1
         # x_0 = noise (t=0), x_1 = actions (data, t=1)
-        # This matches the inference direction: integrate from noise (t=0) to data (t=1)
-        x_t = (1 - t.view(-1, 1)) * noise + t.view(-1, 1) * actions  # [batch_size, action_dim]
+        # Reshape t for broadcasting: [batch, 1, 1]
+        t_broadcast = t.view(-1, 1, 1)  # [batch, 1, 1]
+        x_t = (1 - t_broadcast) * noise + t_broadcast * actions  # [batch, pred_horizon, action_dim]
         
         # Ground truth velocity field: v_t = x_1 - x_0 (direction from noise to data)
-        # In Flow Matching: v_t(x_t) = x_1 - x_0 where x_0=noise, x_1=data
-        # This is the vector pointing from noise (t=0) to data (t=1)
-        v_t = actions - noise  # [batch_size, action_dim]
+        v_t = actions - noise  # [batch, pred_horizon, action_dim]
         
         # Convert t to timesteps format for forward (scale to [0, diffusion_steps-1])
-        # For flow matching, t in [0, 1] is mapped to timesteps in [0, diffusion_steps-1]
         timesteps = (t * (self.cfg.diffusion_steps - 1)).long()  # [batch_size]
         
-        # Predict velocity field (network outputs velocity, not noise)
-        # Reuse the same forward method but interpret output as velocity
+        # Predict velocity field for entire trajectory
         v_pred = self.forward(
             obs,
             noisy_action=x_t,
@@ -1942,25 +2099,16 @@ class GraphDiTPolicy(nn.Module):
             joint_states_history=joint_states_history,
             subtask_condition=subtask_condition,
             timesteps=timesteps
-        )  # [batch_size, action_dim]
+        )  # [batch, pred_horizon, action_dim]
         
-        # Compute loss (MSE between predicted and ground truth velocity)
+        # Compute loss (MSE between predicted and ground truth velocity for trajectory)
         mse_loss = F.mse_loss(v_pred, v_t)
         
-        # Optional: smoothness loss
-        if batch_size > 1:
-            action_diff = actions[1:] - actions[:-1]
-            v_pred_diff = v_pred[1:] - v_pred[:-1]
-            smoothness_loss = F.mse_loss(v_pred_diff, action_diff)
-            total_loss = mse_loss + 0.01 * smoothness_loss
-        else:
-            smoothness_loss = torch.tensor(0.0, device=device)
-            total_loss = mse_loss
+        total_loss = mse_loss
         
         return {
             "total_loss": total_loss,
             "mse_loss": mse_loss,
-            "smoothness_loss": smoothness_loss,
         }
     
     def save(self, path: str):
