@@ -111,5 +111,5 @@ def object_is_lifted(
     
     # Check if object is lifted to at least minimal_height above initial position
     lifted = object_height >= (initial_height + minimal_height)
-
+    
     return lifted.float()  # Return float tensor (0.0 or 1.0) for observations

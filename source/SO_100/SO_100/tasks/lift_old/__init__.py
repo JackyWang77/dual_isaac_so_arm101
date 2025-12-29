@@ -32,6 +32,17 @@ gym.register(
     disable_env_checker=True,
 )
 
+# Register Residual RL environment (uses Graph-DiT features + PPO residual)
+gym.register(
+    id="SO-ARM101-Lift-Cube-ResidualRL-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.joint_pos_env_cfg:SoArm100LiftJointCubeEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.residual_rl_ppo_cfg:LiftResidualRLRunnerCfg",
+    },
+    disable_env_checker=True,
+)
+
 gym.register(
     id="SO-ARM101-Lift-Cube-Play-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",

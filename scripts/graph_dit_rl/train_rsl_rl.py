@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Train Graph DiT RL Policy using RSL-RL framework.
+"""Train Residual RL Policy using RSL-RL framework.
 
-This script integrates GraphDiTRLPolicy with RSL-RL's OnPolicyRunner,
-allowing efficient multi-environment parallel training.
+This script trains a Residual RL policy that uses:
+- Frozen Graph-DiT for base action + scene understanding
+- Trainable PPO for residual corrections
 
 Usage:
-    ./isaaclab.sh -p scripts/graph_dit_rl/train_rsl_rl.py \
-        --task SO-ARM101-Reach-Cube-v0 \
+    python scripts/graph_dit_rl/train_rsl_rl.py \
+        --task SO-ARM101-Lift-Cube-ResidualRL-v0 \
         --pretrained_checkpoint ./logs/graph_dit/.../best_model.pt \
-        --num_envs 64 \
-        --max_iterations 1500
+        --num_envs 256 \
+        --max_iterations 300
 """
 
 """Launch Isaac Sim Simulator first."""
@@ -20,15 +21,15 @@ import argparse
 import sys
 
 # add argparse arguments
-parser = argparse.ArgumentParser(description="Train Graph DiT RL Policy with RSL-RL.")
+parser = argparse.ArgumentParser(description="Train Residual RL Policy with RSL-RL.")
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
-parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
-parser.add_argument("--task", type=str, default=None, help="Name of the task.")
+parser.add_argument("--num_envs", type=int, default=256, help="Number of environments (default: 256, lower for diffusion).")
+parser.add_argument("--task", type=str, default="SO-ARM101-Lift-Cube-ResidualRL-v0", help="Name of the task.")
 parser.add_argument("--pretrained_checkpoint", type=str, required=True, help="Path to pre-trained Graph DiT checkpoint.")
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
-parser.add_argument("--max_iterations", type=int, default=None, help="RL Policy training iterations.")
+parser.add_argument("--max_iterations", type=int, default=300, help="RL Policy training iterations.")
 parser.add_argument(
     "--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes."
 )
@@ -56,28 +57,29 @@ import gymnasium as gym
 import torch
 
 import SO_100.tasks  # noqa: F401  # Register environments
+# Import both ActorCritic types for RSL-RL namespace
 from SO_100.policies.graph_dit_rsl_rl_actor_critic import GraphDiTActorCritic  # noqa: F401
-# Import ensures GraphDiTActorCritic is in Python namespace for RSL-RL to find
+from SO_100.policies.residual_rl_actor_critic import ResidualActorCritic  # noqa: F401
 
 
 def main():
     """Main training function - uses standard RSL-RL flow with Hydra."""
     print("=" * 70)
-    print("Graph DiT RL Fine-Tuning with RSL-RL (Standard Flow)")
+    print("Residual RL Fine-Tuning with RSL-RL")
     print("=" * 70)
-    print(f"Note: This script uses the SAME interface as standard RSL-RL training")
-    print(f"      (just like lift task). Hydra will auto-load the config.")
+    print(f"Task: {args_cli.task}")
+    print(f"Pretrained checkpoint: {args_cli.pretrained_checkpoint}")
+    print(f"Num envs: {args_cli.num_envs} (lower for diffusion to save memory)")
     print("=" * 70)
 
-    # Set pretrained checkpoint via environment variable (if provided)
-    # The config class will automatically read it
+    # Set pretrained checkpoint via environment variable
+    # Both GRAPH_DIT_PRETRAINED_CHECKPOINT and RESIDUAL_RL_PRETRAINED_CHECKPOINT
     if args_cli.pretrained_checkpoint:
         os.environ["GRAPH_DIT_PRETRAINED_CHECKPOINT"] = args_cli.pretrained_checkpoint
-        print(f"\n[Train] Set pretrained checkpoint via env var: {args_cli.pretrained_checkpoint}")
+        os.environ["RESIDUAL_RL_PRETRAINED_CHECKPOINT"] = args_cli.pretrained_checkpoint
+        print(f"\n[Train] Set pretrained checkpoint: {args_cli.pretrained_checkpoint}")
 
     # Use the STANDARD RSL-RL training flow
-    # Hydra will automatically load ReachCubeGraphDiTRLRunnerCfg from environment registration
-    # This is the SAME way lift task works!
     from rsl_rl.runners import OnPolicyRunner
     from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, RslRlOnPolicyRunnerCfg
     from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
@@ -86,10 +88,11 @@ def main():
     from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
     from isaaclab.utils.dict import print_dict
     
-    # Use Hydra to load config (standard RSL-RL way)
-    # This will automatically load ReachCubeGraphDiTRLRunnerCfg from the environment registration
-    # Note: Now we use SO-ARM101-Reach-Cube-v0 which directly uses Graph DiT config
-    @hydra_task_config("SO-ARM101-Reach-Cube-v0", "rsl_rl_cfg_entry_point")
+    # Get task from CLI
+    task_name = args_cli.task
+    
+    # Use Hydra to load config based on task
+    @hydra_task_config(task_name, "rsl_rl_cfg_entry_point")
     def train_with_config(env_cfg, agent_cfg: RslRlOnPolicyRunnerCfg):
         """Training function that gets config from Hydra."""
         
@@ -103,8 +106,7 @@ def main():
             env_cfg.seed = args_cli.seed
 
         # Create environment
-        # Note: Now SO-ARM101-Reach-Cube-v0 directly uses Graph DiT config
-        env = gym.make("SO-ARM101-Reach-Cube-v0", cfg=env_cfg, 
+        env = gym.make(task_name, cfg=env_cfg, 
                       render_mode="rgb_array" if args_cli.video else None)
 
         # Convert to single-agent if needed
@@ -126,6 +128,7 @@ def main():
         # Ensure SO_100 is available in namespace for RSL-RL's eval() calls
         # RSL-RL uses eval() internally to dynamically load custom ActorCritic classes.
         import SO_100.policies.graph_dit_rsl_rl_actor_critic  # noqa: F401
+        import SO_100.policies.residual_rl_actor_critic  # noqa: F401
         import builtins
         import sys
         # Inject SO_100 into builtins so eval() can access it

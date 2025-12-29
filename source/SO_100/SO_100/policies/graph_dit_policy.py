@@ -1775,6 +1775,176 @@ class GraphDiTPolicy(nn.Module):
         else:
             return noise_pred  # [batch, pred_horizon, action_dim]
     
+    def extract_features(
+        self,
+        obs: torch.Tensor,
+        action_history: torch.Tensor | None = None,
+        ee_node_history: torch.Tensor | None = None,
+        object_node_history: torch.Tensor | None = None,
+        joint_states_history: torch.Tensor | None = None,
+        subtask_condition: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """
+        Extract features from Graph-DiT (for Residual RL).
+        
+        This method runs the graph attention layers to extract "scene understanding"
+        features WITHOUT running the full diffusion process. These features can be
+        used by a PPO agent for residual fine-tuning.
+        
+        Args:
+            obs: Observations [batch_size, obs_dim]
+            action_history: Action history [batch_size, history_length, action_dim] (optional)
+            ee_node_history: EE node history [batch_size, history_length, 7] (optional)
+            object_node_history: Object node history [batch_size, history_length, 7] (optional)
+            joint_states_history: Joint states history [batch_size, history_length, joint_dim] (optional)
+            subtask_condition: Subtask condition (one-hot) [batch_size, num_subtasks] (optional)
+            
+        Returns:
+            dict containing:
+                - 'graph_embedding': [batch, hidden_dim] - Aggregated graph features (scene understanding)
+                - 'node_features': [batch, 2, hidden_dim] - Node embeddings (EE and Object)
+                - 'edge_features': [batch, edge_dim] - Edge embeddings (distance, alignment)
+                - 'action_embedding': [batch, hidden_dim] - Action history embedding
+        """
+        self.eval()
+        
+        with torch.no_grad():
+            batch_size = obs.shape[0]
+            device = obs.device
+            
+            # Extract node features (use history if provided)
+            if ee_node_history is not None and object_node_history is not None:
+                # Use node history: [batch, history_length, 7]
+                history_length = ee_node_history.shape[1]
+                node_dim = ee_node_history.shape[2]
+                
+                # Embed node history
+                ee_node_history_flat = ee_node_history.view(-1, node_dim)
+                object_node_history_flat = object_node_history.view(-1, node_dim)
+                
+                ee_node_embed_flat = self.node_embedding(ee_node_history_flat)
+                object_node_embed_flat = self.node_embedding(object_node_history_flat)
+                
+                ee_node_embed = ee_node_embed_flat.view(batch_size, history_length, self.cfg.hidden_dim)
+                object_node_embed = object_node_embed_flat.view(batch_size, history_length, self.cfg.hidden_dim)
+                
+                # Use most recent embeddings for output
+                ee_node_final = ee_node_embed[:, -1, :]  # [batch, hidden_dim]
+                object_node_final = object_node_embed[:, -1, :]  # [batch, hidden_dim]
+                
+                # Stack nodes: [batch, 2, history_length, hidden_dim]
+                node_features = torch.stack([ee_node_embed, object_node_embed], dim=2)
+                node_features = node_features.transpose(1, 2)  # [batch, 2, history_length, hidden_dim]
+                
+                # Compute edge features
+                ee_history_flat = ee_node_history.view(-1, node_dim)
+                obj_history_flat = object_node_history.view(-1, node_dim)
+                edge_features_raw_all = self._compute_edge_features(ee_history_flat, obj_history_flat)
+                edge_features_temporal = edge_features_raw_all.view(batch_size, history_length, 2)
+                
+                # Include current edge + delta
+                current_edge = edge_features_temporal[:, -1, :]
+                if history_length > 1:
+                    prev_edge = edge_features_temporal[:, -2, :]
+                    edge_delta = current_edge - prev_edge
+                    edge_features_raw = torch.cat([current_edge, edge_delta], dim=-1)
+                else:
+                    edge_delta = torch.zeros_like(current_edge)
+                    edge_features_raw = torch.cat([current_edge, edge_delta], dim=-1)
+            else:
+                # Fallback: extract from current obs
+                ee_node, object_node = self._extract_node_features(obs)
+                current_edge = self._compute_edge_features(ee_node, object_node)
+                edge_delta = torch.zeros_like(current_edge)
+                edge_features_raw = torch.cat([current_edge, edge_delta], dim=-1)
+                
+                ee_node_final = self.node_embedding(ee_node)
+                object_node_final = self.node_embedding(object_node)
+                node_features = torch.stack([ee_node_final, object_node_final], dim=1).unsqueeze(2)
+            
+            # Embed edge features
+            edge_features_embed = self.edge_embedding(edge_features_raw)
+            
+            # Embed action history (context for the scene)
+            if action_history is not None and action_history.shape[1] > 0:
+                history_len = action_history.shape[1]
+                action_history_flat = action_history.reshape(-1, self.cfg.action_dim)
+                history_embed_flat = self.action_embedding(action_history_flat)
+                history_embed = history_embed_flat.view(batch_size, history_len, self.cfg.hidden_dim)
+                # Use mean of action history as embedding
+                action_embedding = history_embed.mean(dim=1)  # [batch, hidden_dim]
+            else:
+                # Use last action from obs
+                action_input = obs[:, -self.cfg.action_dim:]
+                action_embedding = self.action_embedding(action_input)
+            
+            # Process through Graph DiT units to get "scene understanding"
+            # We run the graph attention but without the full diffusion denoising
+            action_embed = action_embedding.unsqueeze(1)  # [batch, 1, hidden_dim]
+            
+            for unit in self.graph_dit_units:
+                noise_embed = unit(action_embed, node_features, edge_features_embed, None)
+                action_embed = noise_embed.unsqueeze(1) if len(noise_embed.shape) == 2 else noise_embed
+            
+            # Final graph embedding (aggregated scene understanding)
+            # Handle various output shapes from graph_dit_units
+            if len(action_embed.shape) == 3:
+                # [batch, seq_len, hidden_dim] -> take last token or mean
+                if action_embed.shape[1] == 1:
+                    graph_embedding = action_embed.squeeze(1)  # [batch, hidden_dim]
+                else:
+                    # Multiple tokens: use mean pooling for scene understanding
+                    graph_embedding = action_embed.mean(dim=1)  # [batch, hidden_dim]
+            elif len(action_embed.shape) == 2:
+                graph_embedding = action_embed  # [batch, hidden_dim]
+            else:
+                raise ValueError(f"Unexpected action_embed shape: {action_embed.shape}")
+            
+            # Stack node embeddings for output
+            node_output = torch.stack([ee_node_final, object_node_final], dim=1)  # [batch, 2, hidden_dim]
+            
+            return {
+                'graph_embedding': graph_embedding,  # [batch, hidden_dim] - Main feature for PPO
+                'node_features': node_output,  # [batch, 2, hidden_dim]
+                'edge_features': edge_features_embed,  # [batch, edge_dim]
+                'action_embedding': action_embedding,  # [batch, hidden_dim]
+            }
+    
+    def get_base_action(
+        self,
+        obs: torch.Tensor,
+        action_history: torch.Tensor | None = None,
+        ee_node_history: torch.Tensor | None = None,
+        object_node_history: torch.Tensor | None = None,
+        joint_states_history: torch.Tensor | None = None,
+        subtask_condition: torch.Tensor | None = None,
+        num_diffusion_steps: int | None = None,
+    ) -> torch.Tensor:
+        """
+        Get base action from DiT (for Residual RL).
+        
+        This runs the full diffusion process to get the base action,
+        which PPO will then add a residual to.
+        
+        Args:
+            obs: Observations [batch_size, obs_dim]
+            ... (same as predict)
+            
+        Returns:
+            base_action: [batch_size, action_dim] - First action from predicted trajectory
+        """
+        # Use predict with defaults
+        trajectory = self.predict(
+            obs, action_history, ee_node_history, object_node_history,
+            joint_states_history, subtask_condition, num_diffusion_steps,
+            deterministic=True
+        )
+        
+        # Return first action of trajectory [batch, action_dim]
+        if len(trajectory.shape) == 3:
+            return trajectory[:, 0, :]
+        return trajectory
+
     def predict(
         self, 
         obs: torch.Tensor,
@@ -1963,15 +2133,21 @@ class GraphDiTPolicy(nn.Module):
         joint_states_history: torch.Tensor | None = None,
         subtask_condition: torch.Tensor | None = None,
         timesteps: torch.Tensor | None = None,
+        mask: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         """
         Compute loss for training (DDPM or Flow Matching).
         
         Args:
             obs: Observations [batch_size, obs_dim]
-            actions: Target actions [batch_size, action_dim]
+            actions: Target actions [batch_size, pred_horizon, action_dim]
+            action_history: Action history [batch_size, hist_len, action_dim] (optional)
+            ee_node_history: EE node history [batch_size, hist_len, 7] (optional)
+            object_node_history: Object node history [batch_size, hist_len, 7] (optional)
+            joint_states_history: Joint states history [batch_size, hist_len, joint_dim] (optional)
             subtask_condition: Subtask condition (one-hot) [batch_size, num_subtasks] (optional)
             timesteps: Diffusion timesteps [batch_size] (optional, sampled if not provided)
+            mask: Boolean mask for valid samples [batch_size] (optional, True = valid, False = padding)
             
         Returns:
             dict: Loss dictionary with 'total_loss' and other losses
@@ -1979,12 +2155,12 @@ class GraphDiTPolicy(nn.Module):
         if self.cfg.mode == "flow_matching":
             return self._flow_matching_loss(
                 obs, actions, action_history, ee_node_history, 
-                object_node_history, joint_states_history, subtask_condition
+                object_node_history, joint_states_history, subtask_condition, mask
             )
         else:  # ddpm
             return self._ddpm_loss(
                 obs, actions, action_history, ee_node_history,
-                object_node_history, joint_states_history, subtask_condition, timesteps
+                object_node_history, joint_states_history, subtask_condition, timesteps, mask
             )
     
     def _ddpm_loss(
@@ -1997,12 +2173,14 @@ class GraphDiTPolicy(nn.Module):
         joint_states_history: torch.Tensor | None,
         subtask_condition: torch.Tensor | None,
         timesteps: torch.Tensor | None,
+        mask: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         """DDPM loss: predict noise for action trajectory.
         
         With Action Chunking:
         - actions: [batch, pred_horizon, action_dim] - target trajectory
         - noise_pred: [batch, pred_horizon, action_dim] - predicted noise for trajectory
+        - mask: [batch] - True for valid samples, False for padding (used in demo-level training)
         """
         batch_size = obs.shape[0]
         device = obs.device
@@ -2011,6 +2189,8 @@ class GraphDiTPolicy(nn.Module):
         if len(actions.shape) == 2:
             # Backward compatibility: single action -> repeat for trajectory
             actions = actions.unsqueeze(1).expand(-1, self.pred_horizon, -1)
+        
+        pred_horizon = actions.shape[1]  # Get actual horizon from actions
         
         # Sample timesteps if not provided (same timestep for all positions in trajectory)
         if timesteps is None:
@@ -2036,14 +2216,55 @@ class GraphDiTPolicy(nn.Module):
         )  # [batch, pred_horizon, action_dim]
         
         # Compute loss (MSE between predicted and actual noise for entire trajectory)
-        mse_loss = F.mse_loss(noise_pred, noise)
+        # CRITICAL: Apply mask to exclude padding timesteps from loss
+        # CRITICAL: Handle "half-cut" data where mask is [batch, pred_horizon] instead of [batch]
+        if mask is not None:
+            # Handle both mask shapes:
+            # - [batch] -> old format (whole sample mask)
+            # - [batch, pred_horizon] -> new format (per-horizon-step mask for "half-cut" data)
+            if len(mask.shape) == 1:
+                # Old format: [batch] -> [batch, 1, 1] for broadcasting
+                mask_expanded = mask.float().view(-1, 1, 1)  # [batch, 1, 1]
+                # Count valid elements: pred_horizon * action_dim per valid sample
+                total_valid_elements = (mask.float() * pred_horizon * actions.shape[-1]).sum().clamp(min=1)
+            else:
+                # New format: [batch, pred_horizon] -> [batch, pred_horizon, 1] for broadcasting
+                mask_expanded = mask.float().unsqueeze(-1)  # [batch, pred_horizon, 1]
+                # Count valid elements: sum over all valid horizon steps, then multiply by action_dim
+                total_valid_elements = (mask.float().sum() * actions.shape[-1]).clamp(min=1)
+            
+            # Compute per-element loss
+            per_element_loss = F.mse_loss(noise_pred, noise, reduction='none')  # [batch, pred_horizon, action_dim]
+            # CRITICAL FIX: Zero out padding timesteps BEFORE averaging
+            # This prevents padding from contributing to loss at all (handles both demo-level and horizon-level padding)
+            masked_loss = per_element_loss * mask_expanded  # [batch, pred_horizon, action_dim]
+            # Sum over horizon and action_dim for each sample (padding samples/steps will be 0)
+            per_sample_sum = masked_loss.sum(dim=(1, 2))  # [batch]
+            # Average over all valid elements (not samples!)
+            mse_loss = per_sample_sum.sum() / total_valid_elements
+            total_loss = mse_loss
+        else:
+            # No mask: compute standard MSE loss
+            mse_loss = F.mse_loss(noise_pred, noise)  # Average over all dimensions
+            total_loss = mse_loss
         
-        total_loss = mse_loss
-        
-        return {
+        result = {
             "total_loss": total_loss,
             "mse_loss": mse_loss,
         }
+        
+        # Add debug info if in debug mode (can be enabled via environment variable)
+        import os
+        if os.getenv('DEBUG_LOSS', 'False').lower() == 'true':
+            result['debug'] = {
+                'noise_pred': noise_pred.detach(),
+                'noise': noise.detach(),
+                'actions': actions.detach(),
+                'noisy_actions': noisy_actions.detach(),
+                'timesteps': timesteps.detach() if timesteps is not None else None,
+            }
+        
+        return result
     
     def _flow_matching_loss(
         self,
@@ -2054,12 +2275,14 @@ class GraphDiTPolicy(nn.Module):
         object_node_history: torch.Tensor | None,
         joint_states_history: torch.Tensor | None,
         subtask_condition: torch.Tensor | None,
+        mask: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         """Flow Matching loss: predict velocity field for action trajectory.
         
         With Action Chunking:
         - actions: [batch, pred_horizon, action_dim] - target trajectory
         - v_pred: [batch, pred_horizon, action_dim] - predicted velocity for trajectory
+        - mask: [batch] - True for valid samples, False for padding (used in demo-level training)
         """
         batch_size = obs.shape[0]
         device = obs.device
@@ -2102,14 +2325,56 @@ class GraphDiTPolicy(nn.Module):
         )  # [batch, pred_horizon, action_dim]
         
         # Compute loss (MSE between predicted and ground truth velocity for trajectory)
-        mse_loss = F.mse_loss(v_pred, v_t)
+        # CRITICAL: Apply mask to exclude padding timesteps from loss
+        # CRITICAL: Handle "half-cut" data where mask is [batch, pred_horizon] instead of [batch]
+        if mask is not None:
+            # Handle both mask shapes:
+            # - [batch] -> old format (whole sample mask)
+            # - [batch, pred_horizon] -> new format (per-horizon-step mask for "half-cut" data)
+            if len(mask.shape) == 1:
+                # Old format: [batch] -> [batch, 1, 1] for broadcasting
+                mask_expanded = mask.float().view(-1, 1, 1)  # [batch, 1, 1]
+                # Count valid elements: pred_horizon * action_dim per valid sample
+                total_valid_elements = (mask.float() * pred_horizon * actions.shape[-1]).sum().clamp(min=1)
+            else:
+                # New format: [batch, pred_horizon] -> [batch, pred_horizon, 1] for broadcasting
+                mask_expanded = mask.float().unsqueeze(-1)  # [batch, pred_horizon, 1]
+                # Count valid elements: sum over all valid horizon steps, then multiply by action_dim
+                total_valid_elements = (mask.float().sum() * actions.shape[-1]).clamp(min=1)
+            
+            # Compute per-element loss
+            per_element_loss = F.mse_loss(v_pred, v_t, reduction='none')  # [batch, pred_horizon, action_dim]
+            # CRITICAL FIX: Zero out padding timesteps BEFORE averaging
+            # This prevents padding from contributing to loss at all (handles both demo-level and horizon-level padding)
+            masked_loss = per_element_loss * mask_expanded  # [batch, pred_horizon, action_dim]
+            # Sum over horizon and action_dim for each sample (padding samples/steps will be 0)
+            per_sample_sum = masked_loss.sum(dim=(1, 2))  # [batch]
+            # Average over all valid elements (not samples!)
+            mse_loss = per_sample_sum.sum() / total_valid_elements
+            total_loss = mse_loss
+        else:
+            # No mask: compute standard MSE loss
+            mse_loss = F.mse_loss(v_pred, v_t)  # Average over all dimensions
+            total_loss = mse_loss
         
-        total_loss = mse_loss
-        
-        return {
+        result = {
             "total_loss": total_loss,
             "mse_loss": mse_loss,
         }
+        
+        # Add debug info if in debug mode (can be enabled via environment variable)
+        import os
+        if os.getenv('DEBUG_LOSS', 'False').lower() == 'true':
+            result['debug'] = {
+                'v_pred': v_pred.detach(),
+                'v_t': v_t.detach(),
+                'actions': actions.detach(),
+                'noise': noise.detach(),
+                'x_t': x_t.detach(),
+                't': t.detach(),
+            }
+        
+        return result
     
     def save(self, path: str):
         """Save policy to file.

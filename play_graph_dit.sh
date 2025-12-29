@@ -90,5 +90,5 @@ python scripts/graph_dit/play.py \
     --task "$TASK_NAME" \
     --checkpoint "$LATEST_CHECKPOINT" \
     --num_envs 2 \
-    --num_episodes 5
+    --num_episodes 20
     # --num_diffusion_steps  # Auto-detect based on mode (DDPM: 50, Flow Matching: 10)
