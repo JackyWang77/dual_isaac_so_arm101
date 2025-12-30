@@ -61,11 +61,11 @@ def _create_residual_rl_cfg() -> ResidualRLPolicyCfg:
         value_activation="elu",
         # Input dimensions
         robot_state_dim=12,  # joint_pos(6) + joint_vel(6)
-        # Residual scaling (start small)
-        residual_scale=0.1,
-        max_residual_scale=0.5,
-        # Noise
-        init_noise_std=0.3,
+        # Residual scaling (start VERY small for Residual RL!)
+        residual_scale=0.05,  # Reduced from 0.1
+        max_residual_scale=0.3,  # Reduced from 0.5
+        # Noise (CRITICAL: keep small for Residual RL!)
+        init_noise_std=0.1,  # Reduced from 0.3
         # Feature usage
         use_graph_embedding=True,
         use_node_features=False,
@@ -100,7 +100,7 @@ class LiftResidualRLRunnerCfg(RslRlOnPolicyRunnerCfg):
         self.policy = ResidualActorCriticCfg(
             residual_rl_cfg=residual_rl_cfg,
             class_name="SO_100.policies.residual_rl_actor_critic.ResidualActorCritic",
-            init_noise_std=0.3,
+            init_noise_std=0.1,  # Reduced from 0.3 for Residual RL
             actor_hidden_dims=[256, 128, 64],
             critic_hidden_dims=[256, 128, 64],
             activation="elu",

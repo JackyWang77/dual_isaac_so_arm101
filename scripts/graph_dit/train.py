@@ -63,7 +63,7 @@ class HDF5DemoDataset(Dataset):
     
     def __init__(self, hdf5_path: str, obs_keys: list[str], normalize_obs: bool = True, 
                  normalize_actions: bool = True, action_history_length: int = 4, pred_horizon: int = 16,
-                 single_batch_test: bool = False, single_batch_size: int = 16):
+                 single_batch_test: bool = False, single_batch_size: int = 16, skip_first_steps: int = 10):
         """Initialize dataset.
         
         Args:
@@ -73,6 +73,8 @@ class HDF5DemoDataset(Dataset):
             normalize_actions: If True, normalize actions.
             action_history_length: Number of historical steps for context (default: 4).
             pred_horizon: Number of future action steps to predict per timestep (default: 16).
+            skip_first_steps: Number of initial steps to skip per demo (default: 10).
+                             Human-collected demos often have noisy initial actions.
         """
         self.hdf5_path = hdf5_path
         self.obs_keys = obs_keys
@@ -82,6 +84,7 @@ class HDF5DemoDataset(Dataset):
         self.pred_horizon = pred_horizon
         self.single_batch_test = single_batch_test
         self.single_batch_size = single_batch_size
+        self.skip_first_steps = skip_first_steps
         
         # Observation key dimensions and offsets
         self.obs_key_dims = {}
@@ -96,6 +99,7 @@ class HDF5DemoDataset(Dataset):
         
         print(f"[HDF5DemoDataset] Loading dataset from: {hdf5_path}")
         print(f"[HDF5DemoDataset] DEMO-LEVEL LOADING: Each sample is a complete demo sequence")
+        print(f"[HDF5DemoDataset] Skipping first {skip_first_steps} steps per demo (noisy human actions)")
         
         # Collect all data for normalization statistics
         all_obs = []
@@ -141,7 +145,21 @@ class HDF5DemoDataset(Dataset):
                         obs_dict[key] = np.array(obs_container[key])
                 
                 # Load actions: [T, action_dim]
-                actions = np.array(demo['actions']).astype(np.float32)
+                actions_full = np.array(demo['actions']).astype(np.float32)
+                T_full = len(actions_full)
+                
+                # Skip first N steps (noisy human actions during demo collection)
+                skip = min(self.skip_first_steps, T_full - self.pred_horizon - 1)  # Ensure enough data remains
+                skip = max(0, skip)  # Don't skip negative
+                
+                if skip > 0:
+                    actions = actions_full[skip:]
+                    # Also skip first steps in obs_dict
+                    for key in obs_dict:
+                        obs_dict[key] = obs_dict[key][skip:]
+                else:
+                    actions = actions_full
+                
                 T = len(actions)
                 demo_lengths.append(T)
                 
@@ -608,6 +626,7 @@ def train_graph_dit_policy(
     pred_horizon: int = 16,
     exec_horizon: int = 8,
     lr_schedule: str = "constant",
+    skip_first_steps: int = 10,
 ):
     """Train Graph-DiT Policy with Action Chunking.
     
@@ -690,7 +709,8 @@ def train_graph_dit_policy(
         action_history_length=action_history_length,
         pred_horizon=pred_horizon,
         single_batch_test=single_batch_test,
-        single_batch_size=single_batch_size
+        single_batch_size=single_batch_size,
+        skip_first_steps=skip_first_steps,
     )
     
     # Get normalization stats for saving
@@ -1086,6 +1106,10 @@ def main():
     parser.add_argument("--exec_horizon", type=int, default=8,
                        help="Execution horizon: number of steps to execute before re-planning (default: 8)")
     
+    # Data preprocessing
+    parser.add_argument("--skip_first_steps", type=int, default=10,
+                       help="Skip first N steps of each demo (noisy human actions, default: 10)")
+    
     # Learning rate schedule
     parser.add_argument("--lr_schedule", type=str, default="constant", choices=["constant", "cosine"],
                        help="Learning rate schedule: 'constant' (stable) or 'cosine' (warmup + cosine annealing)")
@@ -1137,6 +1161,7 @@ def main():
         pred_horizon=args.pred_horizon,
         exec_horizon=args.exec_horizon,
         lr_schedule=args.lr_schedule,
+        skip_first_steps=args.skip_first_steps,
     )
 
 

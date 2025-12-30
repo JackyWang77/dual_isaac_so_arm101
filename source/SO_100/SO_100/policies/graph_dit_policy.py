@@ -1866,24 +1866,38 @@ class GraphDiTPolicy(nn.Module):
             edge_features_embed = self.edge_embedding(edge_features_raw)
             
             # Embed action history (context for the scene)
+            # CRITICAL: Keep full sequence for joint_states_history consistency!
             if action_history is not None and action_history.shape[1] > 0:
                 history_len = action_history.shape[1]
                 action_history_flat = action_history.reshape(-1, self.cfg.action_dim)
                 history_embed_flat = self.action_embedding(action_history_flat)
                 history_embed = history_embed_flat.view(batch_size, history_len, self.cfg.hidden_dim)
-                # Use mean of action history as embedding
+                # Keep full sequence for GraphDiTUnit (matches joint_states_history length)
+                action_embed_seq = history_embed  # [batch, history_len, hidden_dim]
+                # Also compute mean for output
                 action_embedding = history_embed.mean(dim=1)  # [batch, hidden_dim]
             else:
                 # Use last action from obs
                 action_input = obs[:, -self.cfg.action_dim:]
                 action_embedding = self.action_embedding(action_input)
+                action_embed_seq = action_embedding.unsqueeze(1)  # [batch, 1, hidden_dim]
             
             # Process through Graph DiT units to get "scene understanding"
             # We run the graph attention but without the full diffusion denoising
-            action_embed = action_embedding.unsqueeze(1)  # [batch, 1, hidden_dim]
+            # CRITICAL: Must pass joint_states_history for consistent feature extraction!
+            # Pass full action history sequence so it matches joint_states_history length
+            action_embed = action_embed_seq  # [batch, history_len, hidden_dim]
             
             for unit in self.graph_dit_units:
-                noise_embed = unit(action_embed, node_features, edge_features_embed, None)
+                # Pass joint_states_history so unit can do proper State-Action Self-Attention
+                # This ensures extract_features matches the training-time behavior
+                noise_embed = unit(
+                    action_embed, 
+                    node_features, 
+                    edge_features_embed, 
+                    None,  # timestep_embed (not needed for feature extraction)
+                    joint_states_history  # CRITICAL: Pass joint_states_history!
+                )
                 action_embed = noise_embed.unsqueeze(1) if len(noise_embed.shape) == 2 else noise_embed
             
             # Final graph embedding (aggregated scene understanding)

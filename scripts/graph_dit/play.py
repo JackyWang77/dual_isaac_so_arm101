@@ -95,7 +95,7 @@ def play_graph_dit_policy(
             elif isinstance(space.spaces, (list, tuple)):
                 # Tuple space: sum all sub-spaces
                 return sum(get_obs_dim(sub_space) for sub_space in space.spaces)
-    else:
+            else:
                 return 0
         else:
             # Unknown space type, try to get from sample
@@ -375,8 +375,8 @@ def play_graph_dit_policy(
                     for key in obs_keys_order:
                         if key in obs:
                             obs_val = obs[key]
-                    if isinstance(obs_val, torch.Tensor):
-                        obs_list.append(obs_val.flatten(start_dim=1))
+                            if isinstance(obs_val, torch.Tensor):
+                                obs_list.append(obs_val.flatten(start_dim=1))
                             elif isinstance(obs_val, np.ndarray):
                                 obs_list.append(torch.from_numpy(obs_val).flatten(start_dim=1))
                             else:
@@ -395,7 +395,7 @@ def play_graph_dit_policy(
                                 obs_list.append(torch.from_numpy(val).flatten(start_dim=1))
                             else:
                                 obs_list.append(torch.tensor(val).flatten(start_dim=1))
-                obs_tensor = torch.cat(obs_list, dim=1).to(device)
+                        obs_tensor = torch.cat(obs_list, dim=1).to(device)
             else:
                 obs_tensor = torch.from_numpy(obs).to(device) if isinstance(obs, np.ndarray) else obs
                 if len(obs_tensor.shape) == 1:
@@ -484,7 +484,7 @@ def play_graph_dit_policy(
                 )  # [num_envs, pred_horizon, action_dim]
                 
                 # Denormalize trajectory
-            if action_mean is not None and action_std is not None:
+                if action_mean is not None and action_std is not None:
                     # Broadcast mean/std for trajectory: [action_dim] -> [1, 1, action_dim]
                     action_trajectory = action_trajectory_normalized * action_std.unsqueeze(0) + action_mean.unsqueeze(0)
                 else:
@@ -507,7 +507,7 @@ def play_graph_dit_policy(
                 if len(action_buffers[env_id]) > 0:
                     actions_list.append(action_buffers[env_id].pop(0))
                     actions_normalized_list.append(action_buffers_normalized[env_id].pop(0))
-            else:
+                else:
                     # Fallback: should not happen if logic is correct
                     print(f"[Play] WARNING: Empty action buffer for env {env_id}, using zeros!")
                     actions_list.append(torch.zeros(action_dim, device=device))
@@ -551,7 +551,7 @@ def play_graph_dit_policy(
             
             # Accumulate rewards (rewards might be numpy or tensor)
             if isinstance(rewards, np.ndarray):
-            current_episode_rewards += torch.from_numpy(rewards).to(device)
+                current_episode_rewards += torch.from_numpy(rewards).to(device)
             else:
                 current_episode_rewards += rewards.to(device) if hasattr(rewards, 'to') else torch.tensor(rewards, device=device)
             

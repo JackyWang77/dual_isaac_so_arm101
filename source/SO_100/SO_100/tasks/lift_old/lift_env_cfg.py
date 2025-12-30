@@ -102,7 +102,10 @@ class ObservationsCfg:
     class PolicyCfg(ObsGroup):
         """Observations for policy group."""
 
-        joint_pos = ObsTerm(func=mdp.joint_pos_rel)
+        # CRITICAL: Use absolute joint positions, not relative!
+        # Training data was collected with absolute positions, so RL must match.
+        # joint_pos_rel would return 0 at start, but training data has non-zero mean.
+        joint_pos = ObsTerm(func=mdp.joint_pos)
         joint_vel = ObsTerm(func=mdp.joint_vel_rel)
         object_position = ObsTerm(func=mdp.object_position_in_robot_root_frame)
         object_orientation = ObsTerm(func=mdp.object_orientation)

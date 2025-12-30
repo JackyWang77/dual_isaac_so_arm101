@@ -37,6 +37,7 @@ echo "========================================"
 # DEMO-LEVEL TRAINING: Each sample is a complete demo sequence
 # batch_size now means number of demos per batch (not timesteps!)
 # Each demo has ~100 timesteps, so effective batch = batch_size * 100
+# skip_first_steps: Skip noisy initial actions from human demo collection
 
 python scripts/graph_dit/train.py \
     --task SO-ARM101-Lift-Cube-v0 \
@@ -44,9 +45,10 @@ python scripts/graph_dit/train.py \
     --obs_dim 32 \
     --action_dim 6 \
     --action_history_length 4 \
+    --skip_first_steps 0 \
     --mode "$MODE" \
     --lr_schedule "$LR_SCHEDULE" \
-    --epochs 300 \
+    --epochs 500 \
     --batch_size 8 \
     --lr 3e-3 \
     --hidden_dim 128 \
