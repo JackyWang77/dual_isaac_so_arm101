@@ -123,11 +123,12 @@ class ObservationsCfg:
 
         # Lift object - check if object is lifted to target height
         # Note: This uses the observation function from mdp.observations, not the reward function
+        # CRITICAL: initial_height must match cube's actual initial height (0.015m from joint_pos_env_cfg.py)
         lift_object = ObsTerm(
             func=mdp.object_is_lifted,
             params={
-                "minimal_height": 0.04,  # 4cm above initial position
-                "initial_height": 0.05,  # Initial height of cube
+                "minimal_height": 0.04,  # Target height: 0.04m (2.5cm lift from initial 0.015m)
+                "initial_height": 0.015,  # Initial height of cube (matches joint_pos_env_cfg.py)
                 "object_cfg": SceneEntityCfg("object"),
             },
         )
@@ -162,7 +163,13 @@ class EventCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
 
-    lifting_object = RewTerm(func=mdp.object_is_lifted, params={"minimal_height": 0.04}, weight=15.0)
+    # CRITICAL: initial_height must match cube's actual initial height (0.015m from joint_pos_env_cfg.py)
+    # minimal_height=0.04 means target height is 0.04m (2.5cm lift from initial 0.015m)
+    lifting_object = RewTerm(
+        func=mdp.object_is_lifted,
+        params={"minimal_height": 0.04, "initial_height": 0.015},
+        weight=15.0
+    )
     reaching_object = RewTerm(func=mdp.object_ee_distance, params={"std": 0.05}, weight=1.0)
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-4)
     joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-1e-4)

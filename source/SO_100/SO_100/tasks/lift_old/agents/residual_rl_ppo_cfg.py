@@ -114,8 +114,8 @@ class LiftResidualRLRunnerCfg(RslRlOnPolicyRunnerCfg):
         entropy_coef=0.01,  # Encourage exploration
         num_learning_epochs=5,
         num_mini_batches=4,
-        learning_rate=1e-4,  # Lower LR for residual (small corrections)
-        schedule="adaptive",
+        learning_rate=3e-4,  # Lower LR for residual (small corrections)
+        schedule="fixed",
         gamma=0.99,  # High discount for long-horizon tasks
         lam=0.95,  # GAE lambda
         desired_kl=0.01,

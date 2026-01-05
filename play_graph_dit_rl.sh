@@ -1,42 +1,45 @@
 #!/bin/bash
-# Play/Test trained Graph DiT RL Policy (RL fine-tuned)
-# This script plays a model trained with RSL-RL fine-tuning
+# Play/Test trained Residual RL Policy (Graph-DiT + PPO fine-tuned)
+# This script plays a model trained with train_residual_rl.sh
+#
+# Usage:
+#   ./play_graph_dit_rl.sh                           # Auto-detect latest checkpoint
+#   ./play_graph_dit_rl.sh <checkpoint_path>         # Use specific checkpoint
+
+set -e
 
 echo "========================================"
-echo "Testing Graph DiT RL Policy (RL Fine-tuned)"
+echo "Testing Residual RL Policy (Graph-DiT + PPO)"
 echo "========================================"
 
 # Check if RSL-RL module is available
 if ! python -c "from rsl_rl.modules import ActorCritic" 2>/dev/null; then
     echo "⚠️  Warning: RSL-RL modules not found!"
     echo ""
-    echo "This usually means the conda environment 'env_isaaclab' is not activated."
-    echo ""
-    echo "Please activate it first:"
+    echo "Please activate conda environment first:"
     echo "  conda activate env_isaaclab"
-    echo ""
-    echo "Then run this script again."
     exit 1
 fi
 
 # Checkpoint path (first argument, or auto-detect latest)
 CHECKPOINT="${1:-}"
 
-# Base directory for RL training logs
-BASE_DIR="./logs/rsl_rl/reach_graph_dit_rl"
+# Base directory for RL training logs (matches train_residual_rl.sh output)
+BASE_DIR="./logs/rsl_rl/lift_residual_rl"
 
 # Auto-detect latest checkpoint if not provided
 if [ -z "$CHECKPOINT" ]; then
-    # Find latest checkpoint (prefer final_checkpoint.pt, fallback to model_*.pt)
-    LATEST_CHECKPOINT=$(ls -t "$BASE_DIR"/*/final_checkpoint.pt 2>/dev/null | head -1)
-    if [ -z "$LATEST_CHECKPOINT" ]; then
-        # Fallback to model_*.pt (RSL-RL naming)
-        LATEST_CHECKPOINT=$(ls -t "$BASE_DIR"/*/model_*.pt 2>/dev/null | head -1)
-    fi
+    # Find latest run directory
+    LATEST_RUN=$(ls -dt "$BASE_DIR"/*/ 2>/dev/null | head -1)
     
-    if [ -n "$LATEST_CHECKPOINT" ]; then
-        CHECKPOINT="$LATEST_CHECKPOINT"
-        echo "Auto-detected latest checkpoint: $CHECKPOINT"
+    if [ -n "$LATEST_RUN" ]; then
+        # Find the highest numbered model checkpoint in the latest run
+        LATEST_CHECKPOINT=$(ls -v "$LATEST_RUN"model_*.pt 2>/dev/null | tail -1)
+        
+        if [ -n "$LATEST_CHECKPOINT" ]; then
+            CHECKPOINT="$LATEST_CHECKPOINT"
+            echo "Auto-detected latest checkpoint: $CHECKPOINT"
+        fi
     fi
 fi
 
@@ -49,21 +52,61 @@ if [ -z "$CHECKPOINT" ] || [ ! -f "$CHECKPOINT" ]; then
     echo "  $0 <checkpoint_path>        # Use specific checkpoint"
     echo ""
     echo "Example:"
-    echo "  $0 ./logs/rsl_rl/reach_graph_dit_rl/2025-12-10_21-05-46/model_199.pt"
+    echo "  $0 ./logs/rsl_rl/lift_residual_rl/2025-12-30_19-52-29/model_299.pt"
     echo ""
-    echo "Available checkpoints:"
-    ls -t "$BASE_DIR"/*/final_checkpoint.pt "$BASE_DIR"/*/model_*.pt 2>/dev/null | head -5 || echo "  (none found)"
+    echo "Available checkpoints in $BASE_DIR:"
+    for dir in $(ls -dt "$BASE_DIR"/*/ 2>/dev/null | head -5); do
+        latest=$(ls -v "${dir}"model_*.pt 2>/dev/null | tail -1)
+        [ -n "$latest" ] && echo "  $latest"
+    done
     exit 1
 fi
 
 echo "Using checkpoint: $CHECKPOINT"
+
+# ============================================================
+# CRITICAL: Extract pretrained_checkpoint path from saved config
+# The Residual RL policy needs the Graph-DiT checkpoint path,
+# which is stored in params/agent.yaml from training.
+# ============================================================
+CHECKPOINT_DIR=$(dirname "$CHECKPOINT")
+AGENT_YAML="$CHECKPOINT_DIR/params/agent.yaml"
+
+if [ -f "$AGENT_YAML" ]; then
+    # Extract pretrained_checkpoint path from YAML
+    PRETRAINED_CHECKPOINT=$(grep "pretrained_checkpoint:" "$AGENT_YAML" | sed 's/.*pretrained_checkpoint: //' | tr -d ' ')
+    
+    if [ -n "$PRETRAINED_CHECKPOINT" ] && [ -f "$PRETRAINED_CHECKPOINT" ]; then
+        echo "Found Graph-DiT checkpoint: $PRETRAINED_CHECKPOINT"
+        export RESIDUAL_RL_PRETRAINED_CHECKPOINT="$PRETRAINED_CHECKPOINT"
+    else
+        echo "⚠️  Warning: pretrained_checkpoint from config not found: $PRETRAINED_CHECKPOINT"
+        echo "   Trying to find a valid checkpoint..."
+        
+        # Fallback: find latest Graph-DiT checkpoint
+        FALLBACK_CHECKPOINT=$(ls -t ./logs/graph_dit/lift_joint_flow_matching/*/best_model.pt 2>/dev/null | head -1)
+        if [ -n "$FALLBACK_CHECKPOINT" ]; then
+            echo "   Using fallback: $FALLBACK_CHECKPOINT"
+            export RESIDUAL_RL_PRETRAINED_CHECKPOINT="$FALLBACK_CHECKPOINT"
+        else
+            echo "❌ Error: No Graph-DiT checkpoint found!"
+            exit 1
+        fi
+    fi
+else
+    echo "⚠️  Warning: Agent config not found: $AGENT_YAML"
+    # Fallback: find latest Graph-DiT checkpoint
+    FALLBACK_CHECKPOINT=$(ls -t ./logs/graph_dit/lift_joint_flow_matching/*/best_model.pt 2>/dev/null | head -1)
+    if [ -n "$FALLBACK_CHECKPOINT" ]; then
+        echo "   Using fallback: $FALLBACK_CHECKPOINT"
+        export RESIDUAL_RL_PRETRAINED_CHECKPOINT="$FALLBACK_CHECKPOINT"
+    fi
+fi
+
 echo ""
 
 # Default parameters (can be overridden via environment variables)
-NUM_ENVS="${NUM_ENVS:-4}"            # Default: 4 environments for playback (fewer for faster/more responsive)
-NUM_EPISODES="${NUM_EPISODES:-5}"    # Default: 5 episodes
-DEVICE="${DEVICE:-cuda}"             # Default: cuda
-DETERMINISTIC="${DETERMINISTIC:-true}" # Default: deterministic actions
+NUM_ENVS="${NUM_ENVS:-4}"            # Default: 4 environments for playback
 
 # Check if headless mode
 HEADLESS_FLAG=""
@@ -73,26 +116,12 @@ fi
 
 echo "Playback settings:"
 echo "  Num envs: $NUM_ENVS"
-echo "  Num episodes: $NUM_EPISODES"
-echo "  Device: $DEVICE"
-echo "  Deterministic: $DETERMINISTIC"
 echo "  Headless: ${HEADLESS:-false}"
 echo ""
 
-# Run the play script using standard RSL-RL play (recommended for RL-trained models)
-# This uses the same flow as standard Isaac Lab RL tasks
+# Run the play script using RSL-RL play
 python scripts/rsl_rl/play.py \
-    --task SO-ARM101-Reach-Cube-Play-v0 \
+    --task SO-ARM101-Lift-Cube-ResidualRL-v0 \
     --checkpoint "$CHECKPOINT" \
     --num_envs "$NUM_ENVS" \
     $HEADLESS_FLAG
-
-# Alternative: Use custom play_rl.py (if you need custom behavior)
-# python scripts/graph_dit_rl/play_rl.py \
-#     --task SO-ARM101-Reach-Cube-Play-v0 \
-#     --checkpoint "$CHECKPOINT" \
-#     --num_envs "$NUM_ENVS" \
-#     --num_episodes "$NUM_EPISODES" \
-#     --device "$DEVICE" \
-#     $([ "$DETERMINISTIC" = "true" ] && echo "--deterministic" || echo "--stochastic") \
-#     $HEADLESS_FLAG

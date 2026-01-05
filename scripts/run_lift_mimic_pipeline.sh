@@ -30,13 +30,13 @@ echo "========================================"
 echo ""
 echo "[Step 1/2] Annotating demos with Joint States env..."
 echo "========================================"
-python scripts/isaaclab_mimic/annotate_demos.py \
-    --device "$DEVICE" \
-    --task "$TASK_ANNOTATE" \
-    --auto \
-    --enable_cameras \
-    --input_file "$INPUT_FILE" \
-    --output_file "$ANNOTATED_FILE"
+# python scripts/isaaclab_mimic/annotate_demos.py \
+#     --device "$DEVICE" \
+#     --task "$TASK_ANNOTATE" \
+#     --auto \
+#     --enable_cameras \
+#     --input_file "$INPUT_FILE" \
+#     --output_file "$ANNOTATED_FILE"
 
 if [ $? -ne 0 ]; then
     echo "Error: Annotation failed!"

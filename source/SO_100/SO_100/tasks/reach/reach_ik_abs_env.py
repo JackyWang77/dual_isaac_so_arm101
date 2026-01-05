@@ -27,24 +27,30 @@ class SoArm100ReachIKAbsEnv(ManagerBasedRLMimicEnv):
         super().__init__(cfg, **kwargs)
 
     def get_robot_eef_pose(self, eef_name: str, env_ids: Sequence[int] | None = None) -> torch.Tensor:
-        """Get current robot end effector pose from ee_frame sensor.
+        """Get current robot end effector pose relative to robot base frame.
+        
+        IMPORTANT: For IK Absolute mode, the pose must be in the robot base frame,
+        NOT world frame. The FrameTransformer provides target_pos_source/target_quat_source
+        which are relative to the source frame (robot base).
         
         Args:
             eef_name: Name of the end effector (not used in single-arm setup)
             env_ids: Environment IDs to get poses for (None = all environments)
             
         Returns:
-            torch.Tensor: End-effector poses as 4x4 transformation matrices
+            torch.Tensor: End-effector poses as 4x4 transformation matrices in robot base frame
         """
         if env_ids is None:
             env_ids = slice(None)
 
-        # Get EEF pose directly from ee_frame sensor
+        # Get EEF pose relative to robot base frame (source frame)
+        # target_pos_source/target_quat_source are in the source frame (robot base)
+        # target_pos_w/target_quat_w are in world frame - DO NOT USE for IK Absolute!
         ee_frame = self.scene["ee_frame"]
-        eef_pos = ee_frame.data.target_pos_w[env_ids, 0, :]  # [num_envs, 3]
-        eef_quat = ee_frame.data.target_quat_w[env_ids, 0, :]  # [num_envs, 4] (w, x, y, z)
-        # Quaternion format is [w, x, y, z]
-        return PoseUtils.make_pose(eef_pos, PoseUtils.matrix_from_quat(eef_quat))
+        eef_pos_b = ee_frame.data.target_pos_source[env_ids, 0, :]  # [num_envs, 3] in base frame
+        eef_quat_b = ee_frame.data.target_quat_source[env_ids, 0, :]  # [num_envs, 4] (w, x, y, z) in base frame
+        
+        return PoseUtils.make_pose(eef_pos_b, PoseUtils.matrix_from_quat(eef_quat_b))
 
     def target_eef_pose_to_action(
         self, target_eef_pose_dict: dict, gripper_action_dict: dict, action_noise_dict: dict | None = None, env_id: int = 0

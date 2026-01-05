@@ -74,7 +74,7 @@ echo ""
 
 # Build command arguments
 CMD_ARGS=(
-    --task SO-ARM101-Reach-Cube-v0
+    --task SO-ARM101-Lift-Cube-v0
     --pretrained_checkpoint "$PRETRAINED_CHECKPOINT"
     --num_envs "$NUM_ENVS"
     --max_iterations "$MAX_ITERATIONS"
