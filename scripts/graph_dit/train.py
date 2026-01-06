@@ -1021,6 +1021,21 @@ def train_graph_dit_policy(
     if joint_dim == 0:
         joint_dim = None
 
+    # CRITICAL FIX: Build obs_structure from dataset's obs_key_offsets and obs_key_dims
+    # This replaces hardcoded indices with dynamic dictionary-based structure
+    obs_structure = None
+    if hasattr(dataset, "obs_key_offsets") and hasattr(dataset, "obs_key_dims"):
+        obs_structure = {}
+        for key in dataset.obs_key_offsets.keys():
+            offset = dataset.obs_key_offsets[key]
+            dim = dataset.obs_key_dims[key]
+            obs_structure[key] = (offset, offset + dim)
+        print(f"[Train] ✅ Using dynamic obs_structure from dataset:")
+        for key, (start, end) in obs_structure.items():
+            print(f"    {key}: [{start}, {end}) (dim={end-start})")
+    else:
+        print(f"[Train] ⚠️  Dataset doesn't have obs_key_offsets, using default hardcoded indices")
+
     # Create policy configuration
     # IMPORTANT: num_subtasks must match the actual subtask_condition dimension in data
     # If dataset has subtasks, use that number; otherwise disable subtask conditioning
@@ -1037,6 +1052,7 @@ def train_graph_dit_policy(
         exec_horizon=exec_horizon,  # RHC: execute this many steps before re-planning
         mode=mode,  # "ddpm" or "flow_matching"
         device=device,
+        obs_structure=obs_structure,  # CRITICAL: Pass dynamic obs_structure instead of hardcoded indices
     )
 
     if num_subtasks > 0:
