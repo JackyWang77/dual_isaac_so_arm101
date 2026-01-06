@@ -160,7 +160,8 @@ class HDF5DemoDataset(Dataset):
                     if key in obs_container:
                         obs_dict[key] = np.array(obs_container[key])
 
-                # Load actions: [T, action_dim]
+                # Load original actions from HDF5 (will be replaced with joint_pos[t+1])
+                # Original actions from teleoperation may have large gaps, so we use joint_pos[t+1] instead
                 actions_full = np.array(demo["actions"]).astype(np.float32)
                 T_full = len(actions_full)
 
@@ -194,6 +195,39 @@ class HDF5DemoDataset(Dataset):
                                 obs_vec.append(np.array([obs_val]))
                     obs_seq.append(np.concatenate(obs_vec).astype(np.float32))
                 obs_seq = np.stack(obs_seq, axis=0)  # [T, obs_dim]
+
+                # CRITICAL FIX: Replace actions with joint_pos[t+1] for smoother actions
+                # Teleoperation data has large gaps between action and current joint_pos,
+                # so using next joint_pos as action produces smoother, more learnable actions
+                jp_start = self.obs_key_offsets.get("joint_pos", 0)
+                jp_dim = self.obs_key_dims.get("joint_pos", 6)
+                
+                # Extract joint_pos sequence from obs_seq
+                joint_pos_seq = []
+                for i in range(T):
+                    obs_i = obs_seq[i]
+                    joint_pos = obs_i[jp_start : jp_start + jp_dim]
+                    joint_pos = np.pad(
+                        joint_pos, (0, max(0, jp_dim - len(joint_pos)))
+                    )[:jp_dim]
+                    joint_pos_seq.append(joint_pos.astype(np.float32))
+                joint_pos_seq = np.stack(joint_pos_seq, axis=0)  # [T, joint_pos_dim]
+                
+                # Replace actions with joint_pos[t+1] (next timestep's joint_pos)
+                # For timestep i, action = joint_pos[i+1] (if exists) or joint_pos[i] (last step)
+                actions_new = []
+                for i in range(T):
+                    if i + 1 < T:
+                        # Use next timestep's joint_pos as action
+                        actions_new.append(joint_pos_seq[i + 1])
+                    else:
+                        # Last timestep: use current joint_pos (no next step available)
+                        actions_new.append(joint_pos_seq[i])
+                actions = np.stack(actions_new, axis=0).astype(np.float32)  # [T, joint_pos_dim]
+                
+                print(f"[HDF5DemoDataset] ✅ Replaced actions with joint_pos[t+1] for smoother actions")
+                print(f"[HDF5DemoDataset]    Original action_dim: {actions_full.shape[1] if len(actions_full.shape) > 1 else 1}")
+                print(f"[HDF5DemoDataset]    New action_dim (joint_pos): {jp_dim}")
 
                 # Build action trajectory for each timestep: [T, pred_horizon, action_dim]
                 # ACTION CHUNKING: Each timestep predicts next pred_horizon actions
@@ -847,7 +881,9 @@ def train_graph_dit_policy(
     print(f"[Train] Log dir (with mode and timestamp): {log_dir}")
 
     # TensorBoard writer
-    writer = SummaryWriter(log_dir=log_dir / "tensorboard")
+    tensorboard_dir = log_dir / "tensorboard"
+    writer = SummaryWriter(log_dir=tensorboard_dir)
+    print(f"[Train] 📊 TensorBoard logs will be saved to: {tensorboard_dir}")
 
     print(f"[Train] ===== Graph-DiT Policy Training with ACTION CHUNKING =====")
     print(f"[Train] Task: {task_name}")
@@ -1361,7 +1397,8 @@ def train_graph_dit_policy(
     print(f"[Train] ✅ Final model saved to: {final_path}")
     print(f"[Train] ✅ Best model saved to: {save_dir / 'best_model.pt'}")
     print(f"[Train] 📁 All models saved in: {save_dir}")
-    print(f"[Train] 📊 TensorBoard logs in: {log_dir / 'tensorboard'}")
+    print(f"[Train] 📊 TensorBoard logs in: {tensorboard_dir}")
+    print(f"[Train] 💡 View logs with: tensorboard --logdir {log_dir}")
 
     writer.close()
     return policy
@@ -1382,7 +1419,12 @@ def main():
         default=32,
         help="Observation dimension (reach task: 32 after removing redundant target_object_position)",
     )
-    parser.add_argument("--action_dim", type=int, default=8, help="Action dimension")
+    parser.add_argument(
+        "--action_dim",
+        type=int,
+        default=6,
+        help="Action dimension (now uses joint_pos[t+1], typically 6 for 6-DoF arm)",
+    )
     parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden dimension")
     parser.add_argument(
         "--num_layers", type=int, default=6, help="Number of transformer layers"
