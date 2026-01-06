@@ -10,10 +10,10 @@ BASE_DIR="./logs/graph_dit/lift_joint_flow_matching"
 # Auto-detect latest checkpoint if not provided
 if [ -z "$CHECKPOINT" ]; then
     echo "🔍 Auto-detecting latest checkpoint in $BASE_DIR..."
-
+    
     # Find the most recent directory
     LATEST_DIR=$(ls -dt "${BASE_DIR}"/*/ 2>/dev/null | head -1)
-
+    
     if [ -z "$LATEST_DIR" ]; then
         echo "❌ Error: No training directories found in $BASE_DIR"
         echo ""
@@ -21,7 +21,7 @@ if [ -z "$CHECKPOINT" ]; then
         ls -d "${BASE_DIR}"/*/ 2>/dev/null | head -5 || echo "  (none)"
         exit 1
     fi
-
+    
     # Try to find best_model.pt first (preferred), then final_model.pt
     if [ -f "${LATEST_DIR}best_model.pt" ]; then
         CHECKPOINT="${LATEST_DIR}best_model.pt"
@@ -34,7 +34,7 @@ if [ -z "$CHECKPOINT" ]; then
         ls -lh "${LATEST_DIR}"*.pt 2>/dev/null || echo "  (none)"
         exit 1
     fi
-
+    
     echo "✅ Found checkpoint: $CHECKPOINT"
 fi
 
@@ -116,3 +116,4 @@ python scripts/graph_dit/train.py \
     --save_dir ./logs/graph_dit/lift_joint \
     --log_dir ./logs/graph_dit/lift_joint \
     --resume "$CHECKPOINT"
+  

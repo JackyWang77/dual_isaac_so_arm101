@@ -18,7 +18,7 @@ from isaaclab.utils import configclass
 
 from . import joint_pos_env_cfg, mdp
 
-from SO_101.robots.so_arm100_roscon import SO_ARM101_ROSCON_HIGH_PD_CFG  # isort: skip
+from SO_101.robots.so_arm101_roscon import SO_ARM101_ROSCON_HIGH_PD_CFG  # isort: skip
 
 
 @configclass

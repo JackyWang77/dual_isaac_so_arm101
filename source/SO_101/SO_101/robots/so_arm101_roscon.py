@@ -19,7 +19,7 @@ The following configurations are available:
 
 * :obj:`SO_ARM101_ROSCON_CFG`: SO-ARM101 robot arm configuration more adapted for sim2real.
         ->  converted from the xacro of this repository:
-        https://github.com/JafarAbdi/ros2_so_arm100
+        https://github.com/JafarAbdi/ros2_so_arm100 (note: repository name still uses arm100)
 """
 
 from pathlib import Path
@@ -37,7 +37,7 @@ TEMPLATE_ASSETS_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data
 SO_ARM101_ROSCON_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
         usd_path=f"{TEMPLATE_ASSETS_DATA_DIR}/Robots/SO-ARM101-NEW-TF2.usd",
-        # usd_path=f"{TEMPLATE_ASSETS_DATA_DIR}/Robots/so_arm100_roscon/so_arm100.usd",
+        # usd_path=f"{TEMPLATE_ASSETS_DATA_DIR}/Robots/so_arm101_roscon/so_arm101.usd",
         activate_contact_sensors=False,  # Adjust based on need
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -114,9 +114,9 @@ SO_ARM101_ROSCON_HIGH_PD_CFG = SO_ARM101_ROSCON_CFG.copy()
 SO_ARM101_ROSCON_HIGH_PD_CFG.spawn.rigid_props.disable_gravity = False
 # [Effort] STS3215 stall torque is approximately 30kg.cm ≈ 3Nm
 # Add some margin in simulation (4-5Nm) to prevent stalling due to friction
-SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["arm"].effort_limit_sim = 5.0
+SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["arm"].effort_limit_sim = 500.0
 # [Velocity] Set slightly higher to avoid bottleneck, 10 rad/s is fast enough
-SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["arm"].velocity_limit_sim = 10.0
+SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["arm"].velocity_limit_sim = 1500.0
 # [Stiffness] Calculated based on 5Hz frequency (Mass * 1000)
 # With this setting, the arm has sufficient support force and won't explode
 SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["arm"].stiffness = {

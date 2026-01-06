@@ -33,6 +33,14 @@ import torch
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
 from SO_101.policies.graph_dit_policy import GraphDiTPolicy
 
+# Try to import visualization utilities (if available)
+try:
+    from omni.isaac.debug_draw import DebugDraw
+    DEBUG_DRAW_AVAILABLE = True
+except ImportError:
+    DEBUG_DRAW_AVAILABLE = False
+    print("[Play] DebugDraw not available, visualization will be disabled")
+
 
 def play_graph_dit_policy(
     task_name: str,
@@ -527,6 +535,9 @@ def play_graph_dit_policy(
             ee_node_current, object_node_current = _extract_node_features_from_obs(
                 obs_tensor
             )  # [num_envs, 7]
+            
+            # 🟢 VISUAL DEBUG: Extract current EE position for comparison
+            current_ee_pos = ee_node_current[:, :3].cpu().numpy()  # [num_envs, 3] - EE position
 
             # Extract current joint states (position + velocity) from raw obs
             if joint_dim is not None:
@@ -638,6 +649,30 @@ def play_graph_dit_policy(
                         print(
                             f"[Play] Warning: No action normalization stats, using normalized actions directly"
                         )
+
+                # 🟢 VISUAL DEBUG: Store target joint positions for visualization
+                # action_trajectory is [num_envs, pred_horizon, action_dim]
+                # We'll visualize the first action (target joint_pos[t+1]) for each env
+                target_joint_positions = action_trajectory[:, 0, :].cpu().numpy()  # [num_envs, action_dim]
+                
+                # 🟢 VISUAL DEBUG: Print target vs current for first env (every replanning step)
+                if step_count % 10 == 0:  # Print every 10 replanning steps
+                    env_id = 0
+                    target_joint = target_joint_positions[env_id]
+                    current_joint = obs_tensor[env_id, :6].cpu().numpy()
+                    current_ee_pos_debug = current_ee_pos[env_id]
+                    object_pos_debug = object_node_current[env_id, :3].cpu().numpy()
+                    
+                    print(
+                        f"\n[🟢 VISUAL DEBUG Step {step_count}] =========="
+                    )
+                    print(f"  Target Joint (action): {target_joint[:3].tolist()} (first 3 joints)")
+                    print(f"  Current Joint:         {current_joint[:3].tolist()} (first 3 joints)")
+                    print(f"  Joint Diff:             {np.abs(target_joint - current_joint)[:3].tolist()}")
+                    print(f"  Current EE Position:    {current_ee_pos_debug.tolist()}")
+                    print(f"  Object Position:        {object_pos_debug.tolist()}")
+                    print(f"  EE-Object Distance:      {np.linalg.norm(current_ee_pos_debug - object_pos_debug):.3f}")
+                    print(f"  =========================================\n")
 
                 # Fill action buffers with first exec_horizon actions
                 for env_id in range(num_envs):

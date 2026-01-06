@@ -27,7 +27,7 @@ from .pick_place_env_cfg import PickPlaceEnvCfg
 # Pre-defined configs
 ##
 from isaaclab.markers.config import FRAME_MARKER_CFG  # isort: skip
-from SO_101.robots.so_arm100_roscon import SO_ARM101_ROSCON_CFG  # isort: skip
+from SO_101.robots.so_arm101_roscon import SO_ARM101_ROSCON_CFG  # isort: skip
 
 
 @configclass

@@ -21,7 +21,7 @@ from . import mdp, pick_place_joint_pos_env_cfg
 ##
 # Pre-defined configs
 ##
-from SO_101.robots.so_arm100_roscon import SO_ARM101_ROSCON_HIGH_PD_CFG  # isort: skip
+from SO_101.robots.so_arm101_roscon import SO_ARM101_ROSCON_HIGH_PD_CFG  # isort: skip
 
 
 @configclass

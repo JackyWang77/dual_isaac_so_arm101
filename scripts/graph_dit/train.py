@@ -160,8 +160,8 @@ class HDF5DemoDataset(Dataset):
                     if key in obs_container:
                         obs_dict[key] = np.array(obs_container[key])
 
-                # Load original actions from HDF5 (will be replaced with joint_pos[t+1])
-                # Original actions from teleoperation may have large gaps, so we use joint_pos[t+1] instead
+                # Load original actions from HDF5 (will be replaced with joint_pos[t+5])
+                # Original actions from teleoperation may have large gaps, so we use joint_pos[t+5] instead
                 actions_full = np.array(demo["actions"]).astype(np.float32)
                 T_full = len(actions_full)
 
@@ -196,9 +196,9 @@ class HDF5DemoDataset(Dataset):
                     obs_seq.append(np.concatenate(obs_vec).astype(np.float32))
                 obs_seq = np.stack(obs_seq, axis=0)  # [T, obs_dim]
 
-                # CRITICAL FIX: Replace actions with joint_pos[t+1] for smoother actions
+                # CRITICAL FIX: Replace actions with joint_pos[t+5] for smoother actions
                 # Teleoperation data has large gaps between action and current joint_pos,
-                # so using next joint_pos as action produces smoother, more learnable actions
+                # so using joint_pos[t+5] as action produces smoother, more learnable actions
                 jp_start = self.obs_key_offsets.get("joint_pos", 0)
                 jp_dim = self.obs_key_dims.get("joint_pos", 6)
                 
@@ -213,19 +213,20 @@ class HDF5DemoDataset(Dataset):
                     joint_pos_seq.append(joint_pos.astype(np.float32))
                 joint_pos_seq = np.stack(joint_pos_seq, axis=0)  # [T, joint_pos_dim]
                 
-                # Replace actions with joint_pos[t+1] (next timestep's joint_pos)
-                # For timestep i, action = joint_pos[i+1] (if exists) or joint_pos[i] (last step)
+                # Replace actions with joint_pos[t+5] (5 timesteps ahead)
+                # For timestep i, action = joint_pos[i+5] (if exists) or last available joint_pos
                 actions_new = []
                 for i in range(T):
-                    if i + 1 < T:
-                        # Use next timestep's joint_pos as action
-                        actions_new.append(joint_pos_seq[i + 1])
+                    target_idx = i + 5
+                    if target_idx < T:
+                        # Use joint_pos 5 steps ahead as action
+                        actions_new.append(joint_pos_seq[target_idx])
                     else:
-                        # Last timestep: use current joint_pos (no next step available)
-                        actions_new.append(joint_pos_seq[i])
+                        # Beyond sequence: use last available joint_pos
+                        actions_new.append(joint_pos_seq[-1])
                 actions = np.stack(actions_new, axis=0).astype(np.float32)  # [T, joint_pos_dim]
                 
-                print(f"[HDF5DemoDataset] ✅ Replaced actions with joint_pos[t+1] for smoother actions")
+                print(f"[HDF5DemoDataset] ✅ Replaced actions with joint_pos[t+5] for smoother actions")
                 print(f"[HDF5DemoDataset]    Original action_dim: {actions_full.shape[1] if len(actions_full.shape) > 1 else 1}")
                 print(f"[HDF5DemoDataset]    New action_dim (joint_pos): {jp_dim}")
 
@@ -1439,7 +1440,7 @@ def main():
         "--action_dim",
         type=int,
         default=6,
-        help="Action dimension (now uses joint_pos[t+1], typically 6 for 6-DoF arm)",
+        help="Action dimension (now uses joint_pos[t+5], typically 6 for 6-DoF arm)",
     )
     parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden dimension")
     parser.add_argument(
