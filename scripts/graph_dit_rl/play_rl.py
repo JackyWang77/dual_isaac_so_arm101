@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2025, SO-ARM100 Project
+# Copyright (c) 2024-2025, SO-ARM101 Project
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -31,9 +31,9 @@ import numpy as np
 import torch
 
 import gymnasium as gym
-import SO_100.tasks  # noqa: F401  # Register environments
+import SO_101.tasks  # noqa: F401  # Register environments
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
-from SO_100.policies.graph_dit_rl_policy import GraphDiTRLPolicy
+from SO_101.policies.graph_dit_rl_policy import GraphDiTRLPolicy
 
 
 def play_graph_dit_rl_policy(

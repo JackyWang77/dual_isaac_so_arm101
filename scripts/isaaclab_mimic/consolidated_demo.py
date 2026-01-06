@@ -92,7 +92,7 @@ from isaaclab_mimic.datagen.data_generator import DataGenerator
 from isaaclab_mimic.datagen.datagen_info_pool import DataGenInfoPool
 
 import isaaclab_tasks  # noqa: F401
-import SO_100.tasks  # noqa: F401  # Import custom tasks (SO-ARM100)
+import SO_101.tasks  # noqa: F401  # Import custom tasks (SO-ARM101)
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
 
 # global variable to keep track of the data generation statistics

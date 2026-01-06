@@ -85,7 +85,7 @@ from isaaclab_tasks.utils import parse_env_cfg
 
 # Import ROS2 device
 try:
-    from SO_100.devices import Se3ROS2, Se3ROS2Cfg
+    from SO_101.devices import Se3ROS2, Se3ROS2Cfg
     ROS2_DEVICE_AVAILABLE = True
 except ImportError:
     ROS2_DEVICE_AVAILABLE = False
@@ -243,7 +243,7 @@ def main() -> None:
                 )
             elif args_cli.teleop_device.lower() == "ros2":
                 if not ROS2_DEVICE_AVAILABLE:
-                    logger.error("ROS2 device not available. Please install SO_100 package.")
+                    logger.error("ROS2 device not available. Please install SO_101 package.")
                     env.close()
                     simulation_app.close()
                     return
@@ -260,12 +260,12 @@ def main() -> None:
                 # print(f"[teleop_se3_agent] 📡 Subscribed to: {ros2_cfg.ee_pose_topic}")
             elif args_cli.teleop_device.lower() == "joint_states":
                 if not ROS2_DEVICE_AVAILABLE:
-                    logger.error("ROS2 device not available. Please install SO_100 package.")
+                    logger.error("ROS2 device not available. Please install SO_101 package.")
                     env.close()
                     simulation_app.close()
                     return
                 # Create Joint States ROS2 device
-                from SO_100.devices import JointStatesROS2, JointStatesROS2Cfg
+                from SO_101.devices import JointStatesROS2, JointStatesROS2Cfg
                 joint_states_cfg = JointStatesROS2Cfg(
                     joint_state_topic="/joint_states",
                     num_dof=6,  # 5 arm joints + 1 gripper

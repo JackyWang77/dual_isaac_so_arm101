@@ -63,7 +63,7 @@ import time
 
 import gymnasium as gym
 import isaaclab_tasks  # noqa: F401
-import SO_100.tasks  # noqa: F401
+import SO_101.tasks  # noqa: F401
 import torch
 from isaaclab.envs import (
     DirectMARLEnv,
@@ -140,17 +140,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # wrap around environment for rsl-rl
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
-    # Ensure SO_100 is available in namespace for RSL-RL's eval() calls
+    # Ensure SO_101 is available in namespace for RSL-RL's eval() calls
     # RSL-RL uses eval() internally to dynamically load custom ActorCritic classes.
-    # We need to ensure SO_100 modules are accessible in that context.
-    import SO_100.policies.graph_dit_rsl_rl_actor_critic  # noqa: F401
+    # We need to ensure SO_101 modules are accessible in that context.
+    import SO_101.policies.graph_dit_rsl_rl_actor_critic  # noqa: F401
     import builtins
     import sys
-    # Inject SO_100 into builtins so eval() can access it
-    # This ensures that when RSL-RL executes eval("SO_100.policies.graph_dit_rsl_rl_actor_critic.GraphDiTActorCritic"),
-    # it can find SO_100 in the namespace
-    if not hasattr(builtins, "SO_100"):
-        builtins.SO_100 = sys.modules["SO_100"]
+    # Inject SO_101 into builtins so eval() can access it
+    # This ensures that when RSL-RL executes eval("SO_101.policies.graph_dit_rsl_rl_actor_critic.GraphDiTActorCritic"),
+    # it can find SO_101 in the namespace
+    if not hasattr(builtins, "SO_101"):
+        builtins.SO_101 = sys.modules["SO_101"]
 
     print(f"[INFO]: Loading model checkpoint from: {resume_path}")
     # load previously trained model

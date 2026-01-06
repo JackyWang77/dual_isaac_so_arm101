@@ -81,8 +81,8 @@ from datetime import datetime
 
 import gymnasium as gym
 import isaaclab_tasks  # noqa: F401
-import SO_100.tasks  # noqa: F401
-import SO_100.policies  # noqa: F401  # Import policies so RSL-RL can use eval() to find custom ActorCritic classes
+import SO_101.tasks  # noqa: F401
+import SO_101.policies  # noqa: F401  # Import policies so RSL-RL can use eval() to find custom ActorCritic classes
 import torch
 from isaaclab.envs import (
     DirectMARLEnv,
@@ -107,21 +107,21 @@ torch.backends.cudnn.benchmark = False
 @hydra_task_config(args_cli.task, "rsl_rl_cfg_entry_point")
 def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agent_cfg: RslRlOnPolicyRunnerCfg):
     """Train with RSL-RL agent."""
-    # Ensure SO_100 modules are imported and available in namespace for RSL-RL's eval() calls
+    # Ensure SO_101 modules are imported and available in namespace for RSL-RL's eval() calls
     # RSL-RL uses eval() to dynamically load custom ActorCritic classes, so we need to ensure
     # the modules are in sys.modules and the namespace
     try:
         # Import the full module path so it's available for eval()
-        module = importlib.import_module("SO_100.policies.graph_dit_rsl_rl_actor_critic")
-        # Make SO_100 available in the current namespace for eval()
-        if "SO_100" not in sys.modules:
-            sys.modules["SO_100"] = importlib.import_module("SO_100")
+        module = importlib.import_module("SO_101.policies.graph_dit_rsl_rl_actor_critic")
+        # Make SO_101 available in the current namespace for eval()
+        if "SO_101" not in sys.modules:
+            sys.modules["SO_101"] = importlib.import_module("SO_101")
         # Ensure the module is in the global namespace
-        globals()["SO_100"] = sys.modules["SO_100"]
-        globals()["SO_100"].policies = sys.modules["SO_100.policies"]
-        globals()["SO_100"].policies.graph_dit_rsl_rl_actor_critic = module
+        globals()["SO_101"] = sys.modules["SO_101"]
+        globals()["SO_101"].policies = sys.modules["SO_101.policies"]
+        globals()["SO_101"].policies.graph_dit_rsl_rl_actor_critic = module
     except ImportError as e:
-        print(f"[WARNING] Could not import SO_100.policies.graph_dit_rsl_rl_actor_critic: {e}")
+        print(f"[WARNING] Could not import SO_101.policies.graph_dit_rsl_rl_actor_critic: {e}")
         print("[WARNING] This may cause issues if using custom Graph DiT ActorCritic.")
     
     # override configurations with non-hydra CLI arguments
@@ -184,17 +184,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # wrap around environment for rsl-rl
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
-    # Ensure SO_100 is available in namespace for RSL-RL's eval() calls
+    # Ensure SO_101 is available in namespace for RSL-RL's eval() calls
     # RSL-RL uses eval() internally to dynamically load custom ActorCritic classes.
-    # We need to ensure SO_100 modules are accessible in that context.
+    # We need to ensure SO_101 modules are accessible in that context.
     # Method: Import the module and inject it into builtins so eval() can find it.
-    import SO_100.policies.graph_dit_rsl_rl_actor_critic  # noqa: F401
+    import SO_101.policies.graph_dit_rsl_rl_actor_critic  # noqa: F401
     import builtins
-    # Inject SO_100 into builtins so eval() can access it
-    # This ensures that when RSL-RL executes eval("SO_100.policies.graph_dit_rsl_rl_actor_critic.GraphDiTActorCritic"),
-    # it can find SO_100 in the namespace
-    if not hasattr(builtins, "SO_100"):
-        builtins.SO_100 = sys.modules["SO_100"]
+    # Inject SO_101 into builtins so eval() can access it
+    # This ensures that when RSL-RL executes eval("SO_101.policies.graph_dit_rsl_rl_actor_critic.GraphDiTActorCritic"),
+    # it can find SO_101 in the namespace
+    if not hasattr(builtins, "SO_101"):
+        builtins.SO_101 = sys.modules["SO_101"]
 
     # create runner from rsl-rl
     runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)

@@ -54,8 +54,7 @@ python scripts/graph_dit/train.py \
     --hidden_dim 96 \
     --num_layers 3 \
     --num_heads 4 \
-    --pred_horizon 16 \
-    --exec_horizon 8 \
+    --pred_horizon 20 \
+    --exec_horizon 4 \
     --device cuda \
-    --save_dir ./logs/graph_dit/lift_joint \w
-    --log_dir ./logs/graph_dit/lift_joint
+    --save_dir ./logs/graph_dit/lift_joint

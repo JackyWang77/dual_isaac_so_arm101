@@ -80,7 +80,7 @@ from isaaclab_mimic.datagen.generation import env_loop, setup_async_generation, 
 from isaaclab_mimic.datagen.utils import get_env_name_from_dataset, setup_output_paths
 
 import isaaclab_tasks  # noqa: F401
-import SO_100.tasks  # noqa: F401  # Import custom tasks (SO-ARM100)
+import SO_101.tasks  # noqa: F401  # Import custom tasks (SO-ARM101)
 
 # import logger
 logger = logging.getLogger(__name__)

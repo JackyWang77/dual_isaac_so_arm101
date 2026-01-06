@@ -164,11 +164,11 @@ from isaaclab.devices.openxr import remove_camera_configs
 from isaaclab.devices.teleop_device_factory import create_teleop_device
 
 import isaaclab_mimic.envs  # noqa: F401
-import SO_100.tasks # noqa: F401  # Registers custom SO-100 tasks
+import SO_101.tasks # noqa: F401  # Registers custom SO-100 tasks
 from isaaclab_mimic.ui.instruction_display import InstructionDisplay, show_subtask_instructions
 
 # Import ROS2 device for teleoperation
-from SO_100.devices import Se3ROS2, Se3ROS2Cfg
+from SO_101.devices import Se3ROS2, Se3ROS2Cfg
 
 if args_cli.enable_pinocchio:
     import isaaclab_tasks.manager_based.manipulation.pick_place  # noqa: F401
@@ -367,7 +367,7 @@ def setup_teleop_device(callbacks: dict[str, Callable]) -> object:
                 print("[record_demos] 💡 Press 'R' to reset episode, Ctrl+C to stop")
             elif args_cli.teleop_device.lower() == "joint_states":
                 # Create Joint States ROS2 device
-                from SO_100.devices import JointStatesROS2, JointStatesROS2Cfg
+                from SO_101.devices import JointStatesROS2, JointStatesROS2Cfg
                 
                 joint_states_cfg = JointStatesROS2Cfg(
                     joint_state_topic="/joint_states",  # Subscribe directly to raw topic (lowest latency)

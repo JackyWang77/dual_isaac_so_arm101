@@ -56,10 +56,10 @@ from datetime import datetime
 import gymnasium as gym
 import torch
 
-import SO_100.tasks  # noqa: F401  # Register environments
+import SO_101.tasks  # noqa: F401  # Register environments
 # Import both ActorCritic types for RSL-RL namespace
-from SO_100.policies.graph_dit_rsl_rl_actor_critic import GraphDiTActorCritic  # noqa: F401
-from SO_100.policies.residual_rl_actor_critic import ResidualActorCritic  # noqa: F401
+from SO_101.policies.graph_dit_rsl_rl_actor_critic import GraphDiTActorCritic  # noqa: F401
+from SO_101.policies.residual_rl_actor_critic import ResidualActorCritic  # noqa: F401
 
 
 def main():
@@ -125,15 +125,15 @@ def main():
         # Wrap environment for RSL-RL
         env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
-        # Ensure SO_100 is available in namespace for RSL-RL's eval() calls
+        # Ensure SO_101 is available in namespace for RSL-RL's eval() calls
         # RSL-RL uses eval() internally to dynamically load custom ActorCritic classes.
-        import SO_100.policies.graph_dit_rsl_rl_actor_critic  # noqa: F401
-        import SO_100.policies.residual_rl_actor_critic  # noqa: F401
+        import SO_101.policies.graph_dit_rsl_rl_actor_critic  # noqa: F401
+        import SO_101.policies.residual_rl_actor_critic  # noqa: F401
         import builtins
         import sys
-        # Inject SO_100 into builtins so eval() can access it
-        if not hasattr(builtins, "SO_100"):
-            builtins.SO_100 = sys.modules["SO_100"]
+        # Inject SO_101 into builtins so eval() can access it
+        if not hasattr(builtins, "SO_101"):
+            builtins.SO_101 = sys.modules["SO_101"]
 
         # Create RSL-RL runner (standard way)
         print(f"\n[Train] Creating RSL-RL runner...")

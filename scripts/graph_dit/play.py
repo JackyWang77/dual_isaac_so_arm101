@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2025, SO-ARM100 Project
+# Copyright (c) 2024-2025, SO-ARM101 Project
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -9,7 +9,7 @@ This script loads a trained Graph-DiT policy and runs it in an Isaac Lab environ
 
 Usage:
     ./isaaclab.sh -p scripts/graph_dit/play.py \
-        --task SO-ARM100-Pick-Place-DualArm-IK-Abs-v0 \
+        --task SO-ARM101-Pick-Place-DualArm-IK-Abs-v0 \
         --checkpoint ./logs/graph_dit/best_model.pt \
         --num_envs 64
 """
@@ -30,9 +30,9 @@ import numpy as np
 import torch
 
 import gymnasium as gym
-import SO_100.tasks  # noqa: F401  # Register environments
+import SO_101.tasks  # noqa: F401  # Register environments
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
-from SO_100.policies.graph_dit_policy import GraphDiTPolicy
+from SO_101.policies.graph_dit_policy import GraphDiTPolicy
 
 
 def play_graph_dit_policy(

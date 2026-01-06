@@ -78,7 +78,7 @@ from isaaclab.utils import configclass
 from isaaclab.utils.datasets import EpisodeData, HDF5DatasetFileHandler
 
 import isaaclab_tasks  # noqa: F401
-import SO_100.tasks  # noqa: F401  # Import custom tasks (SO-ARM100)
+import SO_101.tasks  # noqa: F401  # Import custom tasks (SO-ARM101)
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
 
 is_paused = False

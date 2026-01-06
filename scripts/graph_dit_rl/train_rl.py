@@ -29,9 +29,9 @@ from datetime import datetime
 import gymnasium as gym
 import torch
 
-import SO_100.tasks  # noqa: F401  # Register environments
-from SO_100.policies.graph_dit_rl_policy import GraphDiTRLPolicy, GraphDiTRLPolicyCfg
-from SO_100.policies.graph_dit_policy import GraphDiTPolicyCfg
+import SO_101.tasks  # noqa: F401  # Register environments
+from SO_101.policies.graph_dit_rl_policy import GraphDiTRLPolicy, GraphDiTRLPolicyCfg
+from SO_101.policies.graph_dit_policy import GraphDiTPolicyCfg
 
 
 def train_graph_dit_rl(

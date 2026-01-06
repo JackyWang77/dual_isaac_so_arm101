@@ -1,4 +1,4 @@
-# Copyright (c) 2024-2025, SO-ARM100 Project
+# Copyright (c) 2024-2025, SO-ARM101 Project
 # All rights reserved.
 #
 # SPDX-License-Identifier: BSD-3-Clause
@@ -10,7 +10,7 @@ Users should replace the placeholder GraphDiTPolicy implementation with their ow
 
 Usage:
     ./isaaclab.sh -p scripts/graph_dit/train.py \
-        --task SO-ARM100-Pick-Place-DualArm-IK-Abs-v0 \
+        --task SO-ARM101-Pick-Place-DualArm-IK-Abs-v0 \
         --dataset ./datasets/pick_place.hdf5 \
         --obs_dim 72 \
         --action_dim 8 \
@@ -42,8 +42,8 @@ from torch.utils.data._utils.collate import default_collate
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-import SO_100.tasks  # noqa: F401  # Register environments
-from SO_100.policies.graph_dit_policy import GraphDiTPolicy, GraphDiTPolicyCfg
+import SO_101.tasks  # noqa: F401  # Register environments
+from SO_101.policies.graph_dit_policy import GraphDiTPolicy, GraphDiTPolicyCfg
 
 
 class HDF5DemoDataset(Dataset):
