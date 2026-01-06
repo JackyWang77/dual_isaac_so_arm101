@@ -26,7 +26,7 @@ def object_is_lifted(
     env: ManagerBasedRLEnv,
     minimal_height: float,
     initial_height: float = 0.015,
-    object_cfg: SceneEntityCfg = SceneEntityCfg("object")
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
 ) -> torch.Tensor:
     """Reward the agent for lifting the object. Reward scales with lift distance.
 

@@ -23,7 +23,9 @@ if TYPE_CHECKING:
 
 
 def object_is_lifted(
-    env: ManagerBasedRLEnv, minimal_height: float, object_cfg: SceneEntityCfg = SceneEntityCfg("object")
+    env: ManagerBasedRLEnv,
+    minimal_height: float,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
 ) -> torch.Tensor:
     """Reward the agent for lifting the object above the minimal height."""
     object: RigidObject = env.scene[object_cfg.name]
@@ -65,11 +67,15 @@ def object_goal_distance(
     command = env.command_manager.get_command(command_name)
     # compute the desired position in the world frame
     des_pos_b = command[:, :3]
-    des_pos_w, _ = combine_frame_transforms(robot.data.root_state_w[:, :3], robot.data.root_state_w[:, 3:7], des_pos_b)
+    des_pos_w, _ = combine_frame_transforms(
+        robot.data.root_state_w[:, :3], robot.data.root_state_w[:, 3:7], des_pos_b
+    )
     # distance of the end-effector to the object: (num_envs,)
     distance = torch.norm(des_pos_w - object.data.root_pos_w[:, :3], dim=1)
     # rewarded if the object is lifted above the threshold
-    return (object.data.root_pos_w[:, 2] > minimal_height) * (1 - torch.tanh(distance / std))
+    return (object.data.root_pos_w[:, 2] > minimal_height) * (
+        1 - torch.tanh(distance / std)
+    )
 
 
 def object_ee_distance_and_lifted(
@@ -96,32 +102,32 @@ def closer_arm_reaches_object(
     ee_left_cfg: SceneEntityCfg = SceneEntityCfg("ee_left"),
 ) -> torch.Tensor:
     """Reward only the closer arm for reaching the object.
-    
+
     This encourages the closer arm to reach while the farther arm stays still.
     """
     object: RigidObject = env.scene[object_cfg.name]
     ee_right: FrameTransformer = env.scene[ee_right_cfg.name]
     ee_left: FrameTransformer = env.scene[ee_left_cfg.name]
-    
+
     # Object position
     obj_pos = object.data.root_pos_w
-    
+
     # End-effector positions
     ee_right_pos = ee_right.data.target_pos_w[..., 0, :]
     ee_left_pos = ee_left.data.target_pos_w[..., 0, :]
-    
+
     # Calculate distances
     dist_right = torch.norm(obj_pos - ee_right_pos, dim=1)
     dist_left = torch.norm(obj_pos - ee_left_pos, dim=1)
-    
+
     # Determine which arm is closer (1.0 for closer, 0.0 for farther)
     right_is_closer = (dist_right < dist_left).float()
     left_is_closer = (dist_left < dist_right).float()
-    
+
     # Reward only the closer arm for reaching
     right_reward = right_is_closer * (1 - torch.tanh(dist_right / std))
     left_reward = left_is_closer * (1 - torch.tanh(dist_left / std))
-    
+
     # Return combined reward (only one arm gets rewarded at a time)
     return right_reward + left_reward
 
@@ -135,7 +141,7 @@ def farther_arm_stays_still(
     left_arm_cfg: SceneEntityCfg = SceneEntityCfg("left_arm"),
 ) -> torch.Tensor:
     """Reward the farther arm for staying still (low joint velocities).
-    
+
     This encourages the farther arm to not move while the closer arm reaches.
     """
     object: RigidObject = env.scene[object_cfg.name]
@@ -143,30 +149,30 @@ def farther_arm_stays_still(
     ee_left: FrameTransformer = env.scene[ee_left_cfg.name]
     right_arm = env.scene[right_arm_cfg.name]
     left_arm = env.scene[left_arm_cfg.name]
-    
+
     # Object position
     obj_pos = object.data.root_pos_w
-    
+
     # End-effector positions
     ee_right_pos = ee_right.data.target_pos_w[..., 0, :]
     ee_left_pos = ee_left.data.target_pos_w[..., 0, :]
-    
+
     # Calculate distances
     dist_right = torch.norm(obj_pos - ee_right_pos, dim=1)
     dist_left = torch.norm(obj_pos - ee_left_pos, dim=1)
-    
+
     # Determine which arm is farther
     right_is_farther = (dist_right > dist_left).float()
     left_is_farther = (dist_left > dist_right).float()
-    
+
     # Calculate joint velocity magnitude for each arm
     right_vel_mag = torch.norm(right_arm.data.joint_vel, dim=1)
     left_vel_mag = torch.norm(left_arm.data.joint_vel, dim=1)
-    
+
     # Reward farther arm for staying still (lower velocity = higher reward)
     right_stillness = right_is_farther * torch.exp(-right_vel_mag)
     left_stillness = left_is_farther * torch.exp(-left_vel_mag)
-    
+
     return right_stillness + left_stillness
 
 
@@ -180,10 +186,10 @@ def grasp_intent(
     left_arm_cfg: SceneEntityCfg = SceneEntityCfg("left_arm"),
 ) -> torch.Tensor:
     """Reward the closer arm for closing gripper when near the object.
-    
+
     This solves the "hovering" problem where the agent learns to approach
     but never actually grasps. When ee is close enough, reward gripper closing.
-    
+
     Args:
         proximity_threshold: Distance threshold to start rewarding gripper closing.
     """
@@ -192,38 +198,38 @@ def grasp_intent(
     ee_left: FrameTransformer = env.scene[ee_left_cfg.name]
     right_arm = env.scene[right_arm_cfg.name]
     left_arm = env.scene[left_arm_cfg.name]
-    
+
     # Object position
     obj_pos = object.data.root_pos_w
-    
+
     # End-effector positions
     ee_right_pos = ee_right.data.target_pos_w[..., 0, :]
     ee_left_pos = ee_left.data.target_pos_w[..., 0, :]
-    
+
     # Calculate distances
     dist_right = torch.norm(obj_pos - ee_right_pos, dim=1)
     dist_left = torch.norm(obj_pos - ee_left_pos, dim=1)
-    
+
     # Determine which arm is closer
     right_is_closer = (dist_right < dist_left).float()
     left_is_closer = (dist_left < dist_right).float()
-    
+
     # Get gripper joint positions (jaw_joint: 0.698 = open, 0.0 = closed)
     # jaw_joint is the last joint
     right_gripper_pos = right_arm.data.joint_pos[:, -1]  # jaw_joint
-    left_gripper_pos = left_arm.data.joint_pos[:, -1]    # jaw_joint
-    
+    left_gripper_pos = left_arm.data.joint_pos[:, -1]  # jaw_joint
+
     # Gripper closing reward: higher when gripper is more closed (lower pos)
     # Normalized: (0.698 - pos) / 0.698 gives 0 when open, 1 when closed
     right_gripper_closed = (0.698 - right_gripper_pos) / 0.698
     left_gripper_closed = (0.698 - left_gripper_pos) / 0.698
-    
+
     # Only reward gripper closing when close to object
     right_near = (dist_right < proximity_threshold).float()
     left_near = (dist_left < proximity_threshold).float()
-    
+
     # Reward = closer_arm * near_object * gripper_closing
     right_reward = right_is_closer * right_near * right_gripper_closed
     left_reward = left_is_closer * left_near * left_gripper_closed
-    
+
     return right_reward + left_reward

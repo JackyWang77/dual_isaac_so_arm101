@@ -1,6 +1,6 @@
 #!/bin/bash
 # Train Graph DiT RL Policy using RSL-RL framework (multi-env parallel training)
-# 
+#
 # This script uses the STANDARD RSL-RL training flow, just like lift task.
 # It sets the pretrained_checkpoint via environment variable and calls the standard script.
 #

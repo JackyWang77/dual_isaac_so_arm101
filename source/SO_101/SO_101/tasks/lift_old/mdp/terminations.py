@@ -50,7 +50,9 @@ def object_reached_goal(
     command = env.command_manager.get_command(command_name)
     # compute the desired position in the world frame
     des_pos_b = command[:, :3]
-    des_pos_w, _ = combine_frame_transforms(robot.data.root_state_w[:, :3], robot.data.root_state_w[:, 3:7], des_pos_b)
+    des_pos_w, _ = combine_frame_transforms(
+        robot.data.root_state_w[:, :3], robot.data.root_state_w[:, 3:7], des_pos_b
+    )
     # distance of the end-effector to the object: (num_envs,)
     distance = torch.norm(des_pos_w - object.data.root_pos_w[:, :3], dim=1)
 
@@ -65,25 +67,25 @@ def object_lifted_termination(
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
 ) -> torch.Tensor:
     """Termination condition for checking if the object is lifted above a minimum height.
-    
+
     Returns a boolean tensor (True if object is lifted, False otherwise).
     This is different from the reward/observation functions which return float values.
-    
+
     Args:
         env: The environment
         minimal_height: Minimum height (in meters) above initial position for object to be considered "lifted"
         initial_height: Initial height of the object (default 0.015m for cube)
         object_cfg: Configuration for the object
-        
+
     Returns:
         Boolean tensor indicating if object is above minimal_height
     """
     object: RigidObject = env.scene[object_cfg.name]
-    
+
     # Get object height (z position in world frame)
     object_height = object.data.root_pos_w[:, 2]  # [num_envs]
-    
+
     # Check if object is lifted to at least minimal_height above initial position
     lifted = object_height >= (initial_height + minimal_height)
-    
+
     return lifted  # Return boolean tensor for termination conditions

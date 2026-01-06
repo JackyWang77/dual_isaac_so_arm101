@@ -11,14 +11,8 @@
 from dataclasses import MISSING
 
 import isaaclab.sim as sim_utils
-
-from . import mdp
-from isaaclab.assets import (
-    ArticulationCfg,
-    AssetBaseCfg,
-    DeformableObjectCfg,
-    RigidObjectCfg,
-)
+from isaaclab.assets import (ArticulationCfg, AssetBaseCfg,
+                             DeformableObjectCfg, RigidObjectCfg)
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
@@ -28,11 +22,14 @@ from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg
-from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdFileCfg
+from isaaclab.sensors.frame_transformer.frame_transformer_cfg import \
+    FrameTransformerCfg
+from isaaclab.sim.spawners.from_files.from_files_cfg import (GroundPlaneCfg,
+                                                             UsdFileCfg)
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
+from . import mdp
 
 ##
 # Scene definition
@@ -56,8 +53,12 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     # Table
     table = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Table",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.5, 0, 0], rot=[0.707, 0, 0, 0.707]),
-        spawn=UsdFileCfg(usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/SeattleLabTable/table_instanceable.usd"),
+        init_state=AssetBaseCfg.InitialStateCfg(
+            pos=[0.5, 0, 0], rot=[0.707, 0, 0, 0.707]
+        ),
+        spawn=UsdFileCfg(
+            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/SeattleLabTable/table_instanceable.usd"
+        ),
     )
 
     # plane
@@ -84,7 +85,9 @@ class ActionsCfg:
     """Action specifications for the MDP."""
 
     # will be set by agent env cfg
-    arm_action: mdp.JointPositionActionCfg | mdp.DifferentialInverseKinematicsActionCfg = MISSING
+    arm_action: (
+        mdp.JointPositionActionCfg | mdp.DifferentialInverseKinematicsActionCfg
+    ) = MISSING
     gripper_action: mdp.BinaryJointPositionActionCfg = MISSING
 
 
@@ -155,7 +158,9 @@ class EventCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
 
-    reaching_object = RewTerm(func=mdp.object_ee_distance, params={"std": 0.05}, weight=10.0)
+    reaching_object = RewTerm(
+        func=mdp.object_ee_distance, params={"std": 0.05}, weight=10.0
+    )
 
     gripper_closing = RewTerm(
         func=mdp.gripper_closing_reward,
@@ -180,7 +185,8 @@ class TerminationsCfg:
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
 
     object_dropping = DoneTerm(
-        func=mdp.root_height_below_minimum, params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("object")}
+        func=mdp.root_height_below_minimum,
+        params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("object")},
     )
 
     # Success condition: EE reached object and gripper closed
@@ -203,11 +209,13 @@ class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     action_rate = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -1e-3, "num_steps": 5000}
+        func=mdp.modify_reward_weight,
+        params={"term_name": "action_rate", "weight": -1e-3, "num_steps": 5000},
     )
 
     joint_vel = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "joint_vel", "weight": -1e-3, "num_steps": 5000}
+        func=mdp.modify_reward_weight,
+        params={"term_name": "joint_vel", "weight": -1e-3, "num_steps": 5000},
     )
 
 

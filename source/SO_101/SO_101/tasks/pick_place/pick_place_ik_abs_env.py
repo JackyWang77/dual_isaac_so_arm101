@@ -3,10 +3,10 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-import torch
 from collections.abc import Sequence
 
 import isaaclab.utils.math as PoseUtils
+import torch
 from isaaclab.envs import ManagerBasedRLMimicEnv
 
 from .pick_place_ik_abs_env_cfg import DualArmPickPlaceIKAbsEnvCfg
@@ -14,7 +14,7 @@ from .pick_place_ik_abs_env_cfg import DualArmPickPlaceIKAbsEnvCfg
 
 class DualArmPickPlaceIKAbsEnv(ManagerBasedRLMimicEnv):
     """Isaac Lab Mimic environment wrapper for SO-ARM101 Pick & Place with IK Absolute control.
-    
+
     Action space: [x, y, z, qw, qx, qy, qz, gripper] (8 dimensions)
     - Position (x, y, z): Target end-effector position in robot base frame
     - Quaternion (qw, qx, qy, qz): Target end-effector orientation
@@ -26,13 +26,15 @@ class DualArmPickPlaceIKAbsEnv(ManagerBasedRLMimicEnv):
     def __init__(self, cfg: DualArmPickPlaceIKAbsEnvCfg, **kwargs):
         super().__init__(cfg, **kwargs)
 
-    def get_robot_eef_pose(self, eef_name: str, env_ids: Sequence[int] | None = None) -> torch.Tensor:
+    def get_robot_eef_pose(
+        self, eef_name: str, env_ids: Sequence[int] | None = None
+    ) -> torch.Tensor:
         """Get current robot end effector pose from observation buffer.
-        
+
         Args:
             eef_name: Name of the end effector (not used in single-arm setup)
             env_ids: Environment IDs to get poses for (None = all environments)
-            
+
         Returns:
             torch.Tensor: End-effector poses as 4x4 transformation matrices
         """
@@ -46,13 +48,17 @@ class DualArmPickPlaceIKAbsEnv(ManagerBasedRLMimicEnv):
         return PoseUtils.make_pose(eef_pos, PoseUtils.matrix_from_quat(eef_quat))
 
     def target_eef_pose_to_action(
-        self, target_eef_pose_dict: dict, gripper_action_dict: dict, noise: float | None = None, env_id: int = 0
+        self,
+        target_eef_pose_dict: dict,
+        gripper_action_dict: dict,
+        noise: float | None = None,
+        env_id: int = 0,
     ) -> torch.Tensor:
         """Convert target end-effector pose and gripper action to environment action.
-        
+
         This method transforms a dictionary of target end-effector poses and gripper actions
         into a single action tensor that can be used by the IK Absolute controller.
-        
+
         Args:
             target_eef_pose_dict: Dictionary containing target end-effector pose(s),
                 with keys as eef names and values as 4x4 pose tensors.
@@ -61,7 +67,7 @@ class DualArmPickPlaceIKAbsEnv(ManagerBasedRLMimicEnv):
             noise: Optional noise magnitude to apply to the pose action for exploration.
                 If provided, random noise is generated and added to the pose action.
             env_id: Environment ID for multi-environment setups, defaults to 0.
-            
+
         Returns:
             torch.Tensor: Action tensor [pos(3), quat(4), gripper(1)] = 8 dimensions
         """
@@ -74,8 +80,10 @@ class DualArmPickPlaceIKAbsEnv(ManagerBasedRLMimicEnv):
 
         # Construct pose action: [x, y, z, qw, qx, qy, qz]
         # PoseUtils.quat_from_matrix returns quaternion in [w, x, y, z] format
-        pose_action = torch.cat([target_pos, PoseUtils.quat_from_matrix(target_rot)], dim=0)
-        
+        pose_action = torch.cat(
+            [target_pos, PoseUtils.quat_from_matrix(target_rot)], dim=0
+        )
+
         # Add exploration noise to action if specified
         if noise is not None:
             noise_vec = noise * torch.randn_like(pose_action)
@@ -84,12 +92,14 @@ class DualArmPickPlaceIKAbsEnv(ManagerBasedRLMimicEnv):
         # Combine pose action with gripper action: [pos(3), quat(4), gripper(1)]
         return torch.cat([pose_action, gripper_action], dim=0).unsqueeze(0)
 
-    def action_to_target_eef_pose(self, action: torch.Tensor) -> dict[str, torch.Tensor]:
+    def action_to_target_eef_pose(
+        self, action: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
         """Convert action tensor back to target end-effector pose dictionary.
-        
+
         Args:
             action: Action tensor [pos(3), quat(4), gripper(1)]
-            
+
         Returns:
             dict: Dictionary with eef name as key and 4x4 pose tensor as value
         """
@@ -105,27 +115,31 @@ class DualArmPickPlaceIKAbsEnv(ManagerBasedRLMimicEnv):
 
         return {eef_name: target_poses}
 
-    def actions_to_gripper_actions(self, actions: torch.Tensor) -> dict[str, torch.Tensor]:
+    def actions_to_gripper_actions(
+        self, actions: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
         """Extract gripper actions from full action tensor.
-        
+
         Args:
             actions: Full action tensor [pos(3), quat(4), gripper(1)]
-            
+
         Returns:
             dict: Dictionary with eef name as key and gripper action as value
         """
         # Last dimension is gripper action
         return {"end_effector": actions[:, -1:]}
 
-    def get_subtask_term_signals(self, env_ids: Sequence[int] | None = None) -> dict[str, torch.Tensor]:
+    def get_subtask_term_signals(
+        self, env_ids: Sequence[int] | None = None
+    ) -> dict[str, torch.Tensor]:
         """Get subtask termination signals from observation buffer.
-        
+
         These signals indicate when each subtask is completed,
         used by the Mimic data generation system to segment demonstrations.
-        
+
         Args:
             env_ids: Environment IDs to get signals for (None = all environments)
-            
+
         Returns:
             dict: Dictionary mapping subtask names to termination signal tensors
         """
@@ -134,39 +148,41 @@ class DualArmPickPlaceIKAbsEnv(ManagerBasedRLMimicEnv):
 
         signals = dict()
         subtask_terms = self.obs_buf["subtask_terms"]
-        
+
         # Simplified task: push_cube and lift_ee
         signals["push_cube"] = subtask_terms["push_cube"][env_ids]
         signals["lift_ee"] = subtask_terms["lift_ee"][env_ids]
-        
+
         return signals
 
-    def get_object_poses(self, env_ids: Sequence[int] | None = None) -> dict[str, torch.Tensor]:
+    def get_object_poses(
+        self, env_ids: Sequence[int] | None = None
+    ) -> dict[str, torch.Tensor]:
         """Get the poses of all manipulated objects as 4x4 transformation matrices.
-        
+
         Args:
             env_ids: Environment IDs to query, defaults to all environments
-        
+
         Returns:
             dict: Dictionary mapping object name to 4x4 pose matrix
         """
         if env_ids is None:
             env_ids = slice(None)
-        
+
         object_poses = {}
-        
+
         # Get cube pose as 4x4 matrix
         cube = self.scene["cube"]
         cube_pos = cube.data.root_pos_w[env_ids]
         cube_quat = cube.data.root_quat_w[env_ids]
         cube_rot = PoseUtils.matrix_from_quat(cube_quat)
         object_poses["cube"] = PoseUtils.make_pose(cube_pos, cube_rot)
-        
+
         # Get tray pose as 4x4 matrix (target object)
         tray = self.scene["object"]
         tray_pos = tray.data.root_pos_w[env_ids]
         tray_quat = tray.data.root_quat_w[env_ids]
         tray_rot = PoseUtils.matrix_from_quat(tray_quat)
         object_poses["object"] = PoseUtils.make_pose(tray_pos, tray_rot)
-        
+
         return object_poses

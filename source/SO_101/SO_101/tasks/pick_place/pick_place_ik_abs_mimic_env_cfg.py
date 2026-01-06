@@ -21,7 +21,7 @@ from .pick_place_ik_abs_env_cfg import DualArmPickPlaceIKAbsEnvCfg
 class DualArmPickPlaceIKAbsMimicEnvCfg(DualArmPickPlaceIKAbsEnvCfg, MimicEnvCfg):
     """
     Isaac Lab Mimic environment config class for IK Absolute env.
-    
+
     This environment:
     - Uses IK Absolute control (action = target EEF pose)
     - Has subtask configurations for data generation
@@ -51,7 +51,7 @@ class DualArmPickPlaceIKAbsMimicEnvCfg(DualArmPickPlaceIKAbsEnvCfg, MimicEnvCfg)
 
         # Simplified tasks: push_cube and lift_ee
         subtask_configs = []
-        
+
         # Subtask 1: Push cube to target location
         subtask_configs.append(
             SubTaskConfig(
@@ -68,7 +68,7 @@ class DualArmPickPlaceIKAbsMimicEnvCfg(DualArmPickPlaceIKAbsEnvCfg, MimicEnvCfg)
                 next_subtask_description="Lift hand up",
             )
         )
-        
+
         # Subtask 2: Lift EE up (final subtask)
         subtask_configs.append(
             SubTaskConfig(
@@ -84,6 +84,5 @@ class DualArmPickPlaceIKAbsMimicEnvCfg(DualArmPickPlaceIKAbsEnvCfg, MimicEnvCfg)
                 description="Lift hand up",
             )
         )
-        
-        self.subtask_configs["end_effector"] = subtask_configs
 
+        self.subtask_configs["end_effector"] = subtask_configs

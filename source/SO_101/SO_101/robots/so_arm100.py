@@ -43,7 +43,12 @@ SO_ARM101_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        rot=(0.7071068, 0.0, 0.0, 0.7071068),  # Quaternion for 90 degrees rotation around Y-axis
+        rot=(
+            0.7071068,
+            0.0,
+            0.0,
+            0.7071068,
+        ),  # Quaternion for 90 degrees rotation around Y-axis
         joint_pos={
             "Shoulder_Rotation": 0.0,
             "Shoulder_Pitch": 0.0,

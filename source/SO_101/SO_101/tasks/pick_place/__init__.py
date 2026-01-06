@@ -6,26 +6,22 @@
 
 import gymnasium as gym  # type: ignore[import]
 
-from . import dual_pick_place_ik_rel_mimic_env_cfg
 from . import dual_pick_place_ik_rel_mimic_env  # noqa: F401
-from . import pick_place_ik_abs_env_cfg
 from . import pick_place_ik_abs_env  # noqa: F401
 from . import pick_place_ik_abs_mimic_env_cfg  # IK Abs Mimic config
-from . import pick_place_joint_pos_env_cfg
 from . import pick_place_joint_for_ik_abs_env  # noqa: F401
-from . import pick_place_joint_for_ik_abs_mimic_env_cfg
 from . import pick_place_joint_states_mimic_env  # noqa: F401
-from . import pick_place_joint_states_mimic_env_cfg
+from . import (dual_pick_place_ik_rel_mimic_env_cfg, pick_place_ik_abs_env_cfg,
+               pick_place_joint_for_ik_abs_mimic_env_cfg,
+               pick_place_joint_pos_env_cfg,
+               pick_place_joint_states_mimic_env_cfg)
 
 ##
 # IK Relative Mimic Environment
 ##
-_ENV_CFG_REL = (
-    dual_pick_place_ik_rel_mimic_env_cfg.DualArmPickPlaceIKRelMimicEnvCfg
-)
+_ENV_CFG_REL = dual_pick_place_ik_rel_mimic_env_cfg.DualArmPickPlaceIKRelMimicEnvCfg
 _ENTRY_POINT_REL = (
-    f"{__name__}.dual_pick_place_ik_rel_mimic_env:"
-    "DualArmPickPlaceIKRelMimicEnv"
+    f"{__name__}.dual_pick_place_ik_rel_mimic_env:" "DualArmPickPlaceIKRelMimicEnv"
 )
 
 ##
@@ -44,7 +40,9 @@ _ENTRY_POINT_ABS_MIMIC = f"{__name__}.pick_place_ik_abs_env:DualArmPickPlaceIKAb
 # Joint Control for IK Absolute Data Collection
 ##
 _ENV_CFG_JOINT_FOR_IK_ABS = pick_place_joint_pos_env_cfg.DualArmPickPlaceJointPosEnvCfg
-_ENTRY_POINT_JOINT_FOR_IK_ABS = f"{__name__}.pick_place_joint_for_ik_abs_env:DualArmPickPlaceJointForIKAbsEnv"
+_ENTRY_POINT_JOINT_FOR_IK_ABS = (
+    f"{__name__}.pick_place_joint_for_ik_abs_env:DualArmPickPlaceJointForIKAbsEnv"
+)
 
 ##
 # Joint Control for IK Absolute Data Collection with MimicEnvCfg (subtask configs)

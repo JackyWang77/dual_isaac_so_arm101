@@ -11,14 +11,8 @@
 from dataclasses import MISSING
 
 import isaaclab.sim as sim_utils
-
-from . import mdp
-from isaaclab.assets import (
-    ArticulationCfg,
-    AssetBaseCfg,
-    DeformableObjectCfg,
-    RigidObjectCfg,
-)
+from isaaclab.assets import (ArticulationCfg, AssetBaseCfg,
+                             DeformableObjectCfg, RigidObjectCfg)
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
@@ -29,10 +23,14 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import CameraCfg
-from isaaclab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg
-from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdFileCfg
+from isaaclab.sensors.frame_transformer.frame_transformer_cfg import \
+    FrameTransformerCfg
+from isaaclab.sim.spawners.from_files.from_files_cfg import (GroundPlaneCfg,
+                                                             UsdFileCfg)
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+
+from . import mdp
 
 # from isaaclab.utils.offset import OffsetCfg
 # from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
@@ -64,8 +62,12 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     # Table
     table = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Table",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.5, 0, 0], rot=[0.707, 0, 0, 0.707]),
-        spawn=UsdFileCfg(usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/SeattleLabTable/table_instanceable.usd"),
+        init_state=AssetBaseCfg.InitialStateCfg(
+            pos=[0.5, 0, 0], rot=[0.707, 0, 0, 0.707]
+        ),
+        spawn=UsdFileCfg(
+            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/SeattleLabTable/table_instanceable.usd"
+        ),
     )
 
     # plane
@@ -118,6 +120,7 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     #     offset=CameraCfg.OffsetCfg(pos=(0.510, 0.0, 0.015), rot=(0.5, -0.5, 0.5, -0.5), convention="ros"),
     # )
 
+
 ##
 # MDP settings
 ##
@@ -138,13 +141,17 @@ class ActionsCfg:
     """
 
     # right arm joint control (must be filled in env __post_init__)
-    right_arm_action: mdp.JointPositionActionCfg | mdp.DifferentialInverseKinematicsActionCfg = MISSING
+    right_arm_action: (
+        mdp.JointPositionActionCfg | mdp.DifferentialInverseKinematicsActionCfg
+    ) = MISSING
 
     # right gripper open/close
     right_gripper_action: mdp.BinaryJointPositionActionCfg = MISSING
 
     # left arm joint control
-    left_arm_action: mdp.JointPositionActionCfg | mdp.DifferentialInverseKinematicsActionCfg = MISSING
+    left_arm_action: (
+        mdp.JointPositionActionCfg | mdp.DifferentialInverseKinematicsActionCfg
+    ) = MISSING
 
     # left gripper open/close
     left_gripper_action: mdp.BinaryJointPositionActionCfg = MISSING
@@ -249,9 +256,9 @@ class DualRewardsCfg:
             "ee_right_cfg": SceneEntityCfg("ee_right"),
             "ee_left_cfg": SceneEntityCfg("ee_left"),
         },
-        weight=10.0  # Much higher weight to enforce smart arm selection
+        weight=10.0,  # Much higher weight to enforce smart arm selection
     )
-    
+
     farther_arm_stays_still = RewTerm(
         func=mdp.farther_arm_stays_still,
         params={
@@ -260,7 +267,7 @@ class DualRewardsCfg:
             "right_arm_cfg": SceneEntityCfg("right_arm"),
             "left_arm_cfg": SceneEntityCfg("left_arm"),
         },
-        weight=2.0
+        weight=2.0,
     )
 
     # Grasp intent: reward closing gripper when near object (solves "hovering" problem)
@@ -273,14 +280,12 @@ class DualRewardsCfg:
             "right_arm_cfg": SceneEntityCfg("right_arm"),
             "left_arm_cfg": SceneEntityCfg("left_arm"),
         },
-        weight=8.0  # Important: encourage gripper closing when close
+        weight=8.0,  # Important: encourage gripper closing when close
     )
 
     # Lift object reward (only need one since object is shared)
     lifting_object = RewTerm(
-        func=mdp.object_is_lifted,
-        params={"minimal_height": 0.04},
-        weight=15.0
+        func=mdp.object_is_lifted, params={"minimal_height": 0.04}, weight=15.0
     )
 
     # Action penalty
@@ -299,7 +304,6 @@ class DualRewardsCfg:
     )
 
 
-
 @configclass
 class TerminationsCfg:
     """Termination terms for the MDP."""
@@ -307,7 +311,8 @@ class TerminationsCfg:
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
 
     object_dropping = DoneTerm(
-        func=mdp.root_height_below_minimum, params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("object")}
+        func=mdp.root_height_below_minimum,
+        params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("object")},
     )
 
 

@@ -21,7 +21,7 @@ from .reach_ik_abs_env_cfg import SoArm100ReachIKAbsEnvCfg
 class SoArm100ReachIKAbsMimicEnvCfg(SoArm100ReachIKAbsEnvCfg, MimicEnvCfg):
     """
     Isaac Lab Mimic environment config class for IK Absolute env.
-    
+
     This environment:
     - Uses IK Absolute control (action = target EEF pose)
     - Has subtask configurations for data generation
@@ -51,7 +51,7 @@ class SoArm100ReachIKAbsMimicEnvCfg(SoArm100ReachIKAbsEnvCfg, MimicEnvCfg):
 
         # Subtask configuration for the REACH task
         subtask_configs = []
-        
+
         # Subtask: Reach object (EE close to object and gripper closed)
         subtask_configs.append(
             SubTaskConfig(
@@ -67,5 +67,5 @@ class SoArm100ReachIKAbsMimicEnvCfg(SoArm100ReachIKAbsEnvCfg, MimicEnvCfg):
                 description="Reach object with EE and close gripper",
             )
         )
-        
+
         self.subtask_configs["end_effector"] = subtask_configs

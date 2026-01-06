@@ -3,7 +3,7 @@
 #
 # Usage:
 #   bash play_graph_dit.sh [task] [mode|checkpoint_path]
-#   
+#
 #   task: reach (default) or lift
 #   mode: ddpm, flow_matching, or checkpoint path
 
@@ -33,7 +33,7 @@ elif [ "$TASK" != "reach" ] && [ "$TASK" != "lift" ]; then
 else
     # Task is valid, check second argument
     MODE="$ARG2"
-    
+
     # If checkpoint path is provided directly, use it
     if [ -n "$MODE" ] && [ -f "$MODE" ]; then
         LATEST_CHECKPOINT="$MODE"

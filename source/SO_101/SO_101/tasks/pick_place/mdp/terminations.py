@@ -11,12 +11,12 @@ the termination introduced by the function.
 
 from __future__ import annotations
 
-import torch
 from typing import TYPE_CHECKING
 
+import isaaclab.utils.math as math_utils
+import torch
 from isaaclab.assets import Articulation, RigidObject
 from isaaclab.managers import SceneEntityCfg
-import isaaclab.utils.math as math_utils
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -157,9 +157,7 @@ def objects_picked_and_placed(
         knife_target_offset, dtype=plate_rel_pos.dtype, device=env.device
     )
 
-    fork_planar_error = torch.linalg.norm(
-        fork_rel_pos[:, :2] - fork_target, dim=1
-    )
+    fork_planar_error = torch.linalg.norm(fork_rel_pos[:, :2] - fork_target, dim=1)
     fork_height_ok = (
         torch.abs(fork_rel_pos[:, 2] - utensil_height_target) < height_tolerance
     )
@@ -168,9 +166,7 @@ def objects_picked_and_placed(
         fork_height_ok,
     )
 
-    knife_planar_error = torch.linalg.norm(
-        knife_rel_pos[:, :2] - knife_target, dim=1
-    )
+    knife_planar_error = torch.linalg.norm(knife_rel_pos[:, :2] - knife_target, dim=1)
     knife_height_ok = (
         torch.abs(knife_rel_pos[:, 2] - utensil_height_target) < height_tolerance
     )
@@ -184,10 +180,7 @@ def objects_picked_and_placed(
         torch.logical_and(fork_ok, knife_ok),
     )
 
-    if (
-        hasattr(env.scene, "surface_grippers")
-        and len(env.scene.surface_grippers) > 0
-    ):
+    if hasattr(env.scene, "surface_grippers") and len(env.scene.surface_grippers) > 0:
         surface_gripper = env.scene.surface_grippers["surface_gripper"]
         # 1: closed, 0: closing, -1: open
         suction_cup_status = surface_gripper.state.view(-1, 1)
@@ -200,26 +193,31 @@ def objects_picked_and_placed(
             open_val = torch.tensor(
                 env.cfg.gripper_open_val, dtype=plate_rel_pos.dtype
             ).to(env.device)
-            
+
             # Support both single-DOF and parallel grippers
             # Use larger tolerance (0.1) since gripper may not reach exact open position
             if len(gripper_joint_ids) == 1:
                 # Single DOF gripper (like SO-ARM101)
-                gripper_open = torch.abs(
-                    robot.data.joint_pos[:, gripper_joint_ids[0]] - open_val
-                ) < 0.1
+                gripper_open = (
+                    torch.abs(robot.data.joint_pos[:, gripper_joint_ids[0]] - open_val)
+                    < 0.1
+                )
             elif len(gripper_joint_ids) == 2:
                 # Parallel gripper with two joints
-                finger_0_open = torch.abs(
-                    robot.data.joint_pos[:, gripper_joint_ids[0]] - open_val
-                ) < 0.1
-                finger_1_open = torch.abs(
-                    robot.data.joint_pos[:, gripper_joint_ids[1]] - open_val
-                ) < 0.1
+                finger_0_open = (
+                    torch.abs(robot.data.joint_pos[:, gripper_joint_ids[0]] - open_val)
+                    < 0.1
+                )
+                finger_1_open = (
+                    torch.abs(robot.data.joint_pos[:, gripper_joint_ids[1]] - open_val)
+                    < 0.1
+                )
                 gripper_open = torch.logical_and(finger_0_open, finger_1_open)
             else:
-                raise ValueError(f"Unsupported gripper configuration with {len(gripper_joint_ids)} joints. Expected 1 or 2.")
-            
+                raise ValueError(
+                    f"Unsupported gripper configuration with {len(gripper_joint_ids)} joints. Expected 1 or 2."
+                )
+
             layout_ok = torch.logical_and(gripper_open, layout_ok)
         else:
             raise ValueError("No gripper_joint_names found in environment config")
@@ -230,7 +228,9 @@ def objects_picked_and_placed(
 def objects_picked_and_placed_no_knife(
     env: ManagerBasedRLEnv,
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    plate_cfg: SceneEntityCfg = SceneEntityCfg("plate"),  # Not used, kept for compatibility
+    plate_cfg: SceneEntityCfg = SceneEntityCfg(
+        "plate"
+    ),  # Not used, kept for compatibility
     cube_cfg: SceneEntityCfg = SceneEntityCfg("cube"),
     tray_cfg: SceneEntityCfg = SceneEntityCfg("object"),
     plate_center_tolerance: float = 0.03,  # Not used, kept for compatibility
@@ -241,7 +241,7 @@ def objects_picked_and_placed_no_knife(
     cube_target_offset: tuple[float, float] = (0.0, 0.0),  # Tray center
 ):
     """Check if cube is placed on tray with the gripper released.
-    
+
     Simplified version - only checks cube placement (plate removed for testing).
     """
 
@@ -263,9 +263,7 @@ def objects_picked_and_placed_no_knife(
         cube_target_offset, dtype=cube_rel_pos.dtype, device=env.device
     )
 
-    cube_planar_error = torch.linalg.norm(
-        cube_rel_pos[:, :2] - cube_target, dim=1
-    )
+    cube_planar_error = torch.linalg.norm(cube_rel_pos[:, :2] - cube_target, dim=1)
     cube_height_ok = (
         torch.abs(cube_rel_pos[:, 2] - cube_height_target) < height_tolerance
     )
@@ -277,10 +275,7 @@ def objects_picked_and_placed_no_knife(
     # Only check cube (plate removed for testing)
     layout_ok = cube_ok
 
-    if (
-        hasattr(env.scene, "surface_grippers")
-        and len(env.scene.surface_grippers) > 0
-    ):
+    if hasattr(env.scene, "surface_grippers") and len(env.scene.surface_grippers) > 0:
         surface_gripper = env.scene.surface_grippers["surface_gripper"]
         # 1: closed, 0: closing, -1: open
         suction_cup_status = surface_gripper.state.view(-1, 1)
@@ -293,26 +288,31 @@ def objects_picked_and_placed_no_knife(
             open_val = torch.tensor(
                 env.cfg.gripper_open_val, dtype=cube_rel_pos.dtype
             ).to(env.device)
-            
+
             # Support both single-DOF and parallel grippers
             # Use larger tolerance (0.1) since gripper may not reach exact open position
             if len(gripper_joint_ids) == 1:
                 # Single DOF gripper (like SO-ARM101)
-                gripper_open = torch.abs(
-                    robot.data.joint_pos[:, gripper_joint_ids[0]] - open_val
-                ) < 0.1
+                gripper_open = (
+                    torch.abs(robot.data.joint_pos[:, gripper_joint_ids[0]] - open_val)
+                    < 0.1
+                )
             elif len(gripper_joint_ids) == 2:
                 # Parallel gripper with two joints
-                finger_0_open = torch.abs(
-                    robot.data.joint_pos[:, gripper_joint_ids[0]] - open_val
-                ) < 0.1
-                finger_1_open = torch.abs(
-                    robot.data.joint_pos[:, gripper_joint_ids[1]] - open_val
-                ) < 0.1
+                finger_0_open = (
+                    torch.abs(robot.data.joint_pos[:, gripper_joint_ids[0]] - open_val)
+                    < 0.1
+                )
+                finger_1_open = (
+                    torch.abs(robot.data.joint_pos[:, gripper_joint_ids[1]] - open_val)
+                    < 0.1
+                )
                 gripper_open = torch.logical_and(finger_0_open, finger_1_open)
             else:
-                raise ValueError(f"Unsupported gripper configuration with {len(gripper_joint_ids)} joints. Expected 1 or 2.")
-            
+                raise ValueError(
+                    f"Unsupported gripper configuration with {len(gripper_joint_ids)} joints. Expected 1 or 2."
+                )
+
             layout_ok = torch.logical_and(gripper_open, layout_ok)
         else:
             raise ValueError("No gripper_joint_names found in environment config")
@@ -328,7 +328,7 @@ def cube_pushed(
     cube_target_offset: tuple[float, float] = (0.0, 0.0),  # Tray center
 ):
     """Check if cube is pushed to target position (no gripper check).
-    
+
     Simplified push task - only checks cube position on tray, no gripper state required.
     """
     cube: RigidObject = env.scene[cube_cfg.name]
@@ -348,10 +348,8 @@ def cube_pushed(
         cube_target_offset, dtype=cube_rel_pos.dtype, device=env.device
     )
 
-    cube_planar_error = torch.linalg.norm(
-        cube_rel_pos[:, :2] - cube_target, dim=1
-    )
-    
+    cube_planar_error = torch.linalg.norm(cube_rel_pos[:, :2] - cube_target, dim=1)
+
     # Only check planar position, no height or gripper check
     pushed = cube_planar_error < cube_position_tolerance
 
@@ -364,18 +362,18 @@ def ee_lifted_termination(
     min_height: float = 0.07,  # 7cm above table
 ):
     """Check if the end-effector is lifted above a minimum height.
-    
+
     Used as termination condition for "lift hand up" after completing a task.
     """
     from isaaclab.sensors import FrameTransformer
-    
+
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
-    
+
     # Get EE height (z position in world frame)
     ee_height = ee_frame.data.target_pos_w[:, 0, 2]  # [num_envs]
-    
+
     lifted = ee_height > min_height
-    
+
     return lifted
 
 
@@ -389,13 +387,15 @@ def push_and_lift_complete(
     min_height: float = 0.07,
 ):
     """Check if both push and lift tasks are complete.
-    
+
     Success condition: cube pushed to target AND EE lifted above 7cm.
     """
     # Check cube pushed
-    pushed = cube_pushed(env, cube_cfg, tray_cfg, cube_position_tolerance, cube_target_offset)
-    
+    pushed = cube_pushed(
+        env, cube_cfg, tray_cfg, cube_position_tolerance, cube_target_offset
+    )
+
     # Check EE lifted
     lifted = ee_lifted_termination(env, ee_frame_cfg, min_height)
-    
+
     return torch.logical_and(pushed, lifted)

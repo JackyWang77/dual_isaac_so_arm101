@@ -27,11 +27,10 @@ simulation_app = app_launcher.app
 import argparse
 from collections import deque
 
-import numpy as np
-import torch
-
 import gymnasium as gym
+import numpy as np
 import SO_101.tasks  # noqa: F401  # Register environments
+import torch
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
 from SO_101.policies.graph_dit_rl_policy import GraphDiTRLPolicy
 
@@ -82,8 +81,8 @@ def play_graph_dit_rl_policy(
         """Extract observation vector from dict."""
         if isinstance(obs_dict, dict):
             # Isaac Lab typically uses 'policy' key for observations
-            if 'policy' in obs_dict:
-                obs = obs_dict['policy']
+            if "policy" in obs_dict:
+                obs = obs_dict["policy"]
                 # Check if we need to remove target_object_position (if present)
                 if isinstance(obs, torch.Tensor):
                     if obs.shape[-1] == 39:  # Has target_object_position
@@ -191,8 +190,12 @@ def play_graph_dit_rl_policy(
     print(f"\n[Play] ===== Playback Complete =====")
     if episode_rewards:
         print(f"[Play] Total episodes: {total_episodes}")
-        print(f"[Play] Average reward: {np.mean(episode_rewards):.2f} ± {np.std(episode_rewards):.2f}")
-        print(f"[Play] Average length: {np.mean(episode_lengths):.2f} ± {np.std(episode_lengths):.2f}")
+        print(
+            f"[Play] Average reward: {np.mean(episode_rewards):.2f} ± {np.std(episode_rewards):.2f}"
+        )
+        print(
+            f"[Play] Average length: {np.mean(episode_lengths):.2f} ± {np.std(episode_lengths):.2f}"
+        )
         print(f"[Play] Max reward: {np.max(episode_rewards):.2f}")
         print(f"[Play] Min reward: {np.min(episode_rewards):.2f}")
 
@@ -206,7 +209,9 @@ def main():
     parser.add_argument(
         "--checkpoint", type=str, required=True, help="Path to RL policy checkpoint"
     )
-    parser.add_argument("--num_envs", type=int, default=64, help="Number of environments")
+    parser.add_argument(
+        "--num_envs", type=int, default=64, help="Number of environments"
+    )
     parser.add_argument(
         "--num_episodes", type=int, default=10, help="Number of episodes to run"
     )

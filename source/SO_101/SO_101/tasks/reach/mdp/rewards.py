@@ -49,14 +49,14 @@ def gripper_closing_reward(
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
     """Reward the agent for closing gripper when close to object.
-    
+
     Args:
         env: The environment
         std: Standard deviation for distance threshold (when close to object)
         object_cfg: Configuration for the object
         ee_frame_cfg: Configuration for the end-effector frame
         robot_cfg: Configuration for the robot
-        
+
     Returns:
         Reward tensor encouraging gripper closing when near object
     """
@@ -64,20 +64,24 @@ def gripper_closing_reward(
     object: RigidObject = env.scene[object_cfg.name]
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]
     robot: Articulation = env.scene[robot_cfg.name]
-    
+
     # Compute distance to object
     object_pos_w = object.data.root_pos_w[:, :3]  # [num_envs, 3]
     ee_pos_w = ee_frame.data.target_pos_w[..., 0, :]  # [num_envs, 3]
     distance = torch.norm(object_pos_w - ee_pos_w, dim=1)  # [num_envs]
-    
+
     # Check if close to object (within std threshold)
     close_to_object = distance < std
-    
+
     # Get gripper position
     gripper_joint_names = ["jaw_joint"]
     all_joint_names = robot.joint_names
-    gripper_joint_indices = [all_joint_names.index(name) for name in gripper_joint_names if name in all_joint_names]
-    
+    gripper_joint_indices = [
+        all_joint_names.index(name)
+        for name in gripper_joint_names
+        if name in all_joint_names
+    ]
+
     if len(gripper_joint_indices) > 0:
         gripper_pos = robot.data.joint_pos[:, gripper_joint_indices[0]]  # [num_envs]
         # Reward closing: closer to 0.0 is better (jaw_joint: 0.3 = open, 0.0 = closed)
@@ -86,8 +90,8 @@ def gripper_closing_reward(
         gripper_closing = torch.clamp(gripper_closing, 0.0, 1.0)
     else:
         gripper_closing = torch.zeros_like(distance)
-    
+
     # Only reward gripper closing when close to object
     reward = close_to_object.float() * gripper_closing
-    
+
     return reward

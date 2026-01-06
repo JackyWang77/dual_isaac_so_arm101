@@ -12,14 +12,15 @@ from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import FrameTransformerCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import OffsetCfg
-from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg, CollisionPropertiesCfg, MassPropertiesCfg
+from isaaclab.sim.schemas.schemas_cfg import (CollisionPropertiesCfg,
+                                              MassPropertiesCfg,
+                                              RigidBodyPropertiesCfg)
 from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
 from . import mdp
 from .mdp import dual_pick_place_events
-
 from .pick_place_env_cfg import PickPlaceEnvCfg
 
 ##
@@ -64,7 +65,7 @@ class EventCfg:
                 "x": (0.18, 0.22),  # Reduce X axis range: 18cm to 22cm
                 "y": (-0.10, 0.10),  # Reduce Y axis range: -10cm to 10cm
                 "z": (0.02, 0.02),  # Slightly closer to table
-                "yaw": (-0.5, 0.5)  # Reduce rotation range: -0.5 to 0.5 radians
+                "yaw": (-0.5, 0.5),  # Reduce rotation range: -0.5 to 0.5 radians
             },
             "min_separation": 0.04,  # Reduce object spacing: 4cm
             # Plate commented out for testing - only cube
@@ -105,7 +106,16 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
 
         # Set actions for the specific robot type (dual_arm)
         self.actions.arm_action = mdp.JointPositionActionCfg(
-            asset_name="robot", joint_names=["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_pitch_joint", "wrist_roll_joint"], scale=1.0, use_default_offset=False
+            asset_name="robot",
+            joint_names=[
+                "shoulder_pan_joint",
+                "shoulder_lift_joint",
+                "elbow_joint",
+                "wrist_pitch_joint",
+                "wrist_roll_joint",
+            ],
+            scale=1.0,
+            use_default_offset=False,
         )
         self.actions.gripper_action = mdp.JointPositionActionCfg(
             asset_name="robot",
@@ -122,7 +132,7 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
         # Increase physics iteration count to improve calculation accuracy
         cube_properties = RigidBodyPropertiesCfg(
             solver_position_iteration_count=32,  # Increased from 16 to 32 for more accurate calculation
-            solver_velocity_iteration_count=4,   # Increased from 1 to 4
+            solver_velocity_iteration_count=4,  # Increased from 1 to 4
             max_angular_velocity=1000.0,
             max_linear_velocity=1000.0,
             max_depenetration_velocity=5.0,
@@ -130,9 +140,7 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
         )
 
         # Get assets directory path
-        assets_dir = os.path.join(
-            os.path.dirname(__file__), "../../../assets"
-        )
+        assets_dir = os.path.join(os.path.dirname(__file__), "../../../assets")
         assets_dir = os.path.abspath(assets_dir)
 
         # Place objects on table surface
@@ -141,7 +149,7 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
         #   - plate_frame: [0.0, 0.0, 0.04] (frame marker 4cm above plate center)
         #   - cube_frame: [0.0, 0.0, 0.03] (frame marker 3cm above cube center)
         # Initial positions adjusted so that object frame markers align with desired EE positions
-        
+
         # Plate - COMMENTED OUT for testing (only cube)
         # self.scene.plate = RigidObjectCfg(
         #     prim_path="{ENV_REGEX_NS}/Plate",
@@ -179,7 +187,8 @@ class DualArmPickPlaceJointPosEnvCfg(PickPlaceEnvCfg):
             init_state=RigidObjectCfg.InitialStateCfg(
                 # Position adjusted for cube_frame offset [0.0, 0.0, 0.03]
                 # Frame marker will be at: cube_pos + [0.0, 0.0, 0.03]
-                pos=[0.30, 0.06, 0.02], rot=[1, 0, 0, 0]  # z=0.02 slightly above table
+                pos=[0.30, 0.06, 0.02],
+                rot=[1, 0, 0, 0],  # z=0.02 slightly above table
             ),
             spawn=UsdFileCfg(
                 usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",

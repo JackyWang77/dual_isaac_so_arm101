@@ -122,28 +122,36 @@ SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["arm"].velocity_limit_sim = 10.0
 SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["arm"].stiffness = {
     "shoulder_pan_joint": 800.0,  # Mass ~0.8kg  -> 0.8 * 1000
     "shoulder_lift_joint": 650.0,  # Mass ~0.65kg -> 0.65 * 1000
-    "elbow_joint": 400.0,         # Mass ~0.38kg -> 0.38 * 1000
-    "wrist_pitch_joint": 240.0,   # Mass ~0.24kg -> 0.24 * 1000
-    "wrist_roll_joint": 140.0,    # Mass ~0.14kg -> 0.14 * 1000
+    "elbow_joint": 400.0,  # Mass ~0.38kg -> 0.38 * 1000
+    "wrist_pitch_joint": 240.0,  # Mass ~0.24kg -> 0.24 * 1000
+    "wrist_roll_joint": 140.0,  # Mass ~0.14kg -> 0.14 * 1000
 }
 # [Damping] Calculated based on formula D = 2 * sqrt(Mass * Stiffness)
 # This is the perfect value to eliminate oscillations
 SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["arm"].damping = {
     "shoulder_pan_joint": 50.0,  # 2 * sqrt(0.8 * 800) = 2 * 25.2 = 50.4
     "shoulder_lift_joint": 41.0,  # 2 * sqrt(0.65 * 650) = 2 * 20.5 = 41
-    "elbow_joint": 25.0,         # 2 * sqrt(0.38 * 400) = 2 * 12.3 = 24.6
-    "wrist_pitch_joint": 15.0,   # 2 * sqrt(0.24 * 240) = 2 * 7.6 = 15.2
-    "wrist_roll_joint": 10.0,    # 2 * sqrt(0.14 * 140) = 2 * 4.4 = 8.8
+    "elbow_joint": 25.0,  # 2 * sqrt(0.38 * 400) = 2 * 12.3 = 24.6
+    "wrist_pitch_joint": 15.0,  # 2 * sqrt(0.24 * 240) = 2 * 7.6 = 15.2
+    "wrist_roll_joint": 10.0,  # 2 * sqrt(0.14 * 140) = 2 * 4.4 = 8.8
 }
 # Gripper configuration
-SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["gripper"].effort_limit_sim = 3.0  # Gripper doesn't need too much force, 3Nm is enough
+SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["gripper"].effort_limit_sim = (
+    3.0  # Gripper doesn't need too much force, 3Nm is enough
+)
 SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["gripper"].velocity_limit_sim = 10.0
 # Gripper has very small mass (0.034kg), set frequency slightly higher (6-7Hz) for compliant grasping
 # Or keep 5Hz for stability. Here we use 5Hz:
-SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["gripper"].stiffness = 40.0  # Mass 0.034 * 1000 = 34 -> rounded to 40
+SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["gripper"].stiffness = (
+    40.0  # Mass 0.034 * 1000 = 34 -> rounded to 40
+)
 # Damping calculation: 2 * sqrt(0.034 * 40) = 2 * 1.16 = 2.3
-SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["gripper"].damping = 2  # Slightly higher (2.5) to prevent any tiny jitter
+SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["gripper"].damping = (
+    2  # Slightly higher (2.5) to prevent any tiny jitter
+)
 # Physical contact parameters (must add, otherwise can't grasp)
 SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["gripper"].friction = 0.1
-SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["gripper"].armature = 0.005  # Must add this virtual inertia for very small mass objects!
+SO_ARM101_ROSCON_HIGH_PD_CFG.actuators["gripper"].armature = (
+    0.005  # Must add this virtual inertia for very small mass objects!
+)
 """Configuration of SO-ARM robot with stiffer PD control."""

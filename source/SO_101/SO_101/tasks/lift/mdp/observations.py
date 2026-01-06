@@ -26,7 +26,7 @@ def object_position_w(
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
 ) -> torch.Tensor:
     """Return the object's position in world frame.
-    
+
     Output shape: (num_envs, 3)
     """
     obj: RigidObject = env.scene[object_cfg.name]
@@ -38,7 +38,7 @@ def object_orientation_w(
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
 ) -> torch.Tensor:
     """Return the object's orientation (quaternion) in world frame.
-    
+
     Output shape: (num_envs, 4) - quaternion (w, x, y, z)
     """
     obj: RigidObject = env.scene[object_cfg.name]
@@ -51,7 +51,7 @@ def object_pos_in_arm_frame(
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
 ) -> torch.Tensor:
     """Return the object's position expressed in the given arm's root frame.
-    
+
     arm_cfg: which arm to use as reference, e.g. SceneEntityCfg("right_arm") or ("left_arm")
     Output shape: (num_envs, 3)
     """

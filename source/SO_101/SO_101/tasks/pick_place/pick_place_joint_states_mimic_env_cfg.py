@@ -10,10 +10,12 @@ from .pick_place_joint_pos_env_cfg import DualArmPickPlaceJointPosEnvCfg
 
 
 @configclass
-class DualArmPickPlaceJointStatesMimicEnvCfg(DualArmPickPlaceJointPosEnvCfg, MimicEnvCfg):
+class DualArmPickPlaceJointStatesMimicEnvCfg(
+    DualArmPickPlaceJointPosEnvCfg, MimicEnvCfg
+):
     """
     Isaac Lab Mimic environment config class for recording joint states directly.
-    
+
     This environment:
     - Accepts joint_states control (can be controlled by real robot)
     - Records joint states directly (joint positions + gripper) - no conversion
@@ -40,13 +42,16 @@ class DualArmPickPlaceJointStatesMimicEnvCfg(DualArmPickPlaceJointPosEnvCfg, Mim
         # The following are the subtask configurations for the PUSH task.
         # Simplified: only push_cube (no gripper check)
         subtask_configs = []
-        
+
         # Subtask 1: Push cube to target location
         subtask_configs.append(
             SubTaskConfig(
                 object_ref="cube",
                 subtask_term_signal="push_cube",
-                subtask_term_offset_range=(0, 5),  # Reduced offset to avoid overlap with lift_ee
+                subtask_term_offset_range=(
+                    0,
+                    5,
+                ),  # Reduced offset to avoid overlap with lift_ee
                 selection_strategy="nearest_neighbor_object",
                 selection_strategy_kwargs={"nn_k": 3},
                 action_noise=0.0,
@@ -57,7 +62,7 @@ class DualArmPickPlaceJointStatesMimicEnvCfg(DualArmPickPlaceJointPosEnvCfg, Mim
                 next_subtask_description="Lift hand up",
             )
         )
-        
+
         # Subtask 2: Lift EE up (hand raised after completing push)
         subtask_configs.append(
             SubTaskConfig(

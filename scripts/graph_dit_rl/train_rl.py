@@ -27,11 +27,11 @@ import os
 from datetime import datetime
 
 import gymnasium as gym
-import torch
-
 import SO_101.tasks  # noqa: F401  # Register environments
-from SO_101.policies.graph_dit_rl_policy import GraphDiTRLPolicy, GraphDiTRLPolicyCfg
+import torch
 from SO_101.policies.graph_dit_policy import GraphDiTPolicyCfg
+from SO_101.policies.graph_dit_rl_policy import (GraphDiTRLPolicy,
+                                                 GraphDiTRLPolicyCfg)
 
 
 def train_graph_dit_rl(
@@ -86,15 +86,21 @@ def train_graph_dit_rl(
     print(f"[Train] Obs dim: {obs_dim}, Action dim: {action_dim}")
 
     # Load pre-trained Graph DiT to get config
-    print(f"\n[Train] Loading pre-trained Graph DiT config from: {pretrained_checkpoint}")
-    checkpoint = torch.load(pretrained_checkpoint, map_location="cpu", weights_only=False)
+    print(
+        f"\n[Train] Loading pre-trained Graph DiT config from: {pretrained_checkpoint}"
+    )
+    checkpoint = torch.load(
+        pretrained_checkpoint, map_location="cpu", weights_only=False
+    )
     graph_dit_cfg = checkpoint.get("cfg", None)
     if graph_dit_cfg is None:
         raise ValueError(f"No config found in checkpoint: {pretrained_checkpoint}")
 
     # Override obs_dim and action_dim to match environment
     # Note: If obs_dim differs (e.g., target_object_position present), adjust accordingly
-    print(f"[Train] Pre-trained obs_dim: {graph_dit_cfg.obs_dim}, Env obs_dim: {obs_dim}")
+    print(
+        f"[Train] Pre-trained obs_dim: {graph_dit_cfg.obs_dim}, Env obs_dim: {obs_dim}"
+    )
     if graph_dit_cfg.obs_dim != obs_dim:
         print(f"[Train] Warning: Observation dimension mismatch!")
         print(f"[Train]   Pre-trained: {graph_dit_cfg.obs_dim}")
@@ -186,7 +192,7 @@ def train_graph_dit_rl(
         # 5. Update value function: L^VF = (V_θ - V_target)^2
         # 6. Entropy bonus: L^ENT = entropy(π_θ)
         # 7. Total loss: L = L^CLIP - c1 * L^VF + c2 * L^ENT
-        # 
+        #
         # For now, we just collect rollouts and save checkpoints
         # To implement full PPO, consider using RSL-RL framework or implementing a proper buffer
 
@@ -202,10 +208,10 @@ def train_graph_dit_rl(
     final_checkpoint = os.path.join(run_dir, "final_checkpoint.pt")
     best_checkpoint = os.path.join(run_dir, "best_checkpoint.pt")
     policy.save(final_checkpoint)
-    
+
     # Also save as best_checkpoint.pt for consistency with other training scripts
     policy.save(best_checkpoint)
-    
+
     print(f"\n[Train] Training completed!")
     print(f"[Train] Final checkpoint: {final_checkpoint}")
     print(f"[Train] Best checkpoint: {best_checkpoint}")
@@ -223,12 +229,16 @@ def main():
         required=True,
         help="Path to pre-trained Graph DiT checkpoint",
     )
-    parser.add_argument("--num_envs", type=int, default=64, help="Number of environments")
+    parser.add_argument(
+        "--num_envs", type=int, default=64, help="Number of environments"
+    )
     parser.add_argument(
         "--max_iterations", type=int, default=1000, help="Max training iterations"
     )
     parser.add_argument("--device", type=str, default="cuda", help="Device (cuda/cpu)")
-    parser.add_argument("--save_dir", type=str, default="logs/graph_dit_rl", help="Save directory")
+    parser.add_argument(
+        "--save_dir", type=str, default="logs/graph_dit_rl", help="Save directory"
+    )
     parser.add_argument("--headless", action="store_true", help="Run in headless mode")
 
     args = parser.parse_args()

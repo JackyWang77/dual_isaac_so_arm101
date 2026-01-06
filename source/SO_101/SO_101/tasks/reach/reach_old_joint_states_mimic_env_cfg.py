@@ -13,7 +13,7 @@ from .joint_pos_env_cfg import SoArm100ReachJointCubeEnvCfg
 class SoArm100ReachJointStatesMimicEnvCfg(SoArm100ReachJointCubeEnvCfg, MimicEnvCfg):
     """
     Isaac Lab Mimic environment config class for recording joint states directly for reach task.
-    
+
     This environment:
     - Accepts joint_states control (can be controlled by real robot)
     - Records joint states directly (joint positions + gripper) - no conversion
@@ -43,7 +43,7 @@ class SoArm100ReachJointStatesMimicEnvCfg(SoArm100ReachJointCubeEnvCfg, MimicEnv
 
         # Subtask configuration for the REACH task
         subtask_configs = []
-        
+
         # Subtask: Reach object (EE close to object and gripper closed)
         subtask_configs.append(
             SubTaskConfig(
@@ -59,5 +59,5 @@ class SoArm100ReachJointStatesMimicEnvCfg(SoArm100ReachJointCubeEnvCfg, MimicEnv
                 description="Reach object with EE and close gripper",
             )
         )
-        
+
         self.subtask_configs["end_effector"] = subtask_configs

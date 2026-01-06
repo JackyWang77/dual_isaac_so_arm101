@@ -4,20 +4,21 @@
 
 import isaaclab_tasks.manager_based.manipulation.lift.mdp as mdp
 from isaaclab.assets import RigidObjectCfg
-from isaaclab.controllers.differential_ik_cfg import DifferentialIKControllerCfg
-from isaaclab.envs.mdp.actions.actions_cfg import DifferentialInverseKinematicsActionCfg
-from isaaclab.markers.config import FRAME_MARKER_CFG  # isort: skip
+from isaaclab.controllers.differential_ik_cfg import \
+    DifferentialIKControllerCfg
+from isaaclab.envs.mdp.actions.actions_cfg import \
+    DifferentialInverseKinematicsActionCfg
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import (
-    FrameTransformerCfg,
-    OffsetCfg,
-)
-from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
-from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
+    FrameTransformerCfg, OffsetCfg)
 from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
+from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 from isaaclab.utils import configclass
-
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from SO_101.robots.so_arm100_roscon import SO_ARM101_ROSCON_HIGH_PD_CFG
 from SO_101.tasks.lift.lift_env_cfg import LiftEnvCfg
+
+from isaaclab.markers.config import FRAME_MARKER_CFG  # isort: skip
+
 
 
 @configclass
@@ -117,7 +118,9 @@ class DualSoArm100LiftCubeEnvCfg(LiftEnvCfg):
         # Set Cube as object
         self.scene.object = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Object",
-            init_state=RigidObjectCfg.InitialStateCfg(pos=[0.2, 0.0, 0.015], rot=[1, 0, 0, 0]),
+            init_state=RigidObjectCfg.InitialStateCfg(
+                pos=[0.2, 0.0, 0.015], rot=[1, 0, 0, 0]
+            ),
             spawn=UsdFileCfg(
                 usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
                 scale=(0.3, 0.3, 0.3),

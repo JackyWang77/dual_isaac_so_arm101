@@ -12,9 +12,15 @@ import argparse
 from isaaclab.app import AppLauncher
 
 # add argparse arguments
-parser = argparse.ArgumentParser(description="Replay demonstrations in Isaac Lab environments.")
-parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to replay episodes.")
-parser.add_argument("--task", type=str, default=None, help="Force to use the specified task.")
+parser = argparse.ArgumentParser(
+    description="Replay demonstrations in Isaac Lab environments."
+)
+parser.add_argument(
+    "--num_envs", type=int, default=1, help="Number of environments to replay episodes."
+)
+parser.add_argument(
+    "--task", type=str, default=None, help="Force to use the specified task."
+)
 parser.add_argument(
     "--select_episodes",
     type=int,
@@ -22,7 +28,12 @@ parser.add_argument(
     default=[],
     help="A list of episode indices to be replayed. Keep empty to replay all in the dataset file.",
 )
-parser.add_argument("--dataset_file", type=str, default="datasets/dataset.hdf5", help="Dataset file to be replayed.")
+parser.add_argument(
+    "--dataset_file",
+    type=str,
+    default="datasets/dataset.hdf5",
+    help="Dataset file to be replayed.",
+)
 parser.add_argument(
     "--validate_states",
     action="store_true",
@@ -57,10 +68,10 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import contextlib
-import gymnasium as gym
 import os
-import torch
 
+import gymnasium as gym
+import torch
 from isaaclab.devices import Se3Keyboard, Se3KeyboardCfg
 from isaaclab.utils.datasets import EpisodeData, HDF5DatasetFileHandler
 
@@ -101,10 +112,16 @@ def compare_states(state_from_dataset, runtime_state, runtime_env_index) -> (boo
     for asset_type in ["articulation", "rigid_object"]:
         for asset_name in runtime_state[asset_type].keys():
             for state_name in runtime_state[asset_type][asset_name].keys():
-                runtime_asset_state = runtime_state[asset_type][asset_name][state_name][runtime_env_index]
-                dataset_asset_state = state_from_dataset[asset_type][asset_name][state_name]
+                runtime_asset_state = runtime_state[asset_type][asset_name][state_name][
+                    runtime_env_index
+                ]
+                dataset_asset_state = state_from_dataset[asset_type][asset_name][
+                    state_name
+                ]
                 if len(dataset_asset_state) != len(runtime_asset_state):
-                    raise ValueError(f"State shape of {state_name} for asset {asset_name} don't match")
+                    raise ValueError(
+                        f"State shape of {state_name} for asset {asset_name} don't match"
+                    )
                 for i in range(len(dataset_asset_state)):
                     if abs(dataset_asset_state[i] - runtime_asset_state[i]) > 0.01:
                         states_matched = False
@@ -120,7 +137,9 @@ def main():
 
     # Load dataset
     if not os.path.exists(args_cli.dataset_file):
-        raise FileNotFoundError(f"The dataset file {args_cli.dataset_file} does not exist.")
+        raise FileNotFoundError(
+            f"The dataset file {args_cli.dataset_file} does not exist."
+        )
     dataset_file_handler = HDF5DatasetFileHandler()
     dataset_file_handler.open(args_cli.dataset_file)
     env_name = dataset_file_handler.get_env_name()
@@ -150,7 +169,9 @@ def main():
     # create environment from loaded config
     env = gym.make(args_cli.task, cfg=env_cfg).unwrapped
 
-    teleop_interface = Se3Keyboard(Se3KeyboardCfg(pos_sensitivity=0.1, rot_sensitivity=0.1))
+    teleop_interface = Se3Keyboard(
+        Se3KeyboardCfg(pos_sensitivity=0.1, rot_sensitivity=0.1)
+    )
     teleop_interface.add_callback("N", play_cb)
     teleop_interface.add_callback("B", pause_cb)
     print('Press "B" to pause and "N" to resume the replayed actions.')
@@ -160,7 +181,9 @@ def main():
     if args_cli.validate_states and num_envs == 1:
         state_validation_enabled = True
     elif args_cli.validate_states and num_envs > 1:
-        print("Warning: State validation is only supported with a single environment. Skipping state validation.")
+        print(
+            "Warning: State validation is only supported with a single environment. Skipping state validation."
+        )
 
     # Get idle action (idle actions are applied to envs without next action)
     if hasattr(env_cfg, "idle_action"):
@@ -196,16 +219,24 @@ def main():
 
                         if next_episode_index is not None:
                             replayed_episode_count += 1
-                            print(f"{replayed_episode_count :4}: Loading #{next_episode_index} episode to env_{env_id}")
+                            print(
+                                f"{replayed_episode_count :4}: Loading #{next_episode_index} episode to env_{env_id}"
+                            )
                             episode_data = dataset_file_handler.load_episode(
                                 episode_names[next_episode_index], env.device
                             )
                             env_episode_data_map[env_id] = episode_data
                             # Set initial state for the new episode
                             initial_state = episode_data.get_initial_state()
-                            env.reset_to(initial_state, torch.tensor([env_id], device=env.device), is_relative=True)
+                            env.reset_to(
+                                initial_state,
+                                torch.tensor([env_id], device=env.device),
+                                is_relative=True,
+                            )
                             # Get the first action for the new episode
-                            env_next_action = env_episode_data_map[env_id].get_next_action()
+                            env_next_action = env_episode_data_map[
+                                env_id
+                            ].get_next_action()
                             has_next_action = True
                         else:
                             continue
@@ -228,7 +259,9 @@ def main():
                             end="",
                         )
                         current_runtime_state = env.scene.get_state(is_relative=True)
-                        states_matched, comparison_log = compare_states(state_from_dataset, current_runtime_state, 0)
+                        states_matched, comparison_log = compare_states(
+                            state_from_dataset, current_runtime_state, 0
+                        )
                         if states_matched:
                             print("\t- matched.")
                         else:

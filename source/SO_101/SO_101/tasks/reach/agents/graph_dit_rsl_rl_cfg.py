@@ -24,6 +24,7 @@ from isaaclab.utils import configclass
 # Check if RSL-RL is available (required for this config)
 try:
     from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg
+
     _HAS_RSL_RL = True
 except (ImportError, ModuleNotFoundError) as e:
     raise ImportError(
@@ -31,9 +32,10 @@ except (ImportError, ModuleNotFoundError) as e:
         f"Original error: {e}"
     ) from e
 
-from SO_101.policies.graph_dit_rsl_rl_actor_critic import GraphDiTActorCriticCfg, GraphDiTActorCritic
 from SO_101.policies.graph_dit_policy import GraphDiTPolicyCfg
 from SO_101.policies.graph_dit_rl_policy import GraphDiTRLPolicyCfg
+from SO_101.policies.graph_dit_rsl_rl_actor_critic import (
+    GraphDiTActorCritic, GraphDiTActorCriticCfg)
 
 # Import the ActorCritic class so RSL-RL can find it
 # RSL-RL uses class_name to look up the class, so we need to ensure it's imported
@@ -88,7 +90,9 @@ class ReachCubeGraphDiTRLRunnerCfg(RslRlOnPolicyRunnerCfg):
             freeze_backbone=True,  # Freeze Graph DiT backbone
             # Get pretrained checkpoint from environment variable
             # Can be set via: export GRAPH_DIT_PRETRAINED_CHECKPOINT=./path/to/model.pt
-            pretrained_checkpoint=os.environ.get("GRAPH_DIT_PRETRAINED_CHECKPOINT", None),
+            pretrained_checkpoint=os.environ.get(
+                "GRAPH_DIT_PRETRAINED_CHECKPOINT", None
+            ),
         ),
     )
 

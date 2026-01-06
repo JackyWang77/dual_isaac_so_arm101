@@ -10,12 +10,10 @@
 
 import gymnasium as gym
 
-from . import agents
 from . import lift_ik_abs_env  # noqa: F401
-from . import lift_ik_abs_env_cfg
-from . import lift_ik_abs_mimic_env_cfg
 from . import lift_old_joint_states_mimic_env  # noqa: F401
-from . import lift_old_joint_states_mimic_env_cfg
+from . import (agents, lift_ik_abs_env_cfg, lift_ik_abs_mimic_env_cfg,
+               lift_old_joint_states_mimic_env_cfg)
 
 ##
 # Register Gym environments.

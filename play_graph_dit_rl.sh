@@ -31,11 +31,11 @@ BASE_DIR="./logs/rsl_rl/lift_residual_rl"
 if [ -z "$CHECKPOINT" ]; then
     # Find latest run directory
     LATEST_RUN=$(ls -dt "$BASE_DIR"/*/ 2>/dev/null | head -1)
-    
+
     if [ -n "$LATEST_RUN" ]; then
         # Find the highest numbered model checkpoint in the latest run
         LATEST_CHECKPOINT=$(ls -v "$LATEST_RUN"model_*.pt 2>/dev/null | tail -1)
-        
+
         if [ -n "$LATEST_CHECKPOINT" ]; then
             CHECKPOINT="$LATEST_CHECKPOINT"
             echo "Auto-detected latest checkpoint: $CHECKPOINT"
@@ -75,14 +75,14 @@ AGENT_YAML="$CHECKPOINT_DIR/params/agent.yaml"
 if [ -f "$AGENT_YAML" ]; then
     # Extract pretrained_checkpoint path from YAML
     PRETRAINED_CHECKPOINT=$(grep "pretrained_checkpoint:" "$AGENT_YAML" | sed 's/.*pretrained_checkpoint: //' | tr -d ' ')
-    
+
     if [ -n "$PRETRAINED_CHECKPOINT" ] && [ -f "$PRETRAINED_CHECKPOINT" ]; then
         echo "Found Graph-DiT checkpoint: $PRETRAINED_CHECKPOINT"
         export RESIDUAL_RL_PRETRAINED_CHECKPOINT="$PRETRAINED_CHECKPOINT"
     else
         echo "⚠️  Warning: pretrained_checkpoint from config not found: $PRETRAINED_CHECKPOINT"
         echo "   Trying to find a valid checkpoint..."
-        
+
         # Fallback: find latest Graph-DiT checkpoint
         FALLBACK_CHECKPOINT=$(ls -t ./logs/graph_dit/lift_joint_flow_matching/*/best_model.pt 2>/dev/null | head -1)
         if [ -n "$FALLBACK_CHECKPOINT" ]; then

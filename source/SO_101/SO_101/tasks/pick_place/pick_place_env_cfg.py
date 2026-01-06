@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from dataclasses import MISSING
+from pathlib import Path
 
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg, DeformableObjectCfg
@@ -13,18 +14,15 @@ from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
-from pathlib import Path
-
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import CameraCfg
-from isaaclab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg
-from isaaclab.sim.spawners.from_files.from_files_cfg import GroundPlaneCfg, UsdFileCfg
-from isaaclab.sim import (
-    MeshCuboidCfg,
-    DeformableBodyMaterialCfg,
-    DeformableBodyPropertiesCfg,
-    PreviewSurfaceCfg,
-)
+from isaaclab.sensors.frame_transformer.frame_transformer_cfg import \
+    FrameTransformerCfg
+from isaaclab.sim import (DeformableBodyMaterialCfg,
+                          DeformableBodyPropertiesCfg, MeshCuboidCfg,
+                          PreviewSurfaceCfg)
+from isaaclab.sim.spawners.from_files.from_files_cfg import (GroundPlaneCfg,
+                                                             UsdFileCfg)
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 
@@ -52,8 +50,12 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
     # Table
     table = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Table",
-        init_state=AssetBaseCfg.InitialStateCfg(pos=[0.5, 0, 0], rot=[0.707, 0, 0, 0.707]),
-        spawn=UsdFileCfg(usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/SeattleLabTable/table_instanceable.usd"),
+        init_state=AssetBaseCfg.InitialStateCfg(
+            pos=[0.5, 0, 0], rot=[0.707, 0, 0, 0.707]
+        ),
+        spawn=UsdFileCfg(
+            usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Mounts/SeattleLabTable/table_instanceable.usd"
+        ),
     )
 
     # plane
@@ -126,7 +128,12 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
         # Target: x=0, y=0, z=-90 degrees (rotate -90 degrees around Z axis)
         offset=CameraCfg.OffsetCfg(
             pos=(0.2, 0.0, 1.3),  # x=0.2, y=0.0, z=1.3
-            rot=(0.0, -0.7071, 0.7071, 0.0),  # Rotate -90 degrees around Z axis (x=0, y=0, z=-90)
+            rot=(
+                0.0,
+                -0.7071,
+                0.7071,
+                0.0,
+            ),  # Rotate -90 degrees around Z axis (x=0, y=0, z=-90)
             convention="ros",  # Use ROS coordinate system (Z forward, X right, Y down)
         ),
         debug_vis=False,  # Disable debug visualization
@@ -147,7 +154,12 @@ class ObjectTableSceneCfg(InteractiveSceneCfg):
         # offset set to (0,0,0) and (1,0,0,0) means use original position and orientation from USD file
         offset=CameraCfg.OffsetCfg(
             pos=(0.0, 0.0, 0.0),  # Use original position from USD file
-            rot=(1.0, 0.0, 0.0, 0.0),  # Use original orientation from USD file (no rotation)
+            rot=(
+                1.0,
+                0.0,
+                0.0,
+                0.0,
+            ),  # Use original orientation from USD file (no rotation)
             convention="ros",
         ),
         debug_vis=False,  # Disable debug visualization
@@ -191,7 +203,7 @@ class ObservationsCfg:
     @configclass
     class RGBCameraPolicyCfg(ObsGroup):
         """Observations for policy group with RGB images.
-        
+
         Note: Currently empty - kept for future use in sim2real distillation.
         Teacher policy (Graph-DiT) and student policy (RL fine-tuning) both use
         state-based observations for consistency.
@@ -275,7 +287,7 @@ class ObservationsCfg:
         #         "min_lift_height": 0.01,
         #     },
         # )
-        
+
         # Push cube - only checks position, no gripper check
         push_cube = ObsTerm(
             func=mdp.object_pushed,
@@ -285,10 +297,10 @@ class ObservationsCfg:
                 "object_cfg": SceneEntityCfg("cube"),
                 "target_cfg": SceneEntityCfg("object"),
                 "planar_offset": (0.0, 0.0),  # Push to tray center
-                "planar_tolerance": 0.05,     # 5cm tolerance
+                "planar_tolerance": 0.05,  # 5cm tolerance
             },
         )
-        
+
         # Lift EE - check if hand is raised above 7cm
         lift_ee = ObsTerm(
             func=mdp.ee_lifted,
@@ -297,7 +309,7 @@ class ObservationsCfg:
                 "min_height": 0.07,  # 7cm above table
             },
         )
-        
+
         # Knife - COMMENTED OUT (not generated)
         # pick_knife = ObsTerm(
         #     func=mdp.object_grasped,
@@ -363,7 +375,9 @@ class PickPlaceEnvCfg(ManagerBasedRLEnvCfg):
     """Configuration for the pick and place environment."""
 
     # Scene settings
-    scene: ObjectTableSceneCfg = ObjectTableSceneCfg(num_envs=4096, env_spacing=2.5, replicate_physics=False)
+    scene: ObjectTableSceneCfg = ObjectTableSceneCfg(
+        num_envs=4096, env_spacing=2.5, replicate_physics=False
+    )
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
     actions: ActionsCfg = ActionsCfg()
@@ -400,4 +414,3 @@ class PickPlaceEnvCfg(ManagerBasedRLEnvCfg):
         # 🔥 必须开启！否则 Deformable Object 会报错或变成刚体
         self.sim.physx.use_gpu = True
         self.sim.device = "cuda:0"
-        

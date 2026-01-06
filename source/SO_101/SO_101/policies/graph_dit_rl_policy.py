@@ -54,7 +54,7 @@ class GraphDiTRLPolicyCfg:
 
     value_activation: str = "elu"
     """Activation function for value network."""
-    
+
     value_obs_dim: int | None = None
     """Input dimension for value network. If None, uses graph_dit_cfg.obs_dim."""
 
@@ -105,15 +105,20 @@ class GraphDiTRLPolicy(nn.Module):
         if isinstance(graph_dit_cfg, dict):
             # Convert dict back to GraphDiTPolicyCfg
             from .graph_dit_policy import GraphDiTPolicyCfg
+
             graph_dit_cfg = GraphDiTPolicyCfg(**graph_dit_cfg)
-        
+
         # Store the converted config for later use
         self.graph_dit_cfg = graph_dit_cfg
-        
+
         # Load pre-trained Graph DiT backbone
         if cfg.pretrained_checkpoint is not None:
-            print(f"[GraphDiTRLPolicy] Loading pre-trained Graph DiT from: {cfg.pretrained_checkpoint}")
-            self.graph_dit = GraphDiTPolicy.load(cfg.pretrained_checkpoint, device="cpu", weights_only=False)
+            print(
+                f"[GraphDiTRLPolicy] Loading pre-trained Graph DiT from: {cfg.pretrained_checkpoint}"
+            )
+            self.graph_dit = GraphDiTPolicy.load(
+                cfg.pretrained_checkpoint, device="cpu", weights_only=False
+            )
             # Move to same device as this module later
         else:
             # When pretrained_checkpoint is None, weights will be loaded from RL checkpoint during runner.load()
@@ -161,7 +166,11 @@ class GraphDiTRLPolicy(nn.Module):
         value_activation_fn = self._get_activation(cfg.value_activation)
         value_layers = []
         # Use value_obs_dim if provided, otherwise use graph_dit_cfg.obs_dim
-        obs_dim = cfg.value_obs_dim if cfg.value_obs_dim is not None else graph_dit_cfg.obs_dim
+        obs_dim = (
+            cfg.value_obs_dim
+            if cfg.value_obs_dim is not None
+            else graph_dit_cfg.obs_dim
+        )
         input_dim = obs_dim
         for hidden_dim_value in cfg.value_hidden_dims:
             value_layers.append(nn.Linear(input_dim, hidden_dim_value))
@@ -210,7 +219,9 @@ class GraphDiTRLPolicy(nn.Module):
                 if module.bias is not None:
                     nn.init.constant_(module.bias, 0)
 
-    def _extract_features(self, obs: torch.Tensor, subtask_condition: torch.Tensor | None = None):
+    def _extract_features(
+        self, obs: torch.Tensor, subtask_condition: torch.Tensor | None = None
+    ):
         """
         Extract features from Graph DiT backbone.
 
@@ -235,7 +246,7 @@ class GraphDiTRLPolicy(nn.Module):
         #                    ee_pos(3), ee_ori(4), actions(6)]
         obs_dim = obs.shape[-1]
         expected_graph_dit_obs_dim = self.graph_dit_cfg.obs_dim
-        
+
         if obs_dim != expected_graph_dit_obs_dim:
             if obs_dim == 39 and expected_graph_dit_obs_dim == 32:
                 # Remove target_object_position (7 dims at indices 26:33)
@@ -249,9 +260,15 @@ class GraphDiTRLPolicy(nn.Module):
                 joint_vel = obs[:, 5:10]  # 5 dims
                 rest = obs[:, 10:]  # 20 dims (3+4+3+4+6)
                 # Pad joint_pos and joint_vel to 6 dims each
-                joint_pos_padded = torch.cat([joint_pos, torch.zeros_like(joint_pos[:, :1])], dim=-1)  # 6 dims
-                joint_vel_padded = torch.cat([joint_vel, torch.zeros_like(joint_vel[:, :1])], dim=-1)  # 6 dims
-                obs_for_graph_dit = torch.cat([joint_pos_padded, joint_vel_padded, rest], dim=-1)  # 32 dims
+                joint_pos_padded = torch.cat(
+                    [joint_pos, torch.zeros_like(joint_pos[:, :1])], dim=-1
+                )  # 6 dims
+                joint_vel_padded = torch.cat(
+                    [joint_vel, torch.zeros_like(joint_vel[:, :1])], dim=-1
+                )  # 6 dims
+                obs_for_graph_dit = torch.cat(
+                    [joint_pos_padded, joint_vel_padded, rest], dim=-1
+                )  # 32 dims
             else:
                 raise ValueError(
                     f"Observation dimension mismatch: got {obs_dim}, "
@@ -276,16 +293,20 @@ class GraphDiTRLPolicy(nn.Module):
         edge_features_embed = self.graph_dit.edge_embedding(edge_features_raw)
 
         # Extract last action from obs_for_graph_dit for action embedding
-        action_input = obs_for_graph_dit[:, -self.graph_dit_cfg.action_dim:]
+        action_input = obs_for_graph_dit[:, -self.graph_dit_cfg.action_dim :]
         action_embed = self.graph_dit.action_embedding(action_input)
         action_embed = action_embed.unsqueeze(1)
 
         # Process through Graph DiT units (frozen if specified)
-        context_manager = torch.no_grad() if self.cfg.freeze_backbone else torch.enable_grad()
+        context_manager = (
+            torch.no_grad() if self.cfg.freeze_backbone else torch.enable_grad()
+        )
         with context_manager:
             noise_embed = action_embed.squeeze(1)  # Start with action embed
             for unit in self.graph_dit.graph_dit_units:
-                noise_embed = unit(action_embed, node_features, edge_features_embed, None)
+                noise_embed = unit(
+                    action_embed, node_features, edge_features_embed, None
+                )
                 action_embed = noise_embed.unsqueeze(1)
 
         # Return the final embedding before noise_head (this is what RL head uses)
@@ -388,15 +409,17 @@ class GraphDiTRLPolicy(nn.Module):
             log_probs = action_dist.log_prob(actions).sum(dim=-1)
 
         return actions, log_probs
-    
-    def update_distribution(self, obs: torch.Tensor, subtask_condition: torch.Tensor | None = None):
+
+    def update_distribution(
+        self, obs: torch.Tensor, subtask_condition: torch.Tensor | None = None
+    ):
         """
         Update action distribution based on observations.
-        
+
         This method computes and stores the action distribution for RSL-RL compatibility.
         The distribution is stored in self.distribution and can be accessed via
         action_mean, action_std, etc.
-        
+
         Args:
             obs: Observations [batch, obs_dim] - may be 39-dim (with target_object_position)
             subtask_condition: Subtask condition [batch, num_subtasks] (optional)
@@ -422,6 +445,7 @@ class GraphDiTRLPolicy(nn.Module):
 
         # Create and store distribution
         from torch.distributions import Normal
+
         self.distribution = Normal(action_mean, action_std)
 
     def evaluate(
@@ -486,20 +510,22 @@ class GraphDiTRLPolicy(nn.Module):
         # Ensure obs has correct shape
         if len(obs.shape) != 2:
             raise ValueError(f"Expected obs shape [batch, obs_dim], got {obs.shape}")
-        
+
         obs_for_value = obs
         if self.obs_normalizer is not None:
             obs_for_value = self.obs_normalizer.normalize(obs_for_value)
 
         values = self.value_network(obs_for_value)  # [batch, 1]
-        
+
         # Ensure values have shape [batch]
         values = values.squeeze(-1)  # [batch]
-        
+
         # Final check: ensure it's 1D
         if len(values.shape) != 1:
-            raise ValueError(f"Expected values shape [batch], got {values.shape} after squeeze")
-        
+            raise ValueError(
+                f"Expected values shape [batch], got {values.shape} after squeeze"
+            )
+
         return values
 
     def save(self, path: str):

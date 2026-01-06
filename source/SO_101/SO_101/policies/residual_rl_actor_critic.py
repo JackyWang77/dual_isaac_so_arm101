@@ -68,11 +68,13 @@ class ResidualActorCriticCfg(RslRlPpoActorCriticCfg):
             residual_rl_cfg: Configuration for Residual RL Policy.
             **kwargs: Other arguments passed to RslRlPpoActorCriticCfg.
         """
-        if residual_rl_cfg is None and 'residual_rl_cfg' in kwargs:
-            residual_rl_cfg = kwargs.pop('residual_rl_cfg')
+        if residual_rl_cfg is None and "residual_rl_cfg" in kwargs:
+            residual_rl_cfg = kwargs.pop("residual_rl_cfg")
 
-        if 'class_name' not in kwargs:
-            kwargs['class_name'] = "SO_101.policies.residual_rl_actor_critic.ResidualActorCritic"
+        if "class_name" not in kwargs:
+            kwargs["class_name"] = (
+                "SO_101.policies.residual_rl_actor_critic.ResidualActorCritic"
+            )
 
         super().__init__(**kwargs)
 
@@ -107,7 +109,7 @@ class ResidualActorCritic(ActorCritic):
         activation: str = "elu",
         init_noise_std: float = 1.0,
         noise_std_type: str = "scalar",
-        **kwargs
+        **kwargs,
     ):
         """Initialize Residual ActorCritic.
 
@@ -123,10 +125,14 @@ class ResidualActorCritic(ActorCritic):
         # Double normalization will completely break DiT's predictions!
         # ============================================================
         if actor_obs_normalization:
-            print("[ResidualActorCritic] !!! WARNING: actor_obs_normalization was True, forcing to False !!!")
-            print("[ResidualActorCritic] !!! We handle normalization internally for DiT !!!")
+            print(
+                "[ResidualActorCritic] !!! WARNING: actor_obs_normalization was True, forcing to False !!!"
+            )
+            print(
+                "[ResidualActorCritic] !!! We handle normalization internally for DiT !!!"
+            )
         actor_obs_normalization = False  # FORCE DISABLE!
-        
+
         # Extract residual_rl_cfg from kwargs BEFORE calling super().__init__()
         if "residual_rl_cfg" not in kwargs:
             raise ValueError(
@@ -191,13 +197,13 @@ class ResidualActorCritic(ActorCritic):
 
     def _infer_obs_dim(self, obs) -> int | None:
         """Helper to figure out flat observation dimension."""
-        if 'policy' in obs:
-            sample = obs['policy']
+        if "policy" in obs:
+            sample = obs["policy"]
             if isinstance(sample, torch.Tensor):
                 return sample.shape[-1] if len(sample.shape) > 1 else sample.shape[0]
             elif isinstance(sample, dict):
                 return sum(
-                    v.flatten().shape[0] if hasattr(v, 'shape') else len(v)
+                    v.flatten().shape[0] if hasattr(v, "shape") else len(v)
                     for v in sample.values()
                 )
         # Fallback for flattened dict
@@ -207,14 +213,14 @@ class ResidualActorCritic(ActorCritic):
                 total += v.shape[-1] if len(v.shape) > 1 else v.shape[0]
             elif isinstance(v, dict):
                 total += sum(
-                    vi.flatten().shape[0] if hasattr(vi, 'shape') else len(vi)
+                    vi.flatten().shape[0] if hasattr(vi, "shape") else len(vi)
                     for vi in v.values()
                 )
         return total if total > 0 else None
 
     def _extract_obs_tensor(self, obs) -> torch.Tensor:
         """Extract observation tensor from various input formats.
-        
+
         Handles:
         - torch.Tensor: Return directly
         - dict: Extract 'policy' key or concat all tensors
@@ -223,43 +229,45 @@ class ResidualActorCritic(ActorCritic):
         # Handle torch.Tensor
         if isinstance(obs, torch.Tensor):
             return obs
-        
+
         # Handle TensorDict (from RSL-RL)
         # TensorDict has .get() and .keys() methods like dict
-        if hasattr(obs, 'get') and hasattr(obs, 'keys'):
-            if 'policy' in obs.keys():
-                policy_obs = obs.get('policy')
+        if hasattr(obs, "get") and hasattr(obs, "keys"):
+            if "policy" in obs.keys():
+                policy_obs = obs.get("policy")
                 if isinstance(policy_obs, torch.Tensor):
                     return policy_obs
                 # TensorDict might nest another TensorDict
-                if hasattr(policy_obs, 'to_dict'):
+                if hasattr(policy_obs, "to_dict"):
                     policy_obs = policy_obs.to_dict()
                 if isinstance(policy_obs, dict):
                     obs_list = []
                     for v in policy_obs.values():
                         if isinstance(v, torch.Tensor):
-                            obs_list.append(v.flatten(start_dim=1) if len(v.shape) > 2 else v)
+                            obs_list.append(
+                                v.flatten(start_dim=1) if len(v.shape) > 2 else v
+                            )
                     if obs_list:
                         return torch.cat(obs_list, dim=-1)
-            
+
             # Try to convert TensorDict to regular dict
-            if hasattr(obs, 'to_dict'):
+            if hasattr(obs, "to_dict"):
                 obs = obs.to_dict()
-            
+
             # Concat all tensor values
             obs_list = []
             for k in obs.keys():
-                v = obs.get(k) if hasattr(obs, 'get') else obs[k]
+                v = obs.get(k) if hasattr(obs, "get") else obs[k]
                 if isinstance(v, torch.Tensor):
                     obs_list.append(v.flatten(start_dim=1) if len(v.shape) > 2 else v)
             if obs_list:
                 return torch.cat(obs_list, dim=-1)
             raise ValueError("No valid observations in dict/TensorDict")
-        
+
         # Handle regular dict
         if isinstance(obs, dict):
-            if 'policy' in obs:
-                return obs['policy']
+            if "policy" in obs:
+                return obs["policy"]
             obs_list = []
             for v in obs.values():
                 if isinstance(v, torch.Tensor):
@@ -267,13 +275,13 @@ class ResidualActorCritic(ActorCritic):
             if obs_list:
                 return torch.cat(obs_list, dim=-1)
             raise ValueError("No valid observations in dict")
-        
+
         raise TypeError(f"Unexpected obs type: {type(obs)}")
 
     def to(self, device):
         """Move to device."""
         result = super().to(device)
-        if hasattr(self, 'policy') and self.policy is not None:
+        if hasattr(self, "policy") and self.policy is not None:
             self.policy.to(device)
         return result
 
@@ -328,7 +336,7 @@ class ResidualActorCritic(ActorCritic):
         self.update_distribution(obs)
 
         # Check inference mode (for play/evaluation without noise)
-        inference = kwargs.get('inference', False)
+        inference = kwargs.get("inference", False)
 
         if inference:
             # Deterministic: use mean (no sampling noise)
@@ -341,8 +349,10 @@ class ResidualActorCritic(ActorCritic):
         base_action_t = self.policy._base_action_for_dist
 
         # Combine: final = base + scale * residual
-        scale = torch.clamp(self.policy.residual_scale, 0.01, self.policy.cfg.max_residual_scale)
-        
+        scale = torch.clamp(
+            self.policy.residual_scale, 0.01, self.policy.cfg.max_residual_scale
+        )
+
         # ============================================================
         # DEBUG: Zero Residual Check
         # Set ZERO_RESIDUAL_CHECK = True to test if DiT alone works
@@ -418,7 +428,7 @@ class ResidualActorCritic(ActorCritic):
         """Override to sync normalizers."""
         if name == "actor_obs_normalizer":
             super().__setattr__(name, value)
-            if hasattr(self, 'policy') and self.policy is not None:
+            if hasattr(self, "policy") and self.policy is not None:
                 self.policy.obs_normalizer = value
         elif name == "critic_obs_normalizer":
             super().__setattr__(name, value)

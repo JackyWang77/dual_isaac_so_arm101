@@ -21,7 +21,7 @@ from .lift_ik_abs_env_cfg import SoArm100LiftIKAbsEnvCfg
 class SoArm100LiftIKAbsMimicEnvCfg(SoArm100LiftIKAbsEnvCfg, MimicEnvCfg):
     """
     Isaac Lab Mimic environment config class for IK Absolute env.
-    
+
     This environment:
     - Uses IK Absolute control (action = target EEF pose)
     - Has subtask configurations for data generation
@@ -51,7 +51,7 @@ class SoArm100LiftIKAbsMimicEnvCfg(SoArm100LiftIKAbsEnvCfg, MimicEnvCfg):
 
         # Subtask configuration for the LIFT task
         subtask_configs = []
-        
+
         # Subtask: Lift object to target height
         subtask_configs.append(
             SubTaskConfig(
@@ -67,6 +67,5 @@ class SoArm100LiftIKAbsMimicEnvCfg(SoArm100LiftIKAbsEnvCfg, MimicEnvCfg):
                 description="Lift object to target height",
             )
         )
-        
-        self.subtask_configs["end_effector"] = subtask_configs
 
+        self.subtask_configs["end_effector"] = subtask_configs

@@ -8,14 +8,13 @@ from __future__ import annotations
 
 import math
 import random
-import torch
 from typing import TYPE_CHECKING
 
-from isaacsim.core.utils.extensions import enable_extension
-
 import isaaclab.utils.math as math_utils
+import torch
 from isaaclab.assets import Articulation, AssetBase
 from isaaclab.managers import SceneEntityCfg
+from isaacsim.core.utils.extensions import enable_extension
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
@@ -29,7 +28,9 @@ def set_default_joint_pose(
 ):
     # Set the default pose for robots in all envs
     asset = env.scene[asset_cfg.name]
-    asset.data.default_joint_pos = torch.tensor(default_pose, device=env.device).repeat(env.num_envs, 1)
+    asset.data.default_joint_pos = torch.tensor(default_pose, device=env.device).repeat(
+        env.num_envs, 1
+    )
 
 
 def randomize_joint_by_gaussian_offset(
@@ -44,7 +45,9 @@ def randomize_joint_by_gaussian_offset(
     # Add gaussian noise to joint states
     joint_pos = asset.data.default_joint_pos[env_ids].clone()
     joint_vel = asset.data.default_joint_vel[env_ids].clone()
-    joint_pos += math_utils.sample_gaussian(mean, std, joint_pos.shape, joint_pos.device)
+    joint_pos += math_utils.sample_gaussian(
+        mean, std, joint_pos.shape, joint_pos.device
+    )
 
     # Clamp joint pos to limits
     joint_pos_limits = asset.data.soft_joint_pos_limits[env_ids]
@@ -80,7 +83,10 @@ def sample_random_color(base=(0.75, 0.75, 0.75), variation=0.1):
     balanced_offsets = [offset - avg_offset for offset in offsets]
 
     # Apply the balanced offsets to the base color and clamp each channel between 0 and 1
-    new_color = tuple(max(0, min(1, base_component + offset)) for base_component, offset in zip(base, balanced_offsets))
+    new_color = tuple(
+        max(0, min(1, base_component + offset))
+        for base_component, offset in zip(base, balanced_offsets)
+    )
 
     return new_color
 
@@ -136,7 +142,10 @@ def sample_object_poses(
     pose_range: dict[str, tuple[float, float]] = {},
     max_sample_tries: int = 5000,
 ):
-    range_list = [pose_range.get(key, (0.0, 0.0)) for key in ["x", "y", "z", "roll", "pitch", "yaw"]]
+    range_list = [
+        pose_range.get(key, (0.0, 0.0))
+        for key in ["x", "y", "z", "roll", "pitch", "yaw"]
+    ]
     pose_list = []
 
     for i in range(num_objects):
@@ -149,7 +158,9 @@ def sample_object_poses(
                 break
 
             # Check if pose of object is sufficiently far away from all other objects
-            separation_check = [math.dist(sample[:3], pose[:3]) > min_separation for pose in pose_list]
+            separation_check = [
+                math.dist(sample[:3], pose[:3]) > min_separation for pose in pose_list
+            ]
             if False not in separation_check:
                 pose_list.append(sample)
                 break
@@ -185,12 +196,16 @@ def randomize_object_pose(
             # Write pose to simulation
             pose_tensor = torch.tensor([pose_list[i]], device=env.device)
             positions = pose_tensor[:, 0:3] + env.scene.env_origins[cur_env, 0:3]
-            orientations = math_utils.quat_from_euler_xyz(pose_tensor[:, 3], pose_tensor[:, 4], pose_tensor[:, 5])
+            orientations = math_utils.quat_from_euler_xyz(
+                pose_tensor[:, 3], pose_tensor[:, 4], pose_tensor[:, 5]
+            )
             asset.write_root_pose_to_sim(
-                torch.cat([positions, orientations], dim=-1), env_ids=torch.tensor([cur_env], device=env.device)
+                torch.cat([positions, orientations], dim=-1),
+                env_ids=torch.tensor([cur_env], device=env.device),
             )
             asset.write_root_velocity_to_sim(
-                torch.zeros(1, 6, device=env.device), env_ids=torch.tensor([cur_env], device=env.device)
+                torch.zeros(1, 6, device=env.device),
+                env_ids=torch.tensor([cur_env], device=env.device),
             )
 
 
@@ -228,15 +243,20 @@ def randomize_rigid_objects_in_focus(
             selected_ids.append(object_id)
 
             # Create object state tensor
-            object_states = torch.stack([out_focus_state] * asset.num_objects).to(device=env.device)
+            object_states = torch.stack([out_focus_state] * asset.num_objects).to(
+                device=env.device
+            )
             pose_tensor = torch.tensor([pose_list[asset_idx]], device=env.device)
             positions = pose_tensor[:, 0:3] + env.scene.env_origins[cur_env, 0:3]
-            orientations = math_utils.quat_from_euler_xyz(pose_tensor[:, 3], pose_tensor[:, 4], pose_tensor[:, 5])
+            orientations = math_utils.quat_from_euler_xyz(
+                pose_tensor[:, 3], pose_tensor[:, 4], pose_tensor[:, 5]
+            )
             object_states[object_id, 0:3] = positions
             object_states[object_id, 3:7] = orientations
 
             asset.write_object_state_to_sim(
-                object_state=object_states, env_ids=torch.tensor([cur_env], device=env.device)
+                object_state=object_states,
+                env_ids=torch.tensor([cur_env], device=env.device),
             )
 
         env.rigid_objects_in_focus.append(selected_ids)
@@ -268,7 +288,8 @@ def randomize_visual_texture_material(
         parser will parse the individual asset properties separately.
     """
     if hasattr(env.cfg, "eval_mode") and (
-        not env.cfg.eval_mode or env.cfg.eval_type not in [f"{asset_cfg.name}_texture", "all"]
+        not env.cfg.eval_mode
+        or env.cfg.eval_type not in [f"{asset_cfg.name}_texture", "all"]
     ):
         return
         # textures = [default_texture]
@@ -306,11 +327,15 @@ def randomize_visual_texture_material(
     if not hasattr(asset, "cfg"):
         prims_group = rep.get.prims(path_pattern=f"{asset.prim_paths[0]}/visuals")
     else:
-        prims_group = rep.get.prims(path_pattern=f"{asset.cfg.prim_path}/{body_names_regex}/visuals")
+        prims_group = rep.get.prims(
+            path_pattern=f"{asset.cfg.prim_path}/{body_names_regex}/visuals"
+        )
 
     with prims_group:
         rep.randomizer.texture(
-            textures=textures, project_uvw=True, texture_rotate=rep.distribution.uniform(*texture_rotation)
+            textures=textures,
+            project_uvw=True,
+            texture_rotate=rep.distribution.uniform(*texture_rotation),
         )
 
 
@@ -323,13 +348,13 @@ def apply_high_friction_material(
     restitution: float = 0.0,
 ):
     """Apply high friction physics material to rigid objects.
-    
+
     This function creates a global physics material and binds it to all collision meshes
     of the specified asset. This is useful for improving grasp stability.
 
     Architecture: Uses UsdShade.Material for visual binding and UsdPhysics.MaterialAPI
     for physics properties. Material is created once and bound to all collision prims.
-    
+
     Args:
         env: The environment instance.
         env_ids: Environment IDs to apply the material to (can be None for all).
@@ -345,10 +370,10 @@ def apply_high_friction_material(
     stage = omni.usd.get_context().get_stage()
     if stage is None:
         return
-    
+
     # Get the asset
     asset = env.scene[asset_cfg.name]
-    
+
     # Create a unique material name based on asset name and friction values
     # USD paths cannot contain dots, so replace them with underscores
     static_friction_str = str(static_friction).replace(".", "_")
@@ -383,13 +408,15 @@ def apply_high_friction_material(
     # Apply to all environments
     for env_id in range(num_envs):
         # Replace {ENV_REGEX_NS} with actual environment namespace
-        prim_path = base_prim_path.replace("{ENV_REGEX_NS}", f"/World/envs/env_{env_id}")
-        
+        prim_path = base_prim_path.replace(
+            "{ENV_REGEX_NS}", f"/World/envs/env_{env_id}"
+        )
+
         # Get the root prim using USD API
         prim = stage.GetPrimAtPath(prim_path)
         if not prim.IsValid():
             continue
-        
+
         # Recursively find all collision meshes and bind material
         def bind_material_to_prim(prim):
             """Recursively bind material to prim and its children."""
@@ -398,10 +425,10 @@ def apply_high_friction_material(
                 # Bind the material using MaterialBindingAPI
                 binding_api = UsdShade.MaterialBindingAPI.Apply(prim)
                 binding_api.Bind(usd_material)
-            
+
             # Recursively process children
             for child in prim.GetChildren():
                 bind_material_to_prim(child)
-        
+
         # Apply to root and all children
         bind_material_to_prim(prim)

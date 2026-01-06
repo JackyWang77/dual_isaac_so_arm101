@@ -15,23 +15,57 @@ Usage:
 
 """Launch Isaac Sim Simulator first."""
 
-from isaaclab.app import AppLauncher
-
 import argparse
 import sys
 
+from isaaclab.app import AppLauncher
+
 # add argparse arguments
 parser = argparse.ArgumentParser(description="Train Residual RL Policy with RSL-RL.")
-parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
-parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
-parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
-parser.add_argument("--num_envs", type=int, default=256, help="Number of environments (default: 256, lower for diffusion).")
-parser.add_argument("--task", type=str, default="SO-ARM101-Lift-Cube-ResidualRL-v0", help="Name of the task.")
-parser.add_argument("--pretrained_checkpoint", type=str, required=True, help="Path to pre-trained Graph DiT checkpoint.")
-parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
-parser.add_argument("--max_iterations", type=int, default=300, help="RL Policy training iterations.")
 parser.add_argument(
-    "--distributed", action="store_true", default=False, help="Run training with multiple GPUs or nodes."
+    "--video", action="store_true", default=False, help="Record videos during training."
+)
+parser.add_argument(
+    "--video_length",
+    type=int,
+    default=200,
+    help="Length of the recorded video (in steps).",
+)
+parser.add_argument(
+    "--video_interval",
+    type=int,
+    default=2000,
+    help="Interval between video recordings (in steps).",
+)
+parser.add_argument(
+    "--num_envs",
+    type=int,
+    default=256,
+    help="Number of environments (default: 256, lower for diffusion).",
+)
+parser.add_argument(
+    "--task",
+    type=str,
+    default="SO-ARM101-Lift-Cube-ResidualRL-v0",
+    help="Name of the task.",
+)
+parser.add_argument(
+    "--pretrained_checkpoint",
+    type=str,
+    required=True,
+    help="Path to pre-trained Graph DiT checkpoint.",
+)
+parser.add_argument(
+    "--seed", type=int, default=None, help="Seed used for the environment"
+)
+parser.add_argument(
+    "--max_iterations", type=int, default=300, help="RL Policy training iterations."
+)
+parser.add_argument(
+    "--distributed",
+    action="store_true",
+    default=False,
+    help="Run training with multiple GPUs or nodes.",
 )
 # append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
@@ -54,12 +88,13 @@ import os
 from datetime import datetime
 
 import gymnasium as gym
-import torch
-
 import SO_101.tasks  # noqa: F401  # Register environments
+import torch
 # Import both ActorCritic types for RSL-RL namespace
-from SO_101.policies.graph_dit_rsl_rl_actor_critic import GraphDiTActorCritic  # noqa: F401
-from SO_101.policies.residual_rl_actor_critic import ResidualActorCritic  # noqa: F401
+from SO_101.policies.graph_dit_rsl_rl_actor_critic import \
+    GraphDiTActorCritic  # noqa: F401
+from SO_101.policies.residual_rl_actor_critic import \
+    ResidualActorCritic  # noqa: F401
 
 
 def main():
@@ -80,22 +115,22 @@ def main():
         print(f"\n[Train] Set pretrained checkpoint: {args_cli.pretrained_checkpoint}")
 
     # Use the STANDARD RSL-RL training flow
-    from rsl_rl.runners import OnPolicyRunner
-    from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, RslRlOnPolicyRunnerCfg
-    from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
-    from isaaclab.utils.io import dump_yaml
-    from isaaclab_tasks.utils.hydra import hydra_task_config
     from isaaclab.envs import DirectMARLEnv, multi_agent_to_single_agent
     from isaaclab.utils.dict import print_dict
-    
+    from isaaclab.utils.io import dump_yaml
+    from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
+    from isaaclab_tasks.utils.hydra import hydra_task_config
+    from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
+    from rsl_rl.runners import OnPolicyRunner
+
     # Get task from CLI
     task_name = args_cli.task
-    
+
     # Use Hydra to load config based on task
     @hydra_task_config(task_name, "rsl_rl_cfg_entry_point")
     def train_with_config(env_cfg, agent_cfg: RslRlOnPolicyRunnerCfg):
         """Training function that gets config from Hydra."""
-        
+
         # Override CLI arguments
         if args_cli.num_envs is not None:
             env_cfg.scene.num_envs = args_cli.num_envs
@@ -106,8 +141,9 @@ def main():
             env_cfg.seed = args_cli.seed
 
         # Create environment
-        env = gym.make(task_name, cfg=env_cfg, 
-                      render_mode="rgb_array" if args_cli.video else None)
+        env = gym.make(
+            task_name, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None
+        )
 
         # Convert to single-agent if needed
         if isinstance(env.unwrapped, DirectMARLEnv):
@@ -117,7 +153,7 @@ def main():
         log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
         log_root_path = os.path.abspath(log_root_path)
         print(f"[INFO] Logging experiment in directory: {log_root_path}")
-        
+
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         log_dir = os.path.join(log_root_path, timestamp)
         os.makedirs(log_dir, exist_ok=True)
@@ -127,10 +163,12 @@ def main():
 
         # Ensure SO_101 is available in namespace for RSL-RL's eval() calls
         # RSL-RL uses eval() internally to dynamically load custom ActorCritic classes.
-        import SO_101.policies.graph_dit_rsl_rl_actor_critic  # noqa: F401
-        import SO_101.policies.residual_rl_actor_critic  # noqa: F401
         import builtins
         import sys
+
+        import SO_101.policies.graph_dit_rsl_rl_actor_critic  # noqa: F401
+        import SO_101.policies.residual_rl_actor_critic  # noqa: F401
+
         # Inject SO_101 into builtins so eval() can access it
         if not hasattr(builtins, "SO_101"):
             builtins.SO_101 = sys.modules["SO_101"]
@@ -139,17 +177,25 @@ def main():
         print(f"\n[Train] Creating RSL-RL runner...")
         print(f"[Train] Policy class: {agent_cfg.policy.class_name}")
         # Get device from config or use default
-        device = args_cli.device if hasattr(args_cli, 'device') and args_cli.device is not None else agent_cfg.device
-        runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=device)
+        device = (
+            args_cli.device
+            if hasattr(args_cli, "device") and args_cli.device is not None
+            else agent_cfg.device
+        )
+        runner = OnPolicyRunner(
+            env, agent_cfg.to_dict(), log_dir=log_dir, device=device
+        )
 
         # Print model info
         try:
             policy_nn = runner.alg.policy
         except AttributeError:
             policy_nn = runner.alg.actor_critic
-        
+
         total_params = sum(p.numel() for p in policy_nn.parameters())
-        trainable_params = sum(p.numel() for p in policy_nn.parameters() if p.requires_grad)
+        trainable_params = sum(
+            p.numel() for p in policy_nn.parameters() if p.requires_grad
+        )
         print(f"[Train] Total parameters: {total_params:,}")
         print(f"[Train] Trainable parameters: {trainable_params:,}")
         print(f"[Train] Frozen parameters: {total_params - trainable_params:,}")
@@ -160,8 +206,12 @@ def main():
         dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
 
         # Run training
-        print(f"\n[Train] Starting training with {env_cfg.scene.num_envs} parallel environments...")
-        runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
+        print(
+            f"\n[Train] Starting training with {env_cfg.scene.num_envs} parallel environments..."
+        )
+        runner.learn(
+            num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True
+        )
 
         # Close environment
         env.close()

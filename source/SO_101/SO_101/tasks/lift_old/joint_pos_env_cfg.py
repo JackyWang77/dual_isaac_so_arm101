@@ -10,17 +10,15 @@
 
 import isaaclab_tasks.manager_based.manipulation.lift.mdp as mdp
 from isaaclab.assets import RigidObjectCfg
-
 # from isaaclab.managers NotImplementedError
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import (
-    FrameTransformerCfg,
-    OffsetCfg,
-)
+    FrameTransformerCfg, OffsetCfg)
 from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
 from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
-from SO_101.robots import SO_ARM101_CFG, SO_ARM101_ROSCON_CFG, SO_ARM101_ROSCON_HIGH_PD_CFG  # noqa: F401
+from SO_101.robots import (SO_ARM101_CFG, SO_ARM101_ROSCON_CFG,  # noqa: F401
+                           SO_ARM101_ROSCON_HIGH_PD_CFG)
 from SO_101.tasks.lift_old.lift_env_cfg import LiftEnvCfg
 
 from isaaclab.markers.config import FRAME_MARKER_CFG  # isort: skip
@@ -38,13 +36,21 @@ class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
 
         # Set so arm as robot
         # self.scene.robot = SO_ARM101_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-        self.scene.robot = SO_ARM101_ROSCON_HIGH_PD_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        self.scene.robot = SO_ARM101_ROSCON_HIGH_PD_CFG.replace(
+            prim_path="{ENV_REGEX_NS}/Robot"
+        )
         self.scene.robot.spawn.articulation_props.fix_root_link = True
         # override actions
         self.actions.arm_action = mdp.JointPositionActionCfg(
             asset_name="robot",
             # joint_names=["Shoulder_Rotation", "Shoulder_Pitch", "Elbow", "Wrist_Pitch", "Wrist_Roll"],
-            joint_names=["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_pitch_joint", "wrist_roll_joint"],
+            joint_names=[
+                "shoulder_pan_joint",
+                "shoulder_lift_joint",
+                "elbow_joint",
+                "wrist_pitch_joint",
+                "wrist_roll_joint",
+            ],
             scale=1,
             use_default_offset=True,
         )
@@ -61,7 +67,9 @@ class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
         # Set Cube as object
         self.scene.object = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Object",
-            init_state=RigidObjectCfg.InitialStateCfg(pos=[0.2, 0.0, 0.015], rot=[1, 0, 0, 0]),
+            init_state=RigidObjectCfg.InitialStateCfg(
+                pos=[0.2, 0.0, 0.015], rot=[1, 0, 0, 0]
+            ),
             spawn=UsdFileCfg(
                 usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
                 scale=(0.3, 0.3, 0.3),

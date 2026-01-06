@@ -11,13 +11,13 @@ import time
 from collections.abc import Callable
 from dataclasses import MISSING
 
+import carb.settings
 import numpy as np
+# ROS2 imports
+import rclpy
 import torch
 from isaaclab.devices.device_base import DeviceBase
 from isaaclab.utils import configclass
-import carb.settings
-# ROS2 imports
-import rclpy
 from sensor_msgs.msg import JointState
 
 
@@ -81,8 +81,12 @@ class JointStatesROS2(DeviceBase):
         self.cfg = cfg
         carb.settings.get_settings().set_int("/app/window/presentMode", 0)
         # Internal state - use torch tensor directly to avoid conversions
-        self._latest_joint_positions = torch.zeros((1, cfg.num_dof), dtype=torch.float32)
-        self._previous_joint_positions = torch.zeros((1, cfg.num_dof), dtype=torch.float32)  # For interpolation
+        self._latest_joint_positions = torch.zeros(
+            (1, cfg.num_dof), dtype=torch.float32
+        )
+        self._previous_joint_positions = torch.zeros(
+            (1, cfg.num_dof), dtype=torch.float32
+        )  # For interpolation
         self._last_update_time = 0.0
         self._previous_update_time = 0.0  # For interpolation
         self._connection_warned = False
@@ -92,7 +96,9 @@ class JointStatesROS2(DeviceBase):
         self._joint_positions_array = np.zeros(cfg.num_dof, dtype=np.float32)
 
         # Interpolation state
-        self._interpolation_interval = 1.0 / cfg.interpolation_rate_hz if cfg.enable_interpolation else 0.0
+        self._interpolation_interval = (
+            1.0 / cfg.interpolation_rate_hz if cfg.enable_interpolation else 0.0
+        )
         self._last_interpolation_time = 0.0
         self._last_joint_msg_time = 0.0
         self._last_timing_log_time = 0.0
@@ -106,20 +112,21 @@ class JointStatesROS2(DeviceBase):
             rclpy.init()
 
         # Create ROS2 node with optimized QoS settings for low latency
-        self.node = rclpy.create_node('joint_states_ros2_device')
+        self.node = rclpy.create_node("joint_states_ros2_device")
 
         # Subscribe to joint states topic with more forgiving QoS to avoid missed bridge callbacks
-        from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
+        from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+
         qos_profile = QoSProfile(
             depth=2,  # Buffer a few messages to tolerate bursts/relay delays
             reliability=ReliabilityPolicy.RELIABLE,  # Ensure delivery even if bridge hops exist
-            durability=DurabilityPolicy.VOLATILE  # No persistence
+            durability=DurabilityPolicy.VOLATILE,  # No persistence
         )
         self.subscription = self.node.create_subscription(
             JointState,
             self.cfg.joint_state_topic,
             self._joint_state_callback,
-            qos_profile  # Use optimized QoS
+            qos_profile,  # Use optimized QoS
         )
 
         # Pre-compute joint name mapping for faster lookup
@@ -190,8 +197,12 @@ class JointStatesROS2(DeviceBase):
         # Check connection status (only check, don't block)
         if not self._is_connected():
             if not self._connection_warned:
-                print(f"[JointStatesROS2] ⚠️  No ROS2 messages received for {self.cfg.timeout_sec}s")
-                print(f"[JointStatesROS2] Make sure real robot is publishing to: {self.cfg.joint_state_topic}")
+                print(
+                    f"[JointStatesROS2] ⚠️  No ROS2 messages received for {self.cfg.timeout_sec}s"
+                )
+                print(
+                    f"[JointStatesROS2] Make sure real robot is publishing to: {self.cfg.joint_state_topic}"
+                )
                 self._connection_warned = True
             return torch.zeros((1, self.cfg.num_dof), dtype=torch.float32)
 
@@ -230,7 +241,10 @@ class JointStatesROS2(DeviceBase):
                 interp_factor = min(1.0, max(0.0, interp_factor))
 
                 # Linear interpolation: prev + (current - prev) * factor
-                interpolated = prev_positions + (current_positions - prev_positions) * interp_factor
+                interpolated = (
+                    prev_positions
+                    + (current_positions - prev_positions) * interp_factor
+                )
                 return interpolated * self.cfg.scale
 
         # No interpolation: return latest positions (but avoid waiting too long)
@@ -272,7 +286,7 @@ class JointStatesROS2(DeviceBase):
 
     def close(self):
         """Close the ROS2 device and cleanup resources."""
-        if hasattr(self, 'node') and self.node is not None:
+        if hasattr(self, "node") and self.node is not None:
             try:
                 self.node.destroy_node()
                 # Note: Don't call rclpy.shutdown() here as it might be used by other nodes
@@ -308,14 +322,14 @@ class JointStatesROS2(DeviceBase):
         """
         try:
             # Create mapping from message joint names to indices (only once)
-            if not hasattr(self, '_msg_name_to_idx'):
+            if not hasattr(self, "_msg_name_to_idx"):
                 self._msg_name_to_idx = {name: i for i, name in enumerate(msg.name)}
                 print("[JointStatesROS2] ✅ Received first joint state message:")
                 print(f"  Joint names in message: {msg.name}")
 
             # Extract joint positions in the order specified in cfg.joint_names
             # Use pre-allocated array and direct assignment (faster than list append)
-            msg_name_to_idx = getattr(self, '_msg_name_to_idx', None)
+            msg_name_to_idx = getattr(self, "_msg_name_to_idx", None)
 
             for i, joint_name in enumerate(self.cfg.joint_names):
                 if msg_name_to_idx is not None and joint_name in msg_name_to_idx:
@@ -329,8 +343,10 @@ class JointStatesROS2(DeviceBase):
                     except ValueError:
                         # Joint not found in message, use 0.0 as default
                         self._joint_positions_array[i] = 0.0
-                        if not hasattr(self, '_missing_joint_warned'):
-                            print(f"[JointStatesROS2] ⚠️  Joint '{joint_name}' not found in JointState message")
+                        if not hasattr(self, "_missing_joint_warned"):
+                            print(
+                                f"[JointStatesROS2] ⚠️  Joint '{joint_name}' not found in JointState message"
+                            )
                             self._missing_joint_warned = True
 
             # Update tensor directly
@@ -340,19 +356,25 @@ class JointStatesROS2(DeviceBase):
             self._previous_update_time = self._last_update_time
 
             # Direct assignment from numpy array (no intermediate conversion)
-            self._latest_joint_positions[0] = torch.from_numpy(self._joint_positions_array)
+            self._latest_joint_positions[0] = torch.from_numpy(
+                self._joint_positions_array
+            )
 
             self._last_update_time = current_time
             self._last_joint_msg_time = current_time
 
             # Print first successful message (debug)
-            if not hasattr(self, '_first_msg_printed'):
-                print(f"[JointStatesROS2] ✅ Processing joint states (positions: {self._joint_positions_array})")
+            if not hasattr(self, "_first_msg_printed"):
+                print(
+                    f"[JointStatesROS2] ✅ Processing joint states (positions: {self._joint_positions_array})"
+                )
                 self._first_msg_printed = True
 
         except Exception as e:
             print(f"[JointStatesROS2] ❌ Error processing JointState message: {e}")
             import traceback
+
             traceback.print_exc()
+
 
 # End of ROS2 Joint States device

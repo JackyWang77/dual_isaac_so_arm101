@@ -9,12 +9,9 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 from isaaclab.utils import configclass
-from isaaclab_rl.rsl_rl import (
-    RslRlOnPolicyRunnerCfg,
-    RslRlPpoActorCriticCfg,
-    RslRlPpoAlgorithmCfg,
-    RslRlPpoActorCriticRecurrentCfg,
-)
+from isaaclab_rl.rsl_rl import (RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg,
+                                RslRlPpoActorCriticRecurrentCfg,
+                                RslRlPpoAlgorithmCfg)
 
 
 @configclass
@@ -59,8 +56,8 @@ class LiftCubePPORecurrentRunnerCfg(RslRlOnPolicyRunnerCfg):
         critic_hidden_dims=[256, 128, 64],
         activation="elu",
         rnn_type="gru",
-        rnn_hidden_dim = 64,
-        rnn_num_layers = 2,
+        rnn_hidden_dim=64,
+        rnn_num_layers=2,
     )
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,

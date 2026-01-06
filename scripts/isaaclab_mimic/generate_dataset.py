@@ -15,13 +15,29 @@ import argparse
 from isaaclab.app import AppLauncher
 
 # add argparse arguments
-parser = argparse.ArgumentParser(description="Generate demonstrations for Isaac Lab environments.")
-parser.add_argument("--task", type=str, default=None, help="Name of the task.")
-parser.add_argument("--generation_num_trials", type=int, help="Number of demos to be generated.", default=None)
-parser.add_argument(
-    "--num_envs", type=int, default=1, help="Number of environments to instantiate for generating datasets."
+parser = argparse.ArgumentParser(
+    description="Generate demonstrations for Isaac Lab environments."
 )
-parser.add_argument("--input_file", type=str, default=None, required=True, help="File path to the source dataset file.")
+parser.add_argument("--task", type=str, default=None, help="Name of the task.")
+parser.add_argument(
+    "--generation_num_trials",
+    type=int,
+    help="Number of demos to be generated.",
+    default=None,
+)
+parser.add_argument(
+    "--num_envs",
+    type=int,
+    default=1,
+    help="Number of environments to instantiate for generating datasets.",
+)
+parser.add_argument(
+    "--input_file",
+    type=str,
+    default=None,
+    required=True,
+    help="File path to the source dataset file.",
+)
 parser.add_argument(
     "--output_file",
     type=str,
@@ -62,25 +78,26 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import asyncio
-import gymnasium as gym
 import inspect
 import logging
-import numpy as np
 import random
-import torch
 
-from isaaclab.envs import ManagerBasedRLMimicEnv
-
+import gymnasium as gym
 import isaaclab_mimic.envs  # noqa: F401
+import numpy as np
+import torch
+from isaaclab.envs import ManagerBasedRLMimicEnv
 
 if args_cli.enable_pinocchio:
     import isaaclab_mimic.envs.pinocchio_envs  # noqa: F401
 
-from isaaclab_mimic.datagen.generation import env_loop, setup_async_generation, setup_env_config
-from isaaclab_mimic.datagen.utils import get_env_name_from_dataset, setup_output_paths
-
 import isaaclab_tasks  # noqa: F401
 import SO_101.tasks  # noqa: F401  # Import custom tasks (SO-ARM101)
+from isaaclab_mimic.datagen.generation import (env_loop,
+                                               setup_async_generation,
+                                               setup_env_config)
+from isaaclab_mimic.datagen.utils import (get_env_name_from_dataset,
+                                          setup_output_paths)
 
 # import logger
 logger = logging.getLogger(__name__)
@@ -110,10 +127,15 @@ def main():
     env = gym.make(env_name, cfg=env_cfg).unwrapped
 
     if not isinstance(env, ManagerBasedRLMimicEnv):
-        raise ValueError("The environment should be derived from ManagerBasedRLMimicEnv")
+        raise ValueError(
+            "The environment should be derived from ManagerBasedRLMimicEnv"
+        )
 
     # Check if the mimic API from this environment contains decprecated signatures
-    if "action_noise_dict" not in inspect.signature(env.target_eef_pose_to_action).parameters:
+    if (
+        "action_noise_dict"
+        not in inspect.signature(env.target_eef_pose_to_action).parameters
+    ):
         logger.warning(
             f'The "noise" parameter in the "{env_name}" environment\'s mimic API "target_eef_pose_to_action", '
             "is deprecated. Please update the API to take action_noise_dict instead."
@@ -129,8 +151,10 @@ def main():
 
     motion_planners = None
     if args_cli.use_skillgen:
-        from isaaclab_mimic.motion_planners.curobo.curobo_planner import CuroboPlanner
-        from isaaclab_mimic.motion_planners.curobo.curobo_planner_cfg import CuroboPlannerCfg
+        from isaaclab_mimic.motion_planners.curobo.curobo_planner import \
+            CuroboPlanner
+        from isaaclab_mimic.motion_planners.curobo.curobo_planner_cfg import \
+            CuroboPlannerCfg
 
         # Create one motion planner per environment
         motion_planners = {}
@@ -167,8 +191,10 @@ def main():
 
     try:
         print("[DEBUG] Creating async tasks...")
-        data_gen_tasks = asyncio.ensure_future(asyncio.gather(*async_components["tasks"], return_exceptions=True))
-        
+        data_gen_tasks = asyncio.ensure_future(
+            asyncio.gather(*async_components["tasks"], return_exceptions=True)
+        )
+
         # Add callback to catch async task crashes
         def task_done_callback(future):
             try:
@@ -177,21 +203,24 @@ def main():
                     if isinstance(res, Exception):
                         print(f"\n!!! Async Task {i} CRASHED with error: {res}")
                         import traceback
+
                         traceback.print_exception(type(res), res, res.__traceback__)
             except Exception as e:
                 print(f"!!! Error in callback: {e}")
-        
+
         data_gen_tasks.add_done_callback(task_done_callback)
-        
+
         # Check if tasks started properly
         async_components["event_loop"].run_until_complete(asyncio.sleep(0.5))
         print(f"[DEBUG] Tasks done: {data_gen_tasks.done()}")
         if data_gen_tasks.done():
             result = data_gen_tasks.result()
             print(f"[DEBUG] Task result/exception: {result}")
-        
+
         print("[DEBUG] Starting env_loop...")
-        print(f"[DEBUG] num_envs={args_cli.num_envs}, reset_queue size={async_components['reset_queue'].qsize()}, action_queue size={async_components['action_queue'].qsize()}")
+        print(
+            f"[DEBUG] num_envs={args_cli.num_envs}, reset_queue size={async_components['reset_queue'].qsize()}, action_queue size={async_components['action_queue'].qsize()}"
+        )
         env_loop(
             env,
             async_components["reset_queue"],
@@ -223,7 +252,7 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main() 
+        main()
     except KeyboardInterrupt:
         print("\nProgram interrupted by user. Exiting...")
     # Close sim app

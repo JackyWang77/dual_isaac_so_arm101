@@ -164,7 +164,7 @@ from isaaclab.devices.openxr import remove_camera_configs
 from isaaclab.devices.teleop_device_factory import create_teleop_device
 
 import isaaclab_mimic.envs  # noqa: F401
-import SO_101.tasks # noqa: F401  # Registers custom SO-100 tasks
+import SO_101.tasks  # noqa: F401  # Registers custom SO-100 tasks
 from isaaclab_mimic.ui.instruction_display import InstructionDisplay, show_subtask_instructions
 
 # Import ROS2 device for teleoperation
@@ -368,18 +368,18 @@ def setup_teleop_device(callbacks: dict[str, Callable]) -> object:
             elif args_cli.teleop_device.lower() == "joint_states":
                 # Create Joint States ROS2 device
                 from SO_101.devices import JointStatesROS2, JointStatesROS2Cfg
-                
+
                 joint_states_cfg = JointStatesROS2Cfg(
                     joint_state_topic="/joint_states",  # Subscribe directly to raw topic (lowest latency)
                     # If using relay, change to: joint_state_topic="/isaac_joint_command"
                     num_dof=6,  # 5 arm joints + 1 gripper
                     joint_names=[
                         "shoulder_pan_joint",
-                        "shoulder_lift_joint", 
+                        "shoulder_lift_joint",
                         "elbow_joint",
                         "wrist_pitch_joint",
                         "wrist_roll_joint",
-                        "jaw_joint"
+                        "jaw_joint",
                     ],
                     scale=1.0,
                 )
@@ -553,9 +553,10 @@ def run_simulation_loop(
     extra_keyboard = None
     if args_cli.teleop_device.lower() in ["ros2", "joint_states"]:
         from isaaclab.devices import Se3Keyboard, Se3KeyboardCfg
+
         # Create a keyboard with zero sensitivity, only for listening to keys, not controlling robot
         extra_keyboard = Se3Keyboard(Se3KeyboardCfg(pos_sensitivity=0.0, rot_sensitivity=0.0))
-        
+
         # Define function to toggle recording state
         def toggle_recording():
             nonlocal running_recording_instance
@@ -563,7 +564,7 @@ def run_simulation_loop(
                 stop_recording_instance()
             else:
                 start_recording_instance()
-        
+
         # Bind keys: L key toggles recording state, R key resets
         extra_keyboard.add_callback("L", toggle_recording)
         extra_keyboard.add_callback("R", reset_recording_instance)
@@ -577,7 +578,7 @@ def run_simulation_loop(
         max_wait_time = 5.0  # Maximum wait time: 5 seconds
         start_time = time.time()
         initial_joint_pos = None
-        
+
         # Wait for first ROS2 message
         while time.time() - start_time < max_wait_time:
             # Try to get joint positions (this triggers ROS2 spin)
@@ -592,18 +593,18 @@ def run_simulation_loop(
                         print(f"[record_demos] ✅ Received initial joint positions: {joint_pos_list}")
                         break
             time.sleep(0.1)  # Wait 100ms before retry
-        
+
         # If successfully read initial position, set it in environment
         if initial_joint_pos is not None and initial_joint_pos.numel() > 0:
             robot = env.scene["robot"]
             joint_pos_list = initial_joint_pos[0].cpu().tolist()
-            
+
             # Save initial position for immediate setting after reset
             initial_joint_pos_saved = {
                 "joint_pos_list": joint_pos_list,
                 "joint_names": teleop_interface.cfg.joint_names,
             }
-            
+
             # Set initial joint positions for all environments (used during reset)
             for env_id in range(env.num_envs):
                 for i, joint_name in enumerate(teleop_interface.cfg.joint_names):
@@ -612,7 +613,7 @@ def run_simulation_loop(
                         if joint_name in robot.joint_names:
                             joint_idx = robot.joint_names.index(joint_name)
                             robot.data.default_joint_pos[env_id, joint_idx] = joint_pos_list[i]
-            
+
             print("[record_demos] ✅ Set Isaac Sim robot initial pose to match real robot")
             joint_pos_dict = dict(zip(teleop_interface.cfg.joint_names, joint_pos_list))
             print(f"[record_demos]    Joint positions: {joint_pos_dict}")
@@ -624,17 +625,17 @@ def run_simulation_loop(
     env.sim.reset()
     env.reset()
     teleop_interface.reset()
-    
+
     # === Optimization: Immediately set current joint positions to ensure first frame is synchronized ===
     if initial_joint_pos_saved is not None:
         robot = env.scene["robot"]
         joint_pos_list = initial_joint_pos_saved["joint_pos_list"]
         joint_names = initial_joint_pos_saved["joint_names"]
-        
+
         # Build complete joint position tensor (including all joints, not just ROS2-controlled ones)
         joint_pos_tensor = robot.data.default_joint_pos.clone()
         joint_vel_tensor = torch.zeros_like(robot.data.default_joint_vel)
-        
+
         # Update ROS2-controlled joint positions
         for env_id in range(env.num_envs):
             for i, joint_name in enumerate(joint_names):
@@ -642,7 +643,7 @@ def run_simulation_loop(
                     if joint_name in robot.joint_names:
                         joint_idx = robot.joint_names.index(joint_name)
                         joint_pos_tensor[env_id, joint_idx] = joint_pos_list[i]
-        
+
         # Immediately write to physics engine to ensure first frame is synchronized
         robot.write_joint_state_to_sim(joint_pos_tensor, joint_vel_tensor)
         print("[record_demos] ✅ Immediately synchronized robot pose in physics engine")
@@ -679,7 +680,7 @@ def run_simulation_loop(
                 # Compute actions based on environment
                 # Get observations every frame to ensure UI real-time response (logic check overhead is usually negligible)
                 obv, _, _, _, _ = env.step(actions)
-                
+
                 # Update UI hints (subtask instructions)
                 if subtasks is not None:
                     if subtasks == {}:
@@ -687,20 +688,27 @@ def run_simulation_loop(
                         # obv is already a dict, no need for [0]
                         if "subtask_terms" in obv:
                             subtasks = obv.get("subtask_terms")
-                            print(f"\n[Instructor] ✅ Initialized subtasks: {list(subtasks.keys()) if subtasks else None}")
+                            print(
+                                f"\n[Instructor] ✅ Initialized subtasks: {list(subtasks.keys()) if subtasks else None}"
+                            )
                             # Print initial task description
                             if hasattr(env.cfg, "subtask_configs") and env.cfg.subtask_configs:
                                 eef_name = list(env.cfg.subtask_configs.keys())[0]
                                 configs = env.cfg.subtask_configs[eef_name]
                                 print(f"[Instructor] 📋 Subtask configs ({eef_name}):")
                                 for i, cfg in enumerate(configs):
-                                    task_desc = getattr(cfg, "description", None) or cfg.subtask_term_signal.replace("_", " ").title()
+                                    task_desc = (
+                                        getattr(cfg, "description", None)
+                                        or cfg.subtask_term_signal.replace("_", " ").title()
+                                    )
                                     print(f"   Step {i+1}: {task_desc} (signal: {cfg.subtask_term_signal})")
                                 print("")
                         else:
-                            print(f"[DEBUG] Warning: 'subtask_terms' not found in observation. Available keys: {list(obv.keys())}")
+                            print(
+                                f"[DEBUG] Warning: 'subtask_terms' not found in observation. Available keys: {list(obv.keys())}"
+                            )
                             subtasks = None
-                    
+
                     # Refresh hints every frame to ensure UI real-time updates (e.g., "Pick plate" -> "Place plate")
                     if subtasks:
                         # 1. Try to update UI (keep original logic)
@@ -728,20 +736,31 @@ def run_simulation_loop(
                                         signal_value = subtasks[sig_name]
                                         # Handle tensor, could be scalar or array
                                         if isinstance(signal_value, torch.Tensor):
-                                            val = signal_value.item() if signal_value.numel() == 1 else signal_value[0].item()
+                                            val = (
+                                                signal_value.item()
+                                                if signal_value.numel() == 1
+                                                else signal_value[0].item()
+                                            )
                                         else:
                                             val = float(signal_value)
 
                                         if val < 0.5:  # Not yet complete
                                             # Get task description, or use signal name if not available
-                                            task_desc = getattr(cfg, "description", None) or cfg.subtask_term_signal.replace("_", " ").title()
+                                            task_desc = (
+                                                getattr(cfg, "description", None)
+                                                or cfg.subtask_term_signal.replace("_", " ").title()
+                                            )
                                             current_task_desc = f"Step {i+1}/{len(configs)}: {task_desc}"
                                             break  # Found it, stop iterating
 
                                 # \r returns cursor to line start, enables in-place refresh without screen flooding
                                 # Only print when task description changes to avoid frequent refreshes
                                 if current_task_desc != getattr(run_simulation_loop, "_last_task_desc", ""):
-                                    print(f"\r[Instructor] 🤖 Current task: {current_task_desc} " + " " * 20, end="", flush=True)
+                                    print(
+                                        f"\r[Instructor] 🤖 Current task: {current_task_desc} " + " " * 20,
+                                        end="",
+                                        flush=True,
+                                    )
                                     run_simulation_loop._last_task_desc = current_task_desc
 
                         except Exception as e:
@@ -749,7 +768,10 @@ def run_simulation_loop(
                             if not hasattr(run_simulation_loop, "_debug_printed"):
                                 print(f"\n[Instructor] Debug Error: {e}", flush=True)
                                 if hasattr(env.cfg, "subtask_configs"):
-                                    print(f"[Instructor] subtask_configs keys: {list(env.cfg.subtask_configs.keys())}", flush=True)
+                                    print(
+                                        f"[Instructor] subtask_configs keys: {list(env.cfg.subtask_configs.keys())}",
+                                        flush=True,
+                                    )
                                 if isinstance(subtasks, dict):
                                     print(f"[Instructor] subtasks keys: {list(subtasks.keys())}", flush=True)
                                 run_simulation_loop._debug_printed = True

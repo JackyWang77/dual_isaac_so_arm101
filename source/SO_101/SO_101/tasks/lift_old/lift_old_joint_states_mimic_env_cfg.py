@@ -13,7 +13,7 @@ from .joint_pos_env_cfg import SoArm100LiftJointCubeEnvCfg
 class SoArm100LiftJointStatesMimicEnvCfg(SoArm100LiftJointCubeEnvCfg, MimicEnvCfg):
     """
     Isaac Lab Mimic environment config class for recording joint states directly for lift task.
-    
+
     This environment:
     - Accepts joint_states control (can be controlled by real robot)
     - Records joint states directly (joint positions + gripper) - no conversion
@@ -43,7 +43,7 @@ class SoArm100LiftJointStatesMimicEnvCfg(SoArm100LiftJointCubeEnvCfg, MimicEnvCf
 
         # Subtask configuration for the LIFT task
         subtask_configs = []
-        
+
         # Subtask: Lift object to target height
         subtask_configs.append(
             SubTaskConfig(
@@ -59,6 +59,5 @@ class SoArm100LiftJointStatesMimicEnvCfg(SoArm100LiftJointCubeEnvCfg, MimicEnvCf
                 description="Lift object to target height",
             )
         )
-        
-        self.subtask_configs["end_effector"] = subtask_configs
 
+        self.subtask_configs["end_effector"] = subtask_configs

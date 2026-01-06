@@ -10,10 +10,12 @@ from .pick_place_joint_pos_env_cfg import DualArmPickPlaceJointPosEnvCfg
 
 
 @configclass
-class DualArmPickPlaceJointForIKAbsMimicEnvCfg(DualArmPickPlaceJointPosEnvCfg, MimicEnvCfg):
+class DualArmPickPlaceJointForIKAbsMimicEnvCfg(
+    DualArmPickPlaceJointPosEnvCfg, MimicEnvCfg
+):
     """
     Isaac Lab Mimic environment config class for Joint-For-IK-Abs env.
-    
+
     This environment:
     - Accepts joint_states control (can be controlled by real robot)
     - Records EE absolute poses (for training IK Absolute policies)
@@ -42,7 +44,7 @@ class DualArmPickPlaceJointForIKAbsMimicEnvCfg(DualArmPickPlaceJointPosEnvCfg, M
         # Simplified tasks for testing: push_cube and lift_ee
         # The following are the subtask configurations for the push and lift task.
         subtask_configs = []
-        
+
         # Subtask 1: Push cube to target location
         subtask_configs.append(
             SubTaskConfig(
@@ -59,7 +61,7 @@ class DualArmPickPlaceJointForIKAbsMimicEnvCfg(DualArmPickPlaceJointPosEnvCfg, M
                 next_subtask_description="Lift hand up",
             )
         )
-        
+
         # Subtask 2: Lift EE up (final subtask)
         subtask_configs.append(
             SubTaskConfig(
@@ -147,4 +149,3 @@ class DualArmPickPlaceJointForIKAbsMimicEnvCfg(DualArmPickPlaceJointPosEnvCfg, M
         #     )
         # )
         self.subtask_configs["end_effector"] = subtask_configs
-

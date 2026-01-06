@@ -13,14 +13,10 @@ and trains only the residual action head.
 import os
 
 from isaaclab.utils import configclass
-from isaaclab_rl.rsl_rl import (
-    RslRlOnPolicyRunnerCfg,
-    RslRlPpoAlgorithmCfg,
-)
-
+from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg
 from SO_101.policies import GraphDiTPolicyCfg
-from SO_101.policies.residual_rl_policy import ResidualRLPolicyCfg
 from SO_101.policies.residual_rl_actor_critic import ResidualActorCriticCfg
+from SO_101.policies.residual_rl_policy import ResidualRLPolicyCfg
 
 
 def _get_pretrained_checkpoint() -> str:
@@ -29,8 +25,8 @@ def _get_pretrained_checkpoint() -> str:
         "RESIDUAL_RL_PRETRAINED_CHECKPOINT",
         os.environ.get(
             "GRAPH_DIT_PRETRAINED_CHECKPOINT",
-            "./logs/graph_dit/lift_joint_flow_matching/best_model.pt"
-        )
+            "./logs/graph_dit/lift_joint_flow_matching/best_model.pt",
+        ),
     )
 
 
@@ -49,7 +45,7 @@ def _create_residual_rl_cfg() -> ResidualRLPolicyCfg:
         diffusion_steps=100,
         mode="flow_matching",
     )
-    
+
     return ResidualRLPolicyCfg(
         graph_dit_cfg=graph_dit_cfg,
         pretrained_checkpoint=_get_pretrained_checkpoint(),
@@ -78,24 +74,24 @@ def _create_residual_rl_cfg() -> ResidualRLPolicyCfg:
 @configclass
 class LiftResidualRLRunnerCfg(RslRlOnPolicyRunnerCfg):
     """RSL-RL PPO runner configuration for Residual RL training.
-    
+
     This configures PPO to train only the residual head while keeping
     the Graph-DiT backbone frozen.
     """
-    
+
     num_steps_per_env = 24
     max_iterations = 300  # Residual learning converges faster
     save_interval = 50
     experiment_name = "lift_residual_rl"
     empirical_normalization = False
-    
+
     def __post_init__(self):
         """Initialize config after dataclass creation - reads env var at runtime."""
         super().__post_init__()
-        
+
         # Create residual_rl_cfg at runtime (reads env var NOW, not at import time)
         residual_rl_cfg = _create_residual_rl_cfg()
-        
+
         # Policy configuration using ResidualActorCriticCfg
         self.policy = ResidualActorCriticCfg(
             residual_rl_cfg=residual_rl_cfg,
@@ -105,7 +101,7 @@ class LiftResidualRLRunnerCfg(RslRlOnPolicyRunnerCfg):
             critic_hidden_dims=[256, 128, 64],
             activation="elu",
         )
-    
+
     # PPO algorithm configuration (tuned for residual learning)
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
