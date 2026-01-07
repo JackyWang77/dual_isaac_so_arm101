@@ -712,12 +712,11 @@ class GraphDiTPolicyCfg:
     node_dim: int = 7
     """Node feature dimension: position(3) + orientation(4) = 7"""
 
-    edge_dim: int = 5
-    """Edge feature dimension: distance(1) + direction(3) + alignment(1) = 5
+    edge_dim: int = 2
+    """Edge feature dimension: distance(1) + alignment(1) = 2
     
-    Enhanced edge features for better spatial reasoning:
+    Edge features for spatial reasoning:
     - distance: L2 norm between EE and Object positions
-    - direction: Normalized relative position vector (3D) - crucial for grasping
     - alignment: Quaternion dot product (orientation similarity)
     """
 
@@ -907,7 +906,7 @@ class GraphAttentionWithEdgeBias(nn.Module):
         Args:
             node_features: [batch, num_nodes, history_length, hidden_dim] or [batch, num_nodes, hidden_dim]
                           (2 nodes: EE, Object, with optional temporal history)
-            edge_features: [batch, edge_dim] (distance + orientation_similarity)
+            edge_features: [batch, edge_dim] - Edge features: distance(1) + alignment(1) = 2
         Returns:
             updated_node_features: [batch, num_nodes, hidden_dim] or [batch, num_nodes, history_length, hidden_dim]
         """
@@ -1536,15 +1535,14 @@ class GraphDiTPolicy(nn.Module):
             nn.GELU(),
         )
 
-        # Edge embedding: current(5) + delta(5) = 10 -> graph_edge_dim
-        # CRITICAL FIX: Input is now [current_features(5), delta_features(5)]
-        # Current features: [distance, direction(3), alignment]
+        # Edge embedding: current(2) + delta(2) = 4 -> graph_edge_dim
+        # Input is [current_features(2), delta_features(2)]
+        # Current features: [distance, alignment]
         # Delta features: temporal change in edge features (velocity/trend information)
-        # This includes velocity/trend information for better grasping behavior
         self.edge_embedding = nn.Sequential(
             nn.Linear(
                 cfg.edge_dim * 2, cfg.graph_edge_dim
-            ),  # 10 inputs (current + delta)
+            ),  # 4 inputs (current + delta)
             nn.LayerNorm(cfg.graph_edge_dim),
             nn.GELU(),
         )
@@ -1830,13 +1828,13 @@ class GraphDiTPolicy(nn.Module):
 
     def _compute_edge_features(self, ee_node: torch.Tensor, object_node: torch.Tensor):
         """
-        Compute enhanced edge features: distance + direction + orientation alignment.
+        Compute edge features: distance + orientation alignment.
 
         Args:
             ee_node: [batch, 7] - EE position(3) + orientation(4)
             object_node: [batch, 7] - Object position(3) + orientation(4)
         Returns:
-            edge_features: [batch, 5] - [distance(1), direction(3), alignment(1)]
+            edge_features: [batch, 2] - [distance(1), alignment(1)]
         """
         # Extract positions and orientations
         ee_pos = ee_node[:, :3]  # [batch, 3]
@@ -1849,26 +1847,22 @@ class GraphDiTPolicy(nn.Module):
         ee_quat = F.normalize(ee_quat, p=2, dim=-1, eps=1e-6)  # [batch, 4]
         obj_quat = F.normalize(obj_quat, p=2, dim=-1, eps=1e-6)  # [batch, 4]
 
-        # 1. Relative position vector (direction information)
+        # 1. Relative position vector
         relative_pos = obj_pos - ee_pos  # [batch, 3]
 
         # 2. Distance (L2 norm)
         distance = torch.norm(relative_pos, dim=-1, keepdim=True)  # [batch, 1]
 
-        # 3. Normalized direction (crucial for grasping - which way to move)
-        # This tells the model the direction from EE to Object
-        direction = relative_pos / (distance + 1e-6)  # [batch, 3]
-
-        # 4. Orientation alignment (quaternion dot product)
+        # 3. Orientation alignment (quaternion dot product)
         # Quaternion dot product: q1 · q2 = w1*w2 + x1*x2 + y1*y2 + z1*z2
         quat_dot = torch.sum(ee_quat * obj_quat, dim=-1, keepdim=True)  # [batch, 1]
         # Take absolute value (q and -q represent same rotation)
         alignment = torch.abs(quat_dot)  # [batch, 1], range [0, 1]
 
-        # Concatenate all features
+        # Concatenate features
         edge_features = torch.cat(
-            [distance, direction, alignment], dim=-1
-        )  # [batch, 5]
+            [distance, alignment], dim=-1
+        )  # [batch, 2]
 
         return edge_features
 
@@ -1966,36 +1960,36 @@ class GraphDiTPolicy(nn.Module):
             # Vectorized edge computation for all timesteps at once
             edge_features_raw_all = self._compute_edge_features(
                 ee_history_flat, obj_history_flat
-            )  # [batch * history_length, 5] - distance(1) + direction(3) + alignment(1)
+            )  # [batch * history_length, 2] - distance(1) + alignment(1)
             edge_features_temporal = edge_features_raw_all.view(
                 batch_size, history_length, self.cfg.edge_dim
-            )  # [batch, history_length, 5]
+            )  # [batch, history_length, 2]
 
             # CRITICAL FIX: Include both current edge features AND delta (velocity/trend information)
             # "Object is approaching" is more informative than "Object is at 0.5m"
-            # edge_features_temporal: [batch, history_length, 5] = (distance, direction(3), alignment) per timestep
+            # edge_features_temporal: [batch, history_length, 2] = (distance, alignment) per timestep
             current_edge = edge_features_temporal[
                 :, -1, :
-            ]  # [batch, 5] - current (most recent)
+            ]  # [batch, 2] - current (most recent)
 
             if history_length > 1:
                 # Compute delta: current - previous (positive = increasing distance, negative = approaching)
                 prev_edge = edge_features_temporal[
                     :, -2, :
-                ]  # [batch, 5] - previous timestep
-                edge_delta = current_edge - prev_edge  # [batch, 5] - velocity/trend
+                ]  # [batch, 2] - previous timestep
+                edge_delta = current_edge - prev_edge  # [batch, 2] - velocity/trend
 
                 # Concatenate current edge features with delta for richer information
-                # [batch, 10] = [current_features(5), delta_features(5)]
+                # [batch, 4] = [current_features(2), delta_features(2)]
                 edge_features_raw = torch.cat(
                     [current_edge, edge_delta], dim=-1
-                )  # [batch, 10]
+                )  # [batch, 4]
             else:
                 # Single timestep: pad with zeros for delta
-                edge_delta = torch.zeros_like(current_edge)  # [batch, 5]
+                edge_delta = torch.zeros_like(current_edge)  # [batch, 2]
                 edge_features_raw = torch.cat(
                     [current_edge, edge_delta], dim=-1
-                )  # [batch, 10]
+                )  # [batch, 4]
 
         else:
             # Fallback: extract from current obs (backward compatibility)
@@ -2004,13 +1998,13 @@ class GraphDiTPolicy(nn.Module):
             # Compute edge features
             current_edge = self._compute_edge_features(
                 ee_node, object_node
-            )  # [batch, 5]
+            )  # [batch, 2]
 
             # Pad with zeros for delta (no history available)
-            edge_delta = torch.zeros_like(current_edge)  # [batch, 5]
+            edge_delta = torch.zeros_like(current_edge)  # [batch, 2]
             edge_features_raw = torch.cat(
                 [current_edge, edge_delta], dim=-1
-            )  # [batch, 10]
+            )  # [batch, 4]
 
             # Embed nodes (single timestep)
             ee_node_embed = self.node_embedding(ee_node)  # [batch, hidden_dim]
@@ -2360,14 +2354,14 @@ class GraphDiTPolicy(nn.Module):
                 )
                 edge_features_temporal = edge_features_raw_all.view(
                     batch_size, history_length, self.cfg.edge_dim
-                )  # [batch, history_length, 5]
+                )  # [batch, history_length, 2]
 
                 # Include current edge + delta
-                current_edge = edge_features_temporal[:, -1, :]  # [batch, 5]
+                current_edge = edge_features_temporal[:, -1, :]  # [batch, 2]
                 if history_length > 1:
-                    prev_edge = edge_features_temporal[:, -2, :]  # [batch, 5]
-                    edge_delta = current_edge - prev_edge  # [batch, 5]
-                    edge_features_raw = torch.cat([current_edge, edge_delta], dim=-1)  # [batch, 10]
+                    prev_edge = edge_features_temporal[:, -2, :]  # [batch, 2]
+                    edge_delta = current_edge - prev_edge  # [batch, 2]
+                    edge_features_raw = torch.cat([current_edge, edge_delta], dim=-1)  # [batch, 4]
                 else:
                     edge_delta = torch.zeros_like(current_edge)
                     edge_features_raw = torch.cat([current_edge, edge_delta], dim=-1)
