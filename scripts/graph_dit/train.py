@@ -39,6 +39,7 @@ import SO_101.tasks  # noqa: F401  # Register environments
 import torch
 import torch.optim as optim
 from SO_101.policies.graph_dit_policy import GraphDiTPolicy, GraphDiTPolicyCfg
+import platform
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.tensorboard import SummaryWriter
@@ -73,7 +74,7 @@ class HDF5DemoDataset(Dataset):
         skip_first_steps: int = 10,
     ):
         """Initialize dataset.
-
+        
         Args:
             hdf5_path: Path to HDF5 file.
             obs_keys: List of observation keys to load.
@@ -120,21 +121,21 @@ class HDF5DemoDataset(Dataset):
         all_object_nodes = []
         all_joint_states = []
         demo_lengths = []
-
+            
         with h5py.File(hdf5_path, "r") as f:
             demo_keys = sorted([k for k in f["data"].keys() if k.startswith("demo_")])
             print(f"[HDF5DemoDataset] Found {len(demo_keys)} demonstrations")
-
+            
             for demo_key in demo_keys:
                 demo = f[f"data/{demo_key}"]
-
+                
                 # Load observations container
                 obs_container = demo.get("obs", demo.get("observations", None))
                 if obs_container is None:
                     raise ValueError(
                         f"Neither 'obs' nor 'observations' found in {demo_key}"
                     )
-
+                
                 # Compute key dimensions (only once)
                 if not self.obs_key_dims:
                     offset = 0
@@ -153,7 +154,7 @@ class HDF5DemoDataset(Dataset):
                             print(
                                 f"[HDF5DemoDataset] Key '{key}': dim={key_dim}, offset={self.obs_key_offsets[key]}"
                             )
-
+                
                 # Load all observation keys for this demo
                 obs_dict = {}
                 for key in obs_keys:
@@ -489,25 +490,6 @@ class HDF5DemoDataset(Dataset):
                 f"  ✅ Single batch dataset created: {len(self.demos)} identical demos"
             )
 
-        # ============================================================================
-        # 🚑 SINGLE BATCH TEST MODE: Overfitting test for debugging
-        # ============================================================================
-        if self.single_batch_test:
-            if len(self.demos) == 0:
-                raise ValueError(
-                    "[SINGLE BATCH TEST] No demos loaded! Cannot create single batch test."
-                )
-            print(f"\n🚑 [SINGLE BATCH TEST MODE] Enabled!")
-            print(f"  Original demos: {len(self.demos)}")
-            print(f"  Using ONLY first demo: {self.demos[0]['demo_key']}")
-            print(f"  Replicating {self.single_batch_size} times to fill batch")
-            # Keep only first demo and replicate it
-            first_demo = self.demos[0]
-            self.demos = [first_demo] * self.single_batch_size
-            print(
-                f"  ✅ Single batch dataset created: {len(self.demos)} identical demos"
-            )
-
         print(f"\n[HDF5DemoDataset] Dataset Statistics:")
         print(f"  Total demos: {len(self.demos)}")
         print(
@@ -567,58 +549,11 @@ class HDF5DemoDataset(Dataset):
                 print(
                     f"  ⚠️  WARNING: Obs Std has values > 100! Normalization may be too aggressive!"
                 )
-
-        # ============================================================================
-        # 🔍 NORMALIZATION STATS CHECK: Detect potential issues
-        # ============================================================================
-        print(f"\n🔍 [NORMALIZATION STATS CHECK]:")
-        if len(self.action_stats) > 0:
-            action_mean = self.action_stats["mean"]
-            action_std = self.action_stats["std"]
-            print(
-                f"  Action Mean: min={action_mean.min():.6f}, max={action_mean.max():.6f}, mean={action_mean.mean():.6f}"
-            )
-            print(
-                f"  Action Std:  min={action_std.min():.6f}, max={action_std.max():.6f}, mean={action_std.mean():.6f}"
-            )
-
-            # Check for anomalies
-            if (action_std < 1e-6).any():
-                print(
-                    f"  ⚠️  WARNING: Action Std has values < 1e-6! This may cause numerical issues!"
-                )
-            if (action_std > 100).any():
-                print(
-                    f"  ⚠️  WARNING: Action Std has values > 100! Normalization may be too aggressive!"
-                )
-            if (action_std < 0.01).any():
-                print(
-                    f"  ⚠️  WARNING: Action Std has very small values (< 0.01). Check if this dimension is constant!"
-                )
-
-        if len(self.obs_stats) > 0:
-            obs_mean = self.obs_stats["mean"]
-            obs_std = self.obs_stats["std"]
-            print(
-                f"  Obs Mean: min={obs_mean.min():.6f}, max={obs_mean.max():.6f}, mean={obs_mean.mean():.6f}"
-            )
-            print(
-                f"  Obs Std:  min={obs_std.min():.6f}, max={obs_std.max():.6f}, mean={obs_std.mean():.6f}"
-            )
-
-            if (obs_std < 1e-6).any():
-                print(
-                    f"  ⚠️  WARNING: Obs Std has values < 1e-6! This may cause numerical issues!"
-                )
-            if (obs_std > 100).any():
-                print(
-                    f"  ⚠️  WARNING: Obs Std has values > 100! Normalization may be too aggressive!"
-                )
-
+    
     def __len__(self):
         """Return number of demos (not timesteps!)."""
         return len(self.demos)
-
+    
     def __getitem__(self, idx):
         """Return complete demo sequence with all timesteps.
 
@@ -652,7 +587,7 @@ class HDF5DemoDataset(Dataset):
         # Normalize observations: [T, obs_dim]
         if self.normalize_obs and len(self.obs_stats) > 0:
             obs_seq = (obs_seq - self.obs_stats["mean"]) / self.obs_stats["std"]
-
+        
         # Normalize actions: [T, action_dim] and [T, pred_horizon, action_dim] and [T, hist_len, action_dim]
         if self.normalize_actions and len(self.action_stats) > 0:
             action_seq = (action_seq - self.action_stats["mean"]) / self.action_stats[
@@ -705,10 +640,10 @@ class HDF5DemoDataset(Dataset):
             ),
             "length": T,
         }
-
+    
     def get_obs_stats(self):
         return self.obs_stats
-
+    
     def get_action_stats(self):
         return self.action_stats
 
@@ -726,7 +661,7 @@ def demo_collate_fn(batch):
 
     Args:
         batch: List of demo dictionaries from dataset
-
+        
         Returns:
         Dictionary with padded tensors and mask:
         - obs_seq: [B, max_T, obs_dim]
@@ -836,7 +771,7 @@ def train_graph_dit_policy(
     skip_first_steps: int = 10,
 ):
     """Train Graph-DiT Policy with Action Chunking.
-
+    
     Args:
         task_name: Environment task name.
         dataset_path: Path to HDF5 dataset.
@@ -856,36 +791,36 @@ def train_graph_dit_policy(
         exec_horizon: Execution horizon for receding horizon control (default: 8).
         lr_schedule: Learning rate schedule: "constant" (stable) or "cosine" (warmup + cosine annealing).
     """
-
+    
     # Create directories with timestamp and mode suffix
     from datetime import datetime
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-
+    
     # Add mode suffix to save/log directories (e.g., reach_joint_ddpm, reach_joint_flow_matching)
     base_save_dir = Path(save_dir)
     base_log_dir = Path(log_dir)
-
+    
     # Append mode suffix to the base directory name
     # e.g., ./logs/graph_dit/reach_joint -> ./logs/graph_dit/reach_joint_ddpm
     save_dir_with_mode = base_save_dir.parent / f"{base_save_dir.name}_{mode}"
     log_dir_with_mode = base_log_dir.parent / f"{base_log_dir.name}_{mode}"
-
+    
     # Add timestamp
     save_dir = save_dir_with_mode / timestamp
     log_dir = log_dir_with_mode / timestamp
-
+    
     save_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
-
+    
     print(f"[Train] Save dir (with mode and timestamp): {save_dir}")
     print(f"[Train] Log dir (with mode and timestamp): {log_dir}")
-
+    
     # TensorBoard writer
     tensorboard_dir = log_dir / "tensorboard"
     writer = SummaryWriter(log_dir=tensorboard_dir)
     print(f"[Train] 📊 TensorBoard logs will be saved to: {tensorboard_dir}")
-
+    
     print(f"[Train] ===== Graph-DiT Policy Training with ACTION CHUNKING =====")
     print(f"[Train] Task: {task_name}")
     print(f"[Train] Dataset: {dataset_path}")
@@ -936,7 +871,7 @@ def train_graph_dit_policy(
         single_batch_size=single_batch_size,
         skip_first_steps=skip_first_steps,
     )
-
+    
     # Get normalization stats for saving
     obs_stats = dataset.get_obs_stats()
     action_stats = dataset.get_action_stats()
@@ -956,7 +891,7 @@ def train_graph_dit_policy(
     print(
         f"[Train] Action trajectory shape: [T, {actual_pred_horizon}, {actual_action_dim}]"
     )
-
+    
     # Check if subtask condition is available
     num_subtasks = (
         len(dataset.subtask_order)
@@ -969,11 +904,11 @@ def train_graph_dit_policy(
         )
     else:
         print(f"[Train] No subtask condition found in dataset")
-
+    
     print(
         f"[Train] Actual obs dim: {actual_obs_dim}, Actual action dim: {actual_action_dim}"
     )
-
+    
     # Update dimensions if needed
     if obs_dim != actual_obs_dim:
         print(
@@ -985,7 +920,7 @@ def train_graph_dit_policy(
             f"[Train] Warning: action_dim mismatch ({action_dim} vs {actual_action_dim}), using {actual_action_dim}"
         )
         action_dim = actual_action_dim
-
+    
     # Create dataloader with demo_collate_fn for variable-length sequence padding
     # IMPORTANT: batch_size now means number of demos per batch, not timesteps!
     # Recommend smaller batch_size (e.g., 4-16) since each demo is ~100 timesteps
@@ -995,16 +930,19 @@ def train_graph_dit_policy(
         f"[Train] (Each demo has ~{sample_T} timesteps, so effective batch ≈ {demo_batch_size * sample_T} timesteps)"
     )
 
+    # Platform-adaptive num_workers: Windows has issues with multiprocessing
+    num_workers = 4 if platform.system() != "Windows" else 0
+
     dataloader = DataLoader(
         dataset,
         batch_size=demo_batch_size,
         shuffle=True,
-        num_workers=4,
+        num_workers=num_workers,
         pin_memory=True,
         drop_last=True,
         collate_fn=demo_collate_fn,  # CRITICAL: Use demo-level collate function
     )
-
+    
     # Get number of subtasks from dataset
     num_subtasks = (
         len(dataset.subtask_order)
@@ -1036,7 +974,7 @@ def train_graph_dit_policy(
             print(f"    {key}: [{start}, {end}) (dim={end-start})")
     else:
         print(f"[Train] ⚠️  Dataset doesn't have obs_key_offsets, using default hardcoded indices")
-
+    
     # Create policy configuration
     # IMPORTANT: num_subtasks must match the actual subtask_condition dimension in data
     # If dataset has subtasks, use that number; otherwise disable subtask conditioning
@@ -1055,7 +993,7 @@ def train_graph_dit_policy(
         device=device,
         obs_structure=obs_structure,  # CRITICAL: Pass dynamic obs_structure instead of hardcoded indices
     )
-
+    
     if num_subtasks > 0:
         print(
             f"[Train] Policy configured with {num_subtasks} subtasks: {dataset.subtask_order}"
@@ -1065,11 +1003,11 @@ def train_graph_dit_policy(
         print(
             f"[Train] No subtask info found, subtask conditioning disabled (num_subtasks=0)"
         )
-
+    
     # Create policy network
     print(f"\n[Train] Creating Graph-DiT Policy...")
     policy = GraphDiTPolicy(cfg).to(device)
-
+    
     # Print model summary
     total_params = sum(p.numel() for p in policy.parameters())
     trainable_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
@@ -1077,7 +1015,7 @@ def train_graph_dit_policy(
     print(f"[Train] Trainable parameters: {trainable_params:,}")
     print(f"\n[Train] Policy architecture:")
     print(policy)
-
+    
     # Create optimizer
     optimizer = optim.AdamW(
         policy.parameters(),
@@ -1085,7 +1023,7 @@ def train_graph_dit_policy(
         weight_decay=weight_decay,
         betas=(0.9, 0.999),
     )
-
+    
     # Learning rate scheduler
     import math
 
@@ -1113,11 +1051,11 @@ def train_graph_dit_policy(
         print(
             f"[Train] Using CONSTANT learning rate: {learning_rate} (no warmup, no decay)"
         )
-
+    
     # Resume from checkpoint if specified
     start_epoch = 0
     best_loss = float("inf")
-
+    
     if resume_checkpoint and os.path.exists(resume_checkpoint):
         print(f"\n[Train] Resuming from checkpoint: {resume_checkpoint}")
         # weights_only=False is needed for PyTorch 2.6+ to load custom config classes
@@ -1125,7 +1063,7 @@ def train_graph_dit_policy(
             resume_checkpoint, map_location=device, weights_only=False
         )
         policy.load_state_dict(checkpoint["policy_state_dict"])
-
+        
         # Try to load optimizer and scheduler states (may not exist in best_model.pt)
         if "optimizer_state_dict" in checkpoint:
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -1134,15 +1072,15 @@ def train_graph_dit_policy(
             print(
                 f"[Train] Warning: No optimizer state in checkpoint, starting with fresh optimizer"
             )
-
+        
         if scheduler is not None and "scheduler_state_dict" in checkpoint:
             scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
             print(f"[Train] Loaded scheduler state from checkpoint")
-
+        
         start_epoch = checkpoint.get("epoch", 0) + 1
         best_loss = checkpoint.get("best_loss", checkpoint.get("loss", float("inf")))
         print(f"[Train] Resumed from epoch {start_epoch}, best loss: {best_loss:.6f}")
-
+    
     # Training loop - DEMO-LEVEL TRAINING
     print(f"\n[Train] Starting DEMO-LEVEL training for {num_epochs} epochs...")
     print(f"[Train] CRITICAL: Each batch contains complete demo sequences")
@@ -1150,15 +1088,15 @@ def train_graph_dit_policy(
         f"[Train] Loss is computed over all timesteps in each demo, with padding masked out"
     )
     policy.train()
-
+    
     # Track last epoch loss for final model
     last_epoch_loss = None
-
+    
     for epoch in range(start_epoch, num_epochs):
         epoch_losses = []
         epoch_mse_losses = []
         epoch_total_timesteps = 0  # Track actual timesteps processed
-
+        
         pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}")
         for batch_idx, batch in enumerate(pbar):
             # batch is a dictionary from demo_collate_fn
@@ -1316,17 +1254,17 @@ def train_graph_dit_policy(
                     print(f"  Enable DEBUG_LOSS=true to see detailed diagnostics")
 
                 print("========================================\n")
-
+            
             # Backward pass
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(policy.parameters(), max_norm=1.0)
             optimizer.step()
-
+            
             # Record losses
             epoch_losses.append(loss.item())
             epoch_mse_losses.append(loss_dict["mse_loss"].item())
-
+            
             # Update progress bar
             pbar.set_postfix(
                 {
@@ -1336,7 +1274,7 @@ def train_graph_dit_policy(
                     "lr": optimizer.param_groups[0]["lr"],
                 }
             )
-
+            
             # Log to tensorboard
             global_step = epoch * len(dataloader) + batch_idx
             writer.add_scalar("Train/Loss", loss.item(), global_step)
@@ -1350,17 +1288,17 @@ def train_graph_dit_policy(
         # Update learning rate (if scheduler is enabled)
         if scheduler is not None:
             scheduler.step()
-
+        
         # Compute epoch statistics
         avg_loss = np.mean(epoch_losses)
         avg_mse_loss = np.mean(epoch_mse_losses)
-
+        
         print(
             f"\n[Epoch {epoch+1}/{num_epochs}] "
-            f"Loss: {avg_loss:.6f}, MSE: {avg_mse_loss:.6f}, "
+              f"Loss: {avg_loss:.6f}, MSE: {avg_mse_loss:.6f}, "
             f"LR: {optimizer.param_groups[0]['lr']:.6f}"
         )
-
+        
         # Log to tensorboard
         # Log learning rate
         current_lr = optimizer.param_groups[0]["lr"]
@@ -1368,10 +1306,10 @@ def train_graph_dit_policy(
         writer.add_scalar("Epoch/AverageLoss", avg_loss, epoch)
         writer.add_scalar("Epoch/AverageMSE", avg_mse_loss, epoch)
         writer.add_scalar("Epoch/LearningRate", current_lr, epoch)
-
+        
         # Track last epoch loss
         last_epoch_loss = avg_loss
-
+        
         # Save best model only (overwrite if better)
         if avg_loss < best_loss:
             best_loss = avg_loss
@@ -1393,7 +1331,7 @@ def train_graph_dit_policy(
             print(
                 f"[Train] ✅ Saved best model (loss: {best_loss:.6f}, epoch: {epoch+1}) to: {best_path}"
             )
-
+    
     # Save final model (after all epochs)
     final_loss = last_epoch_loss if last_epoch_loss is not None else best_loss
     final_path = save_dir / "final_model.pt"
@@ -1416,7 +1354,7 @@ def train_graph_dit_policy(
     print(f"[Train] 📁 All models saved in: {save_dir}")
     print(f"[Train] 📊 TensorBoard logs in: {tensorboard_dir}")
     print(f"[Train] 💡 View logs with: tensorboard --logdir {log_dir}")
-
+    
     writer.close()
     return policy
 
@@ -1424,11 +1362,11 @@ def train_graph_dit_policy(
 def main():
     """Main training function."""
     parser = argparse.ArgumentParser(description="Train Graph-DiT Policy")
-
+    
     # Dataset arguments
     parser.add_argument("--task", type=str, required=True, help="Task name")
     parser.add_argument("--dataset", type=str, required=True, help="HDF5 dataset path")
-
+    
     # Model arguments
     parser.add_argument(
         "--obs_dim",
@@ -1449,7 +1387,7 @@ def main():
     parser.add_argument(
         "--num_heads", type=int, default=8, help="Number of attention heads"
     )
-
+    
     # Training arguments
     parser.add_argument(
         "--epochs", type=int, default=200, help="Number of training epochs"
@@ -1501,7 +1439,7 @@ def main():
         choices=["constant", "cosine"],
         help="Learning rate schedule: 'constant' (stable) or 'cosine' (warmup + cosine annealing)",
     )
-
+    
     # Paths
     parser.add_argument(
         "--save_dir",
@@ -1515,12 +1453,12 @@ def main():
     parser.add_argument(
         "--resume", type=str, default=None, help="Resume from checkpoint"
     )
-
+    
     # Device
     parser.add_argument("--device", type=str, default="cuda", help="Device (cuda/cpu)")
-
+    
     args = parser.parse_args()
-
+    
     # Observation keys (should match your dataset)
     # For reach task, these keys match the observations in reach_env_cfg.py
     # Note: Removed "target_object_position" (7 dims) as it's redundant with object_position + object_orientation
@@ -1534,7 +1472,7 @@ def main():
         "ee_orientation",
         "actions",  # last action for self-attention in Graph DiT
     ]
-
+    
     # Start training
     train_graph_dit_policy(
         task_name=args.task,
@@ -1565,3 +1503,4 @@ def main():
 if __name__ == "__main__":
     main()
     simulation_app.close()
+    
