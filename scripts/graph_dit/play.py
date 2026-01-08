@@ -370,6 +370,11 @@ def play_graph_dit_policy(
         [] for _ in range(num_envs)
     ]  # List of lists for dynamic management
     
+    # Initialize action smoothing (EMA) to reduce jitter
+    # Smoothing factor: 0.1-0.3 recommended. Smaller = smoother but more delay, larger = less smoothing
+    smoothing_factor = 0.3
+    last_actions = [None] * num_envs  # Store last executed action for each environment
+    
     step_count = 0
     
     def _extract_node_features_from_obs(obs_tensor):
@@ -622,17 +627,37 @@ def play_graph_dit_policy(
                                 action_trajectory[env_id, t, :]
                             )
 
-            # Pop the first action from each buffer
+            # Pop the first action from each buffer and apply smoothing (EMA)
             actions_list = []
             for env_id in range(num_envs):
                 if len(action_buffers[env_id]) > 0:
-                    actions_list.append(action_buffers[env_id].pop(0))
+                    # Get raw action from buffer (model's desired action)
+                    raw_action = action_buffers[env_id].pop(0)
+                    
+                    # Apply exponential moving average (EMA) smoothing to reduce jitter
+                    # Formula: smoothed_action = (1 - α) * last_action + α * raw_action
+                    # This prevents sudden action changes while still following model predictions
+                    if last_actions[env_id] is None:
+                        # First action: use raw action directly
+                        smoothed_action = raw_action
+                    else:
+                        # Apply EMA smoothing: blend between last action and new prediction
+                        smoothed_action = (1 - smoothing_factor) * last_actions[env_id] + smoothing_factor * raw_action
+                    
+                    # Update last action for next iteration
+                    last_actions[env_id] = smoothed_action
+                    actions_list.append(smoothed_action)
                 else:
                     # Fallback: should not happen if logic is correct
                     print(
                         f"[Play] WARNING: Empty action buffer for env {env_id}, using zeros!"
                     )
-                    actions_list.append(torch.zeros(action_dim, device=device))
+                    zero_action = torch.zeros(action_dim, device=device)
+                    # Apply smoothing even for zero action
+                    if last_actions[env_id] is not None:
+                        zero_action = (1 - smoothing_factor) * last_actions[env_id] + smoothing_factor * zero_action
+                    last_actions[env_id] = zero_action
+                    actions_list.append(zero_action)
 
             # Stack into batch tensors
             actions = torch.stack(actions_list, dim=0)  # [num_envs, action_dim]
@@ -675,6 +700,10 @@ def play_graph_dit_policy(
                     and joint_state_history_buffers is not None
                 ):
                     joint_state_history_buffers.reset(env_ids=done_env_ids)
+                
+                # Reset action smoothing state for done environments
+                for env_id in done_env_ids:
+                    last_actions[env_id] = None
 
                 for i in range(num_envs):
                     if done[i]:
