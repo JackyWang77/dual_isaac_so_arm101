@@ -1333,3 +1333,146 @@
 
 [Play] Playback completed!
 [121.336s] Simulation App Shutting Down
+
+
+ [PLAY.PREDICT] Call #1
+  obs_tensor shape: torch.Size([2, 32]), mean: 0.0702, std: 0.2678, min: -0.7069, max: 1.0000
+  action_history_tensor shape: torch.Size([2, 15, 6]), mean: 0.0000, std: 0.0000
+  ee_node_history_tensor shape: torch.Size([2, 15, 7]), mean: 0.0000, std: 0.0000
+  object_node_history_tensor shape: torch.Size([2, 15, 7]), mean: 0.0000, std: 0.0000
+  joint_states_history_tensor shape: torch.Size([2, 15, 12]), mean: 0.0000, std: 0.0000
+
+🔍 [NORMALIZE_INPUTS] Call #1
+  obs shape: torch.Size([2, 32]), mean: 0.0702, std: 0.2678, min: -0.7069, max: 1.0000
+  action_history shape: torch.Size([2, 15, 6]), mean: 0.0000, std: 0.0000
+  ee_node_history shape: torch.Size([2, 15, 7]), mean: 0.0000, std: 0.0000
+  object_node_history shape: torch.Size([2, 15, 7]), mean: 0.0000, std: 0.0000
+  joint_states_history shape: torch.Size([2, 15, 12]), mean: 0.0000, std: 0.0000
+  📊 obs_stats: mean shape=torch.Size([32]), std shape=torch.Size([32])
+    obs_mean range: [-0.7319, 1.4416]
+    obs_std range: [0.0367, 2.3337]
+  ✅ After normalize obs: mean: 0.0183, std: 1.6985, min: -4.4946, max: 3.7746
+  📊 action_stats: mean shape=torch.Size([6]), std shape=torch.Size([6])
+    action_mean range: [-0.1859, 1.4085]
+    action_std range: [0.1782, 0.6427]
+  ✅ After normalize action_history: mean: -0.9952, std: 1.9065
+  📊 node_stats (EE): mean shape=torch.Size([7]), std shape=torch.Size([7])
+  ✅ After normalize ee_node_history: mean: 1.0781, std: 4.3338
+  📊 node_stats (Object): mean shape=torch.Size([7]), std shape=torch.Size([7])
+  ✅ After normalize object_node_history: mean: -4.4493, std: 9.3494
+  📊 joint_stats: mean shape=torch.Size([12]), std shape=torch.Size([12])
+  ✅ After normalize joint_states_history: mean: -0.4513, std: 1.2661
+  🔍 [NORMALIZE_INPUTS] Done
+
+
+🔍 [DENORMALIZE_ACTION] Call #1
+  Input action shape: torch.Size([2, 8, 6])
+  Input action (normalized): mean: -0.2423, std: 0.8722, min: -2.0256, max: 2.2182
+  📊 action_stats: mean shape=torch.Size([6]), std shape=torch.Size([6])
+    action_mean range: [-0.1859, 1.4085]
+    action_std range: [0.1782, 0.6427]
+  ✅ After denormalize action: mean: 0.2787, std: 0.5964, min: -1.1258, max: 1.5027
+  🔍 [DENORMALIZE_ACTION] Done
+
+  ✅ action_trajectory (denormalized) shape: torch.Size([2, 8, 6])
+    mean: 0.2787, std: 0.5964, min: -1.1258, max: 1.5027
+  🔍 [PLAY.PREDICT] Done
+
+
+[🟢 VISUAL DEBUG Step 0] ==========
+  Target Joint (action): [0.14731961488723755, -0.0012522637844085693, 0.02598608285188675] (first 3 joints)
+  Current Joint:         [0.0, 0.0, 0.0] (first 3 joints)
+  Joint Diff:             [0.14731961488723755, 0.0012522637844085693, 0.02598608285188675]
+  Current EE Position:    [0.3932337760925293, -0.0006624371162615716, 0.2443591058254242]
+  Object Position:        [0.16617321968078613, -0.01426592469215393, 0.014999999664723873]
+  EE-Object Distance:      0.323
+  =========================================
+
+
+🔍 [PLAY.PREDICT] Call #2
+  obs_tensor shape: torch.Size([2, 32]), mean: 0.2124, std: 1.3232, min: -5.2468, max: 3.9187
+  action_history_tensor shape: torch.Size([2, 15, 6]), mean: 0.0683, std: 0.3061
+  ee_node_history_tensor shape: torch.Size([2, 15, 7]), mean: 0.0126, std: 0.2122
+  object_node_history_tensor shape: torch.Size([2, 15, 7]), mean: 0.0459, std: 0.1943
+  joint_states_history_tensor shape: torch.Size([2, 15, 12]), mean: 0.1928, std: 2.0659
+
+🔍 [NORMALIZE_INPUTS] Call #2
+  obs shape: torch.Size([2, 32]), mean: 0.2124, std: 1.3232, min: -5.2468, max: 3.9187
+  action_history shape: torch.Size([2, 15, 6]), mean: 0.0683, std: 0.3061
+  ee_node_history shape: torch.Size([2, 15, 7]), mean: 0.0126, std: 0.2122
+  object_node_history shape: torch.Size([2, 15, 7]), mean: 0.0459, std: 0.1943
+  joint_states_history shape: torch.Size([2, 15, 12]), mean: 0.1928, std: 2.0659
+  📊 obs_stats: mean shape=torch.Size([32]), std shape=torch.Size([32])
+    obs_mean range: [-0.7319, 1.4416]
+    obs_std range: [0.0367, 2.3337]
+  ✅ After normalize obs: mean: -0.0022, std: 1.3487, min: -4.5993, max: 3.3135
+  📊 action_stats: mean shape=torch.Size([6]), std shape=torch.Size([6])
+    action_mean range: [-0.1859, 1.4085]
+    action_std range: [0.1782, 0.6427]
+  ✅ After normalize action_history: mean: -0.8065, std: 1.7343
+  📊 node_stats (EE): mean shape=torch.Size([7]), std shape=torch.Size([7])
+  ✅ After normalize ee_node_history: mean: 1.0914, std: 3.7994
+  📊 node_stats (Object): mean shape=torch.Size([7]), std shape=torch.Size([7])
+  ✅ After normalize object_node_history: mean: -3.2665, std: 8.2459
+  📊 joint_stats: mean shape=torch.Size([12]), std shape=torch.Size([12])
+  ✅ After normalize joint_states_history: mean: -0.3369, std: 1.8583
+  🔍 [NORMALIZE_INPUTS] Done
+
+
+🔍 [DENORMALIZE_ACTION] Call #2
+  Input action shape: torch.Size([2, 8, 6])
+  Input action (normalized): mean: -0.2125, std: 0.7609, min: -2.5941, max: 1.6381
+  📊 action_stats: mean shape=torch.Size([6]), std shape=torch.Size([6])
+    action_mean range: [-0.1859, 1.4085]
+    action_std range: [0.1782, 0.6427]
+  ✅ After denormalize action: mean: 0.2945, std: 0.6367, min: -0.7756, max: 1.9570
+  🔍 [DENORMALIZE_ACTION] Done
+
+  ✅ action_trajectory (denormalized) shape: torch.Size([2, 8, 6])
+    mean: 0.2945, std: 0.6367, min: -0.7756, max: 1.9570
+  🔍 [PLAY.PREDICT] Done
+
+
+🔍 [PLAY.PREDICT] Call #3
+  obs_tensor shape: torch.Size([2, 32]), mean: 0.2267, std: 1.7614, min: -6.4736, max: 8.3136
+  action_history_tensor shape: torch.Size([2, 15, 6]), mean: 0.1359, std: 0.4270
+  ee_node_history_tensor shape: torch.Size([2, 15, 7]), mean: 0.0050, std: 0.2979
+  object_node_history_tensor shape: torch.Size([2, 15, 7]), mean: 0.0916, std: 0.2670
+  joint_states_history_tensor shape: torch.Size([2, 15, 12]), mean: 0.2976, std: 2.4005
+
+🔍 [NORMALIZE_INPUTS] Call #3
+  obs shape: torch.Size([2, 32]), mean: 0.2267, std: 1.7614, min: -6.4736, max: 8.3136
+  action_history shape: torch.Size([2, 15, 6]), mean: 0.1359, std: 0.4270
+  ee_node_history shape: torch.Size([2, 15, 7]), mean: 0.0050, std: 0.2979
+  object_node_history shape: torch.Size([2, 15, 7]), mean: 0.0916, std: 0.2670
+  joint_states_history shape: torch.Size([2, 15, 12]), mean: 0.2976, std: 2.4005
+  📊 obs_stats: mean shape=torch.Size([32]), std shape=torch.Size([32])
+    obs_mean range: [-0.7319, 1.4416]
+    obs_std range: [0.0367, 2.3337]
+  ✅ After normalize obs: mean: -0.0266, std: 1.4044, min: -6.3964, max: 3.8774
+  📊 action_stats: mean shape=torch.Size([6]), std shape=torch.Size([6])
+    action_mean range: [-0.1859, 1.4085]
+    action_std range: [0.1782, 0.6427]
+  ✅ After normalize action_history: mean: -0.6206, std: 1.4997
+  📊 node_stats (EE): mean shape=torch.Size([7]), std shape=torch.Size([7])
+  ✅ After normalize ee_node_history: mean: 0.9656, std: 3.1527
+  📊 node_stats (Object): mean shape=torch.Size([7]), std shape=torch.Size([7])
+  ✅ After normalize object_node_history: mean: -2.0871, std: 6.7641
+  📊 joint_stats: mean shape=torch.Size([12]), std shape=torch.Size([12])
+  ✅ After normalize joint_states_history: mean: -0.2239, std: 1.9661
+  🔍 [NORMALIZE_INPUTS] Done
+
+
+🔍 [DENORMALIZE_ACTION] Call #3
+  Input action shape: torch.Size([2, 8, 6])
+  Input action (normalized): mean: -0.2283, std: 0.6983, min: -2.2766, max: 1.3321
+  📊 action_stats: mean shape=torch.Size([6]), std shape=torch.Size([6])
+    action_mean range: [-0.1859, 1.4085]
+    action_std range: [0.1782, 0.6427]
+  ✅ After denormalize action: mean: 0.2805, std: 0.6013, min: -0.8868, max: 1.5294
+  🔍 [DENORMALIZE_ACTION] Done
+
+  ✅ action_trajectory (denormalized) shape: torch.Size([2, 8, 6])
+    mean: 0.2805, std: 0.6013, min: -0.8868, max: 1.5294
+  🔍 [PLAY.PREDICT] Done
+

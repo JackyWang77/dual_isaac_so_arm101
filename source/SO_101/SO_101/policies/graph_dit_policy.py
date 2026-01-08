@@ -112,8 +112,6 @@ class ActionHistoryBuffer:
     def update(self, actions: torch.Tensor):
         """Add new actions to the buffer using ring buffer (no memory allocation).
 
-        If buffer was never initialized, initialize with the first action.
-
         Args:
             actions: New actions [num_envs, action_dim] or [num_envs, 1, action_dim]
         """
@@ -126,11 +124,6 @@ class ActionHistoryBuffer:
             self.num_envs,
             self.action_dim,
         ), f"Expected actions shape ({self.num_envs}, {self.action_dim}), got {actions.shape}"
-
-        # If buffer was never initialized, initialize with the first action
-        if not self.initialized:
-            self.initialize_with(actions)
-            return
 
         # PERFORMANCE FIX: Ring buffer - direct write, no memory allocation
         # Write to current position
@@ -329,8 +322,6 @@ class NodeHistoryBuffer:
     def update(self, ee_node: torch.Tensor, object_node: torch.Tensor):
         """Add new node features to the buffer using ring buffer (no memory allocation).
 
-        If buffer was never initialized, initialize with the first node features.
-
         Args:
             ee_node: EE node features [num_envs, node_dim] or [num_envs, 1, node_dim]
             object_node: Object node features [num_envs, node_dim] or [num_envs, 1, node_dim]
@@ -350,11 +341,6 @@ class NodeHistoryBuffer:
             self.num_envs,
             self.node_dim,
         ), f"Expected object_node shape ({self.num_envs}, {self.node_dim}), got {object_node.shape}"
-
-        # If buffer was never initialized, initialize with the first node features
-        if not self.initialized:
-            self.initialize_with(ee_node, object_node)
-            return
 
         # PERFORMANCE FIX: Ring buffer - direct write, no memory allocation
         env_indices = torch.arange(self.num_envs, device=self.device)
@@ -539,8 +525,6 @@ class JointStateHistoryBuffer:
     def update(self, joint_states: torch.Tensor):
         """Add new joint states to the buffer using ring buffer (no memory allocation).
 
-        If buffer was never initialized, initialize with the first joint states.
-
         Args:
             joint_states: New joint states [num_envs, joint_dim] or [num_envs, 1, joint_dim]
         """
@@ -553,11 +537,6 @@ class JointStateHistoryBuffer:
             self.num_envs,
             self.joint_dim,
         ), f"Expected joint_states shape ({self.num_envs}, {self.joint_dim}), got {joint_states.shape}"
-
-        # If buffer was never initialized, initialize with the first joint states
-        if not self.initialized:
-            self.initialize_with(joint_states)
-            return
 
         # PERFORMANCE FIX: Ring buffer - direct write, no memory allocation
         env_indices = torch.arange(self.num_envs, device=self.device)
@@ -3151,6 +3130,7 @@ class GraphDiTPolicy(nn.Module):
                 self.action_stats["std"], device=device, dtype=dtype
             ).squeeze(0)
             action = action * action_std + action_mean
+        
         return action
 
     def save(self, path: str):

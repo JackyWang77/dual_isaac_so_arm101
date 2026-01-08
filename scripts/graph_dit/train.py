@@ -41,7 +41,6 @@ import torch.optim as optim
 from SO_101.policies.graph_dit_policy import GraphDiTPolicy, GraphDiTPolicyCfg
 import platform
 from torch.utils.data import DataLoader, Dataset
-from torch.utils.data._utils.collate import default_collate
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -121,7 +120,7 @@ class HDF5DemoDataset(Dataset):
         all_object_nodes = []
         all_joint_states = []
         demo_lengths = []
-
+            
         with h5py.File(hdf5_path, "r") as f:
             demo_keys = sorted([k for k in f["data"].keys() if k.startswith("demo_")])
             print(f"[HDF5DemoDataset] Found {len(demo_keys)} demonstrations")
@@ -1030,7 +1029,7 @@ def train_graph_dit_policy(
     if lr_schedule == "cosine":
         # Warmup + Cosine Annealing (original)
         warmup_epochs = max(1, int(num_epochs * 0.1))  # 10% warmup, at least 1 epoch
-
+        
         def lr_lambda(epoch):
             if epoch < warmup_epochs:
                 # Linear warmup: linearly increase from 0 to learning_rate
@@ -1039,7 +1038,7 @@ def train_graph_dit_policy(
                 # Cosine annealing after warmup
                 progress = (epoch - warmup_epochs) / (num_epochs - warmup_epochs)
                 return 0.5 * (1 + math.cos(math.pi * progress))
-
+        
         scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
         print(
             f"[Train] Using COSINE schedule: {warmup_epochs} warmup epochs ({100*warmup_epochs/num_epochs:.1f}%), then cosine annealing"
@@ -1124,7 +1123,7 @@ def train_graph_dit_policy(
                 subtask_condition_seq = subtask_condition_seq.to(
                     device, non_blocking=True
                 )  # [B, max_T, num_subtasks]
-            lengths = batch["lengths"]  # [B] - original lengths
+            # lengths = batch["lengths"]  # [B] - original lengths (not used)
             mask = batch["mask"].to(
                 device, non_blocking=True
             )  # [B, max_T] - True for valid timesteps

@@ -46,7 +46,6 @@ except ImportError:
     DEBUG_DRAW_AVAILABLE = False
     print("[Play] DebugDraw not available, visualization will be disabled")
 
-
 def play_graph_dit_policy(
     task_name: str,
     checkpoint_path: str,
@@ -242,17 +241,10 @@ def play_graph_dit_policy(
     
     if action_stats is not None:
         print(f"[Play] Loaded action normalization stats")
-        # Handle both numpy arrays and torch tensors
-        if isinstance(action_stats["mean"], np.ndarray):
-            action_mean = torch.from_numpy(action_stats["mean"]).squeeze().to(device)
-            action_std = torch.from_numpy(action_stats["std"]).squeeze().to(device)
-        else:
-            action_mean = action_stats["mean"].squeeze().to(device)
-            action_std = action_stats["std"].squeeze().to(device)
+        # Note: action_mean and action_std are not used directly anymore
+        # because policy.predict(normalize=True) handles normalization automatically
     else:
         print(f"[Play] Warning: No action stats found, skipping denormalization")
-        action_mean = None
-        action_std = None
     
     # CRITICAL FIX: Load node feature normalization stats
     node_stats = checkpoint.get("node_stats", None)
@@ -260,19 +252,19 @@ def play_graph_dit_policy(
         print(f"[Play] Loaded node feature normalization stats")
         # Handle both numpy arrays and torch tensors
         if isinstance(node_stats["ee_mean"], np.ndarray):
-            ee_node_mean = torch.from_numpy(node_stats["ee_mean"]).squeeze().to(device)
-            ee_node_std = torch.from_numpy(node_stats["ee_std"]).squeeze().to(device)
-            object_node_mean = (
-                torch.from_numpy(node_stats["object_mean"]).squeeze().to(device)
-            )
-            object_node_std = (
-                torch.from_numpy(node_stats["object_std"]).squeeze().to(device)
-            )
+            # Note: node stats variables are not used directly anymore
+            # because policy.predict(normalize=True) handles normalization automatically
+            _ = torch.from_numpy(node_stats["ee_mean"]).squeeze().to(device)  # Loaded but not used
+            _ = torch.from_numpy(node_stats["ee_std"]).squeeze().to(device)
+            _ = torch.from_numpy(node_stats["object_mean"]).squeeze().to(device)
+            _ = torch.from_numpy(node_stats["object_std"]).squeeze().to(device)
         else:
-            ee_node_mean = node_stats["ee_mean"].squeeze().to(device)
-            ee_node_std = node_stats["ee_std"].squeeze().to(device)
-            object_node_mean = node_stats["object_mean"].squeeze().to(device)
-            object_node_std = node_stats["object_std"].squeeze().to(device)
+            # Note: node stats variables are not used directly anymore
+            # because policy.predict(normalize=True) handles normalization automatically
+            _ = node_stats["ee_mean"].squeeze().to(device)  # Loaded but not used
+            _ = node_stats["ee_std"].squeeze().to(device)
+            _ = node_stats["object_mean"].squeeze().to(device)
+            _ = node_stats["object_std"].squeeze().to(device)
     else:
         print(
             f"[Play] Warning: No node stats found, node features will NOT be normalized!"
@@ -280,10 +272,8 @@ def play_graph_dit_policy(
         print(
             f"[Play] This may cause poor performance - retrain with node normalization!"
         )
-        ee_node_mean = None
-        ee_node_std = None
-        object_node_mean = None
-        object_node_std = None
+        # Note: node stats variables are not used directly anymore
+        # because policy.predict(normalize=True) handles normalization automatically
 
     # CRITICAL FIX: Load joint state normalization stats
     joint_stats = checkpoint.get("joint_stats", None)
@@ -291,11 +281,15 @@ def play_graph_dit_policy(
         print(f"[Play] Loaded joint state normalization stats")
         # Handle both numpy arrays and torch tensors
         if isinstance(joint_stats["mean"], np.ndarray):
-            joint_mean = torch.from_numpy(joint_stats["mean"]).squeeze().to(device)
-            joint_std = torch.from_numpy(joint_stats["std"]).squeeze().to(device)
+            # Note: joint stats variables are not used directly anymore
+            # because policy.predict(normalize=True) handles normalization automatically
+            _ = torch.from_numpy(joint_stats["mean"]).squeeze().to(device)  # Loaded but not used
+            _ = torch.from_numpy(joint_stats["std"]).squeeze().to(device)
         else:
-            joint_mean = joint_stats["mean"].squeeze().to(device)
-            joint_std = joint_stats["std"].squeeze().to(device)
+            # Note: joint stats variables are not used directly anymore
+            # because policy.predict(normalize=True) handles normalization automatically
+            _ = joint_stats["mean"].squeeze().to(device)  # Loaded but not used
+            _ = joint_stats["std"].squeeze().to(device)
     else:
         print(
             f"[Play] Warning: No joint stats found, joint states will NOT be normalized!"
@@ -303,8 +297,8 @@ def play_graph_dit_policy(
         print(
             f"[Play] This may cause poor performance - retrain with joint normalization!"
         )
-        joint_mean = None
-        joint_std = None
+        # Note: joint stats variables are not used directly anymore
+        # because policy.predict(normalize=True) handles normalization automatically
 
     # Get config values from policy
     action_history_length = (
@@ -552,24 +546,7 @@ def play_graph_dit_policy(
                 )  # [num_envs, joint_dim]
 
             # CRITICAL: Initialize history buffers with first observation (not zeros)
-            # This matches training behavior where history is padded with first action
-            # Buffer classes will automatically initialize on first update() call
-            # But we can also manually initialize if needed
-            if step_count == 0:
-                # Initialize buffers with first observation
-                # For action history: use first action from obs (or zero if not available)
-                first_action = torch.zeros(num_envs, action_dim, device=device)
-                if obs_tensor.shape[1] >= 26 + action_dim:
-                    first_action = obs_tensor[:, 26:26+action_dim].clone()  # [num_envs, action_dim]
-                action_history_buffers.initialize_with(first_action)
-                
-                # Initialize node histories with current node features
-                node_history_buffers.initialize_with(ee_node_current, object_node_current)
-                
-                # Initialize joint state history if needed
-                if joint_dim is not None and joint_state_history_buffers is not None:
-                    joint_state_history_buffers.initialize_with(joint_states_current)
-
+            # Buffer classes automatically initialize with zeros (no manual initialization needed)
             # Get histories using Buffer classes (automatically handles ring buffer ordering)
             action_history_tensor = action_history_buffers.get_history()  # [num_envs, history_length, action_dim]
             ee_node_history_tensor, object_node_history_tensor = node_history_buffers.get_history()  # [num_envs, history_length, 7] each
@@ -606,8 +583,8 @@ def play_graph_dit_policy(
                     ee_node_history=ee_node_history_tensor,  # Raw history - policy will normalize internally
                     object_node_history=object_node_history_tensor,  # Raw history - policy will normalize internally
                     joint_states_history=joint_states_history_tensor,  # Raw history - policy will normalize internally
-                subtask_condition=subtask_condition,
-                num_diffusion_steps=num_diffusion_steps,
+                    subtask_condition=subtask_condition,
+                    num_diffusion_steps=num_diffusion_steps,
                     deterministic=True,
                     normalize=True,  # CRITICAL: Let policy handle normalization/denormalization
                 )  # [num_envs, pred_horizon, action_dim] - Already denormalized!
