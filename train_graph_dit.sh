@@ -44,7 +44,7 @@ python scripts/graph_dit/train.py \
     --dataset ./datasets/lift_annotated_dataset.hdf5 \
     --obs_dim 32 \
     --action_dim 6 \
-    --action_history_length 2 \
+    --action_history_length 8 \
     --skip_first_steps 0 \
     --mode "$MODE" \
     --lr_schedule "$LR_SCHEDULE" \
