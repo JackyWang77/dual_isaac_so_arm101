@@ -232,6 +232,8 @@ class HDF5DemoDataset(Dataset):
 
                 # Build action trajectory for each timestep: [T, pred_horizon, action_dim]
                 # ACTION CHUNKING: Each timestep predicts next pred_horizon actions
+                # CRITICAL: Use RELATIVE ACTIONS (joint_pos[t+k] - joint_pos[t]) instead of absolute
+                # This prevents drift accumulation and handles latency better
                 # CRITICAL: Also build trajectory_mask to mark which horizon steps are valid
                 action_trajectory_seq = []
                 trajectory_mask_seq = (
@@ -240,13 +242,23 @@ class HDF5DemoDataset(Dataset):
                 for i in range(T):
                     traj = []
                     traj_mask = []
+                    # Get current joint position as reference point
+                    current_joint_pos = joint_pos_seq[i]  # [action_dim]
+                    # CRITICAL FIX: Start from t+1 (future actions), not t (current action)
+                    # This matches predict() behavior: first step is t+1, last step is t+pred_horizon
                     for k in range(self.pred_horizon):
-                        future_idx = i + k
+                        future_idx = i + k + 1  # Start from t+1 instead of t
                         if future_idx < T:
-                            traj.append(actions[future_idx])
+                            # RELATIVE ACTION: future_joint_pos - current_joint_pos
+                            future_joint_pos = joint_pos_seq[future_idx]
+                            relative_action = future_joint_pos - current_joint_pos
+                            traj.append(relative_action)
                             traj_mask.append(True)  # Valid future step
                         else:
-                            traj.append(actions[-1])  # Pad with last action
+                            # Padding: use last available relative action
+                            last_joint_pos = joint_pos_seq[-1]
+                            relative_action = last_joint_pos - current_joint_pos
+                            traj.append(relative_action)
                             traj_mask.append(False)  # Padding (beyond demo end)
                     action_trajectory_seq.append(np.stack(traj, axis=0))
                     trajectory_mask_seq.append(np.array(traj_mask, dtype=bool))
@@ -258,14 +270,20 @@ class HDF5DemoDataset(Dataset):
                 )  # [T, pred_horizon]
 
                 # Build action history for each timestep: [T, history_len, action_dim]
+                # CRITICAL: Use RELATIVE ACTIONS (actions[j] - joint_pos[i]) for consistency
+                # All historical actions are relative to current timestep i
                 action_history_seq = []
                 for i in range(T):
                     history = []
+                    current_joint_pos = joint_pos_seq[i]  # [action_dim]
                     for j in range(max(0, i - self.action_history_length + 1), i + 1):
-                        history.append(actions[j])
-                    # Pad with first action if needed
+                        # RELATIVE ACTION: historical_action - current_joint_pos
+                        historical_joint_pos = joint_pos_seq[j]
+                        relative_action = historical_joint_pos - current_joint_pos
+                        history.append(relative_action)
+                    # Pad with zero relative action if needed (no movement from current position)
                     while len(history) < self.action_history_length:
-                        history.insert(0, actions[0])
+                        history.insert(0, np.zeros_like(current_joint_pos))
                     action_history_seq.append(np.stack(history, axis=0))
                 action_history_seq = np.stack(
                     action_history_seq, axis=0

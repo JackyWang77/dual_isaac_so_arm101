@@ -372,7 +372,7 @@ def play_graph_dit_policy(
     
     # Initialize action smoothing (EMA) to reduce jitter
     # Smoothing factor: 0.1-0.3 recommended. Smaller = smoother but more delay, larger = less smoothing
-    smoothing_factor = 0.3
+    smoothing_factor = 0.7
     last_actions = [None] * num_envs  # Store last executed action for each environment
     
     step_count = 0
@@ -553,7 +553,8 @@ def play_graph_dit_policy(
             # CRITICAL: Initialize history buffers with first observation (not zeros)
             # Buffer classes automatically initialize with zeros (no manual initialization needed)
             # Get histories using Buffer classes (automatically handles ring buffer ordering)
-            action_history_tensor = action_history_buffers.get_history()  # [num_envs, history_length, action_dim]
+            # CRITICAL: Buffer stores ABSOLUTE actions (target joint positions)
+            action_history_tensor_absolute = action_history_buffers.get_history()  # [num_envs, history_length, action_dim] - ABSOLUTE
             ee_node_history_tensor, object_node_history_tensor = node_history_buffers.get_history()  # [num_envs, history_length, 7] each
             joint_states_history_tensor = (
                 joint_state_history_buffers.get_history()
@@ -576,15 +577,50 @@ def play_graph_dit_policy(
             )
 
             if needs_replan:
+                # CRITICAL FIX: Convert ABSOLUTE action history to RELATIVE action history
+                # Buffer stores absolute actions, but model expects relative actions (relative to current timestep)
+                # This must be done in real-time because current_joint_pos changes every step!
+                # Formula: relative_history = absolute_history - current_joint_pos
+                current_joint_pos = obs_tensor[:, 0:action_dim]  # [num_envs, action_dim] - Current absolute position
+                current_joint_pos_expanded = current_joint_pos.unsqueeze(1)  # [num_envs, 1, action_dim] for broadcasting
+                
+                # CRITICAL FIX: Match training behavior - include current timestep as last history element
+                # Training: action_history[i, j] includes j=i (when i >= history_length),
+                #           so last element = joint_pos[i] - joint_pos[i] = 0
+                # To match this exactly, we need to include current_joint_pos in history
+                # However, buffer only stores past actions, so we append current_joint_pos
+                # Then compute relative, and keep only the last history_length elements
+                # This ensures last element is exactly 0, matching training data format
+                action_history_with_current = torch.cat(
+                    [
+                        action_history_tensor_absolute,  # [num_envs, history_length, action_dim] - Past actions
+                        current_joint_pos.unsqueeze(1),  # [num_envs, 1, action_dim] - Current position
+                    ],
+                    dim=1,
+                )  # [num_envs, history_length+1, action_dim]
+                
+                # Now compute relative: all elements relative to current_joint_pos
+                action_history_relative_with_current = (
+                    action_history_with_current - current_joint_pos_expanded
+                )  # [num_envs, history_length+1, action_dim] - RELATIVE to current timestep
+                # Last element is: current_joint_pos - current_joint_pos = 0 (matches training!)
+                
+                # Take the last history_length elements to match training format
+                # This gives us: [actions[t-history_length+1] - current, ..., actions[t-1] - current, 0]
+                # Which matches training: [joint_pos[i-history_length+1] - current, ..., joint_pos[i] - current]
+                action_history_tensor_relative = action_history_relative_with_current[:, -action_history_length:, :]
+                # [num_envs, history_length, action_dim] - Last element is exactly 0 (matches training!)
+                
                 # CRITICAL FIX: Use policy.predict(normalize=True) to automatically handle
                 # normalization/denormalization. This ensures consistency with training.
                 # The policy will:
                 # 1. Normalize obs, action_history, node_history, joint_history using stored stats
                 # 2. Run inference
                 # 3. Denormalize the output action trajectory
-                action_trajectory = policy.predict(
+                # CRITICAL: Model outputs RELATIVE actions (joint_pos[t+k] - joint_pos[t])
+                action_trajectory_relative = policy.predict(
                     obs_tensor,  # Raw obs (not normalized) - policy will normalize internally
-                    action_history=action_history_tensor,  # Raw history - policy will normalize internally
+                    action_history=action_history_tensor_relative,  # RELATIVE history (computed in real-time) - policy will normalize internally
                     ee_node_history=ee_node_history_tensor,  # Raw history - policy will normalize internally
                     object_node_history=object_node_history_tensor,  # Raw history - policy will normalize internally
                     joint_states_history=joint_states_history_tensor,  # Raw history - policy will normalize internally
@@ -592,7 +628,16 @@ def play_graph_dit_policy(
                     num_diffusion_steps=num_diffusion_steps,
                     deterministic=True,
                     normalize=True,  # CRITICAL: Let policy handle normalization/denormalization
-                )  # [num_envs, pred_horizon, action_dim] - Already denormalized!
+                )  # [num_envs, pred_horizon, action_dim] - RELATIVE actions (denormalized)
+                
+                # CRITICAL: Convert RELATIVE actions to ABSOLUTE actions for environment
+                # Formula: absolute_target = relative_action + current_joint_position
+                # Get current joint position from obs (first action_dim elements)
+                current_joint_pos = obs_tensor[:, 0:action_dim].clone()  # [num_envs, action_dim]
+                # Expand to match trajectory shape: [num_envs, 1, action_dim] for broadcasting
+                current_joint_pos_expanded = current_joint_pos.unsqueeze(1)  # [num_envs, 1, action_dim]
+                # Add current position to relative actions: [num_envs, pred_horizon, action_dim]
+                action_trajectory = action_trajectory_relative + current_joint_pos_expanded
 
                 # 🟢 VISUAL DEBUG: Store target joint positions for visualization
                 # action_trajectory is [num_envs, pred_horizon, action_dim]
@@ -660,14 +705,15 @@ def play_graph_dit_policy(
                     actions_list.append(zero_action)
 
             # Stack into batch tensors
-            actions = torch.stack(actions_list, dim=0)  # [num_envs, action_dim]
+            actions = torch.stack(actions_list, dim=0)  # [num_envs, action_dim] - ABSOLUTE actions (for env.step)
             
-            # CRITICAL FIX: Store RAW actions in buffer (not normalized!)
-            # policy.predict(normalize=True) will normalize all inputs internally via normalize_inputs()
-            # If we pre-normalize here, actions will be DOUBLE-NORMALIZED, causing scale mismatch!
-            # Training behavior: train.py normalizes action_history once, policy.loss() receives normalized data
-            # Inference behavior: play.py stores raw actions, policy.predict(normalize=True) normalizes once
-            action_history_buffers.update(actions)  # [num_envs, action_dim] - RAW actions
+            # CRITICAL FIX: Store ABSOLUTE actions in history buffer (not relative!)
+            # Why? Because the reference frame (current_joint_pos) changes every step.
+            # If we store relative actions, they become stale when current_joint_pos changes.
+            # Instead, we store absolute actions and convert to relative in real-time when needed.
+            # This matches training logic: action_history[i, j] = joint_pos[j] - joint_pos[i]
+            # where joint_pos[j] is absolute, and we subtract current joint_pos[i] at query time.
+            action_history_buffers.update(actions)  # [num_envs, action_dim] - ABSOLUTE actions (target joint positions)
             node_history_buffers.update(ee_node_current, object_node_current)  # [num_envs, 7] each
             if joint_dim is not None and joint_state_history_buffers is not None:
                 joint_state_history_buffers.update(joint_states_current)  # [num_envs, joint_dim]

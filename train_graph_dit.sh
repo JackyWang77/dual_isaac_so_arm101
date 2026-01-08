@@ -44,11 +44,11 @@ python scripts/graph_dit/train.py \
     --dataset ./datasets/lift_annotated_dataset.hdf5 \
     --obs_dim 32 \
     --action_dim 6 \
-    --action_history_length 20 \
+    --action_history_length 2 \
     --skip_first_steps 0 \
     --mode "$MODE" \
     --lr_schedule "$LR_SCHEDULE" \
-    --epochs 1000 \
+    --epochs 500 \
     --batch_size 32 \
     --lr 3e-4 \
     --hidden_dim 64 \
