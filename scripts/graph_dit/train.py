@@ -68,6 +68,8 @@ class HDF5DemoDataset(Dataset):
         normalize_actions: bool = True,
         action_history_length: int = 4,
         pred_horizon: int = 16,
+        action_target_offset: int = 5,
+        action_trajectory_start_offset: int = 1,
         single_batch_test: bool = False,
         single_batch_size: int = 16,
         skip_first_steps: int = 10,
@@ -81,6 +83,9 @@ class HDF5DemoDataset(Dataset):
             normalize_actions: If True, normalize actions.
             action_history_length: Number of historical steps for context (default: 4).
             pred_horizon: Number of future action steps to predict per timestep (default: 16).
+            action_target_offset: Offset for action target (default: 5). Action = joint_pos[t+action_target_offset].
+            action_trajectory_start_offset: Start offset for action trajectory (default: 1). 
+                                           Trajectory starts from t+action_trajectory_start_offset.
             skip_first_steps: Number of initial steps to skip per demo (default: 10).
                              Human-collected demos often have noisy initial actions.
         """
@@ -90,6 +95,8 @@ class HDF5DemoDataset(Dataset):
         self.normalize_actions = normalize_actions
         self.action_history_length = action_history_length
         self.pred_horizon = pred_horizon
+        self.action_target_offset = action_target_offset
+        self.action_trajectory_start_offset = action_trajectory_start_offset
         self.single_batch_test = single_batch_test
         self.single_batch_size = single_batch_size
         self.skip_first_steps = skip_first_steps
@@ -213,27 +220,26 @@ class HDF5DemoDataset(Dataset):
                     joint_pos_seq.append(joint_pos.astype(np.float32))
                 joint_pos_seq = np.stack(joint_pos_seq, axis=0)  # [T, joint_pos_dim]
                 
-                # Replace actions with joint_pos[t+5] (5 timesteps ahead)
-                # For timestep i, action = joint_pos[i+5] (if exists) or last available joint_pos
+                # Replace actions with joint_pos[t+action_target_offset] (configurable timesteps ahead)
+                # For timestep i, action = joint_pos[i+action_target_offset] (if exists) or last available joint_pos
                 actions_new = []
                 for i in range(T):
-                    target_idx = i + 5
+                    target_idx = i + self.action_target_offset
                     if target_idx < T:
-                        # Use joint_pos 5 steps ahead as action
+                        # Use joint_pos action_target_offset steps ahead as action
                         actions_new.append(joint_pos_seq[target_idx])
                     else:
                         # Beyond sequence: use last available joint_pos
                         actions_new.append(joint_pos_seq[-1])
                 actions = np.stack(actions_new, axis=0).astype(np.float32)  # [T, joint_pos_dim]
                 
-                print(f"[HDF5DemoDataset] ✅ Replaced actions with joint_pos[t+5] for smoother actions")
+                print(f"[HDF5DemoDataset] ✅ Replaced actions with joint_pos[t+{self.action_target_offset}] for smoother actions")
                 print(f"[HDF5DemoDataset]    Original action_dim: {actions_full.shape[1] if len(actions_full.shape) > 1 else 1}")
                 print(f"[HDF5DemoDataset]    New action_dim (joint_pos): {jp_dim}")
 
                 # Build action trajectory for each timestep: [T, pred_horizon, action_dim]
                 # ACTION CHUNKING: Each timestep predicts next pred_horizon actions
-                # CRITICAL: Use RELATIVE ACTIONS (joint_pos[t+k] - joint_pos[t]) instead of absolute
-                # This prevents drift accumulation and handles latency better
+                # Use ABSOLUTE positions (joint_pos[t+k]) instead of relative
                 # CRITICAL: Also build trajectory_mask to mark which horizon steps are valid
                 action_trajectory_seq = []
                 trajectory_mask_seq = (
@@ -242,23 +248,19 @@ class HDF5DemoDataset(Dataset):
                 for i in range(T):
                     traj = []
                     traj_mask = []
-                    # Get current joint position as reference point
-                    current_joint_pos = joint_pos_seq[i]  # [action_dim]
-                    # CRITICAL FIX: Start from t+1 (future actions), not t (current action)
-                    # This matches predict() behavior: first step is t+1, last step is t+pred_horizon
+                    # CRITICAL FIX: Start from t+action_trajectory_start_offset (future actions), not t (current action)
+                    # This matches predict() behavior: first step is t+action_trajectory_start_offset, 
+                    # last step is t+action_trajectory_start_offset+pred_horizon-1
                     for k in range(self.pred_horizon):
-                        future_idx = i + k + 1  # Start from t+1 instead of t
+                        future_idx = i + k + self.action_trajectory_start_offset  # Configurable start offset
                         if future_idx < T:
-                            # RELATIVE ACTION: future_joint_pos - current_joint_pos
+                            # ABSOLUTE ACTION: future_joint_pos (absolute position)
                             future_joint_pos = joint_pos_seq[future_idx]
-                            relative_action = future_joint_pos - current_joint_pos
-                            traj.append(relative_action)
+                            traj.append(future_joint_pos)
                             traj_mask.append(True)  # Valid future step
                         else:
-                            # Padding: use last available relative action
-                            last_joint_pos = joint_pos_seq[-1]
-                            relative_action = last_joint_pos - current_joint_pos
-                            traj.append(relative_action)
+                            # Padding: use last available joint position
+                            traj.append(joint_pos_seq[-1])
                             traj_mask.append(False)  # Padding (beyond demo end)
                     action_trajectory_seq.append(np.stack(traj, axis=0))
                     trajectory_mask_seq.append(np.array(traj_mask, dtype=bool))
@@ -270,20 +272,16 @@ class HDF5DemoDataset(Dataset):
                 )  # [T, pred_horizon]
 
                 # Build action history for each timestep: [T, history_len, action_dim]
-                # CRITICAL: Use RELATIVE ACTIONS (actions[j] - joint_pos[i]) for consistency
-                # All historical actions are relative to current timestep i
+                # Use ABSOLUTE positions (actions[j]) instead of relative
                 action_history_seq = []
                 for i in range(T):
                     history = []
-                    current_joint_pos = joint_pos_seq[i]  # [action_dim]
                     for j in range(max(0, i - self.action_history_length + 1), i + 1):
-                        # RELATIVE ACTION: historical_action - current_joint_pos
-                        historical_joint_pos = joint_pos_seq[j]
-                        relative_action = historical_joint_pos - current_joint_pos
-                        history.append(relative_action)
-                    # Pad with zero relative action if needed (no movement from current position)
+                        # ABSOLUTE ACTION: historical action (absolute position)
+                        history.append(actions[j])
+                    # Pad with first action if needed
                     while len(history) < self.action_history_length:
-                        history.insert(0, np.zeros_like(current_joint_pos))
+                        history.insert(0, actions[0])
                     action_history_seq.append(np.stack(history, axis=0))
                 action_history_seq = np.stack(
                     action_history_seq, axis=0
@@ -450,6 +448,7 @@ class HDF5DemoDataset(Dataset):
 
                 # Collect for normalization
                 all_obs.append(obs_seq)
+                # Use ABSOLUTE actions (actions) for normalization stats
                 all_actions.append(actions)
                 all_ee_nodes.append(
                     ee_node_history_seq[:, -1, :]
@@ -471,6 +470,7 @@ class HDF5DemoDataset(Dataset):
             self.obs_stats["std"] = np.std(all_obs, axis=0, keepdims=True) + 1e-8
 
         if normalize_actions:
+            # Use ABSOLUTE actions for normalization stats
             self.action_stats["mean"] = np.mean(all_actions, axis=0, keepdims=True)
             self.action_stats["std"] = np.std(all_actions, axis=0, keepdims=True) + 1e-8
 
@@ -577,6 +577,7 @@ class HDF5DemoDataset(Dataset):
         Returns a dictionary with:
         - obs_seq: [T, obs_dim]
         - action_trajectory_seq: [T, pred_horizon, action_dim]
+        - trajectory_mask_seq: [T, pred_horizon] - marks valid horizon steps
         - action_history_seq: [T, history_len, action_dim]
         - ee_node_history_seq: [T, history_len, 7]
         - object_node_history_seq: [T, history_len, 7]
@@ -591,6 +592,7 @@ class HDF5DemoDataset(Dataset):
         obs_seq = demo["obs_seq"].copy()
         action_seq = demo["action_seq"].copy()
         action_trajectory_seq = demo["action_trajectory_seq"].copy()
+        trajectory_mask_seq = demo["trajectory_mask_seq"].copy()  # [T, pred_horizon] - marks valid horizon steps
         action_history_seq = demo["action_history_seq"].copy()
         ee_node_history_seq = demo["ee_node_history_seq"].copy()
         object_node_history_seq = demo["object_node_history_seq"].copy()
@@ -606,6 +608,7 @@ class HDF5DemoDataset(Dataset):
             obs_seq = (obs_seq - self.obs_stats["mean"]) / self.obs_stats["std"]
         
         # Normalize actions: [T, action_dim] and [T, pred_horizon, action_dim] and [T, hist_len, action_dim]
+        # All actions are ABSOLUTE positions, normalized with absolute position stats
         if self.normalize_actions and len(self.action_stats) > 0:
             action_seq = (action_seq - self.action_stats["mean"]) / self.action_stats[
                 "std"
@@ -638,6 +641,9 @@ class HDF5DemoDataset(Dataset):
             "action_trajectory_seq": torch.from_numpy(
                 action_trajectory_seq
             ).float(),  # [T, pred_horizon, action_dim]
+            "trajectory_mask_seq": torch.from_numpy(
+                trajectory_mask_seq
+            ).bool(),  # [T, pred_horizon] - marks valid horizon steps
             "action_history_seq": torch.from_numpy(
                 action_history_seq
             ).float(),  # [T, hist_len, action_dim]
@@ -738,7 +744,11 @@ def demo_collate_fn(batch):
         # CRITICAL: Fill trajectory_mask for "half-cut" data handling
         # For each timestep t, mark which horizon steps k are valid (t+k < T)
         if "trajectory_mask_seq" in item:
-            trajectory_mask[i, :T] = torch.from_numpy(item["trajectory_mask_seq"])
+            # Handle both Tensor and numpy array cases
+            if isinstance(item["trajectory_mask_seq"], torch.Tensor):
+                trajectory_mask[i, :T] = item["trajectory_mask_seq"]
+            else:
+                trajectory_mask[i, :T] = torch.from_numpy(item["trajectory_mask_seq"])
         else:
             # Fallback: if trajectory_mask_seq not available, create it
             for t in range(T):
@@ -786,6 +796,8 @@ def train_graph_dit_policy(
     exec_horizon: int = 8,
     lr_schedule: str = "constant",
     skip_first_steps: int = 10,
+    action_target_offset: int = 5,
+    action_trajectory_start_offset: int = 1,
 ):
     """Train Graph-DiT Policy with Action Chunking.
     
@@ -884,6 +896,8 @@ def train_graph_dit_policy(
         normalize_actions=True,
         action_history_length=action_history_length,
         pred_horizon=pred_horizon,
+        action_target_offset=action_target_offset,
+        action_trajectory_start_offset=action_trajectory_start_offset,
         single_batch_test=single_batch_test,
         single_batch_size=single_batch_size,
         skip_first_steps=skip_first_steps,
@@ -1395,7 +1409,19 @@ def main():
         "--action_dim",
         type=int,
         default=6,
-        help="Action dimension (now uses joint_pos[t+5], typically 6 for 6-DoF arm)",
+        help="Action dimension (typically 6 for 6-DoF arm)",
+    )
+    parser.add_argument(
+        "--action_target_offset",
+        type=int,
+        default=5,
+        help="Offset for action target. Action = joint_pos[t+action_target_offset] (default: 5)",
+    )
+    parser.add_argument(
+        "--action_trajectory_start_offset",
+        type=int,
+        default=1,
+        help="Start offset for action trajectory. Trajectory starts from t+action_trajectory_start_offset (default: 1)",
     )
     parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden dimension")
     parser.add_argument(
@@ -1514,6 +1540,8 @@ def main():
         exec_horizon=args.exec_horizon,
         lr_schedule=args.lr_schedule,
         skip_first_steps=args.skip_first_steps,
+        action_target_offset=args.action_target_offset,
+        action_trajectory_start_offset=args.action_trajectory_start_offset,
     )
 
 

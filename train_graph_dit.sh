@@ -38,13 +38,19 @@ echo "========================================"
 # batch_size now means number of demos per batch (not timesteps!)
 # Each demo has ~100 timesteps, so effective batch = batch_size * 100
 # skip_first_steps: Skip noisy initial actions from human demo collection
+#
+# ABSOLUTE POSITION VERSION:
+# - action_seq[i] = joint_pos[i + action_target_offset] (absolute position)
+# - action_trajectory_seq[i] = [joint_pos[i+start_offset], ..., joint_pos[i+start_offset+pred_horizon-1]] (absolute positions)
+# - action_history_seq[i] = [actions[i-history_length+1], ..., actions[i]] (absolute positions)
+# - All actions are normalized using absolute position statistics
 
 python scripts/graph_dit/train.py \
     --task SO-ARM101-Lift-Cube-v0 \
     --dataset ./datasets/lift_annotated_dataset.hdf5 \
     --obs_dim 32 \
     --action_dim 6 \
-    --action_history_length 8 \
+    --action_history_length 10 \
     --skip_first_steps 0 \
     --mode "$MODE" \
     --lr_schedule "$LR_SCHEDULE" \
@@ -55,7 +61,9 @@ python scripts/graph_dit/train.py \
     --num_layers 2 \
     --num_heads 4 \
     --pred_horizon 20 \
-    --exec_horizon 10\
+    --exec_horizon 10 \
+    --action_target_offset 5 \
+    --action_trajectory_start_offset 1 \
     --device cuda \
     --save_dir ./logs/graph_dit/lift_joint \
     --log_dir ./logs/graph_dit/lift_joint
