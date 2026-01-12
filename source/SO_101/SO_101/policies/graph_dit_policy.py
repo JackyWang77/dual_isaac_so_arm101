@@ -522,7 +522,8 @@ class GraphDiTPolicyCfg:
 
     # Observation structure indices (for backward compatibility with flattened obs)
     # CRITICAL: These should match the actual observation structure
-    # Default assumes: [joint_pos(6), joint_vel(6), object_pos(3), object_ori(4),
+    # NOTE: joint_vel removed - only using joint_pos
+    # Default assumes: [joint_pos(6), object_pos(3), object_ori(4),
     #                  ee_pos(3), ee_ori(4), target_object_position(7), actions(6)]
     obs_structure: dict[str, tuple[int, int]] | None = None
     """
@@ -530,7 +531,7 @@ class GraphDiTPolicyCfg:
     If None, uses default indices. If provided, should be a dict like:
     {
         'joint_pos': (0, 6),
-        'joint_vel': (6, 12),
+        # NOTE: 'joint_vel' removed - no longer used
         'object_position': (12, 15),
         'object_orientation': (15, 19),
         'ee_position': (19, 22),
@@ -938,27 +939,24 @@ class GraphDiTUnit(nn.Module):
         self.joint_vel_dim: int | None = None
 
         # Joint states encoder (if joint_dim is provided)
+        # NOTE: Only using joint_pos (removed joint_vel to test if it's noise)
         if joint_dim is not None:
-            # By default, assume joint_dim = joint_pos_dim + joint_vel_dim
-            # For joint control with 6 DoF: joint_pos_dim = 6, joint_vel_dim = 6
-            self.joint_pos_dim = joint_dim // 2
-            self.joint_vel_dim = joint_dim - self.joint_pos_dim
+            # Now joint_dim only contains joint_pos (no joint_vel)
+            # For joint control with 6 DoF: joint_pos_dim = 6, joint_vel_dim = 0
+            self.joint_pos_dim = joint_dim  # joint_dim is now only joint_pos
+            self.joint_vel_dim = 0  # No joint_vel
 
-            # Encode joint positions and velocities for state-action self-attention TOGETHER
-            # joint_pos: first half, joint_vel: second half
+            # Encode joint positions for state-action self-attention
+            # Only joint_pos (no joint_vel)
             self.joint_pos_encoder = nn.Sequential(
                 nn.Linear(self.joint_pos_dim, hidden_dim),
                 nn.LayerNorm(hidden_dim),
                 nn.GELU(),
             )
-            self.joint_vel_encoder = nn.Sequential(
-                nn.Linear(self.joint_vel_dim, hidden_dim),
-                nn.LayerNorm(hidden_dim),
-                nn.GELU(),
-            )
-            # Projection for concatenated (joint_pos_embed, joint_vel_embed, action_embed) sequence
-            # 3 * hidden_dim -> hidden_dim
-            self.state_action_proj = nn.Linear(hidden_dim * 3, hidden_dim)
+            self.joint_vel_encoder = None  # Disabled - no joint_vel
+            # Projection for concatenated (joint_pos_embed, action_embed) sequence
+            # 2 * hidden_dim -> hidden_dim (was 3 * hidden_dim when joint_vel was included)
+            self.state_action_proj = nn.Linear(hidden_dim * 2, hidden_dim)
         else:
             self.joint_pos_encoder = None
             self.joint_vel_encoder = None
@@ -1052,22 +1050,17 @@ class GraphDiTUnit(nn.Module):
             and self.joint_pos_dim is not None
         ):
             # Split joint states into position and velocity
-            joint_pos = joint_states_history[
-                ..., : self.joint_pos_dim
-            ]  # [batch, T, joint_pos_dim]
-            joint_vel = joint_states_history[
-                ..., self.joint_pos_dim :
-            ]  # [batch, T, joint_vel_dim]
+            # NOTE: joint_states_history now only contains joint_pos (no joint_vel)
+            joint_pos = joint_states_history  # [batch, T, joint_pos_dim] where joint_pos_dim = joint_dim
+            # joint_vel removed - no longer extracted
 
             batch_size, history_length, _ = joint_pos.shape
 
-            # Encode joint positions / velocities: [batch, T, dim] -> [batch, T, hidden_dim]
+            # Encode joint positions: [batch, T, dim] -> [batch, T, hidden_dim]
             joint_pos_embed = self.joint_pos_encoder(
                 joint_pos
             )  # [batch, T, hidden_dim]
-            joint_vel_embed = self.joint_vel_encoder(
-                joint_vel
-            )  # [batch, T, hidden_dim]
+            # joint_vel_embed removed - no joint_vel
 
             # Determine how many history tokens we have in the action sequence
             # Typical case: seq_len = history_length + 1 (H history + 1 noisy_action)
@@ -1096,10 +1089,11 @@ class GraphDiTUnit(nn.Module):
                 action_history_embed = action_history_embed[:, -trim_len:, :]
                 history_length = trim_len
 
-            # Concatenate joint pos + joint vel + action history (NOT with noisy_action token)
-            # [batch, history_length, hidden_dim * 3] -> [batch, history_length, hidden_dim]
+            # Concatenate joint pos + action history (NOT with noisy_action token)
+            # NOTE: joint_vel removed - only joint_pos + action
+            # [batch, history_length, hidden_dim * 2] -> [batch, history_length, hidden_dim]
             state_action_history = torch.cat(
-                [joint_pos_embed, joint_vel_embed, action_history_embed], dim=-1
+                [joint_pos_embed, action_history_embed], dim=-1
             )
             state_action_history = self.state_action_proj(state_action_history)
 
@@ -1565,51 +1559,47 @@ class GraphDiTPolicy(nn.Module):
 
     def _extract_joint_states(self, obs: torch.Tensor):
         """
-        Extract joint states (joint_pos + joint_vel) from observations.
+        Extract joint states (only joint_pos, joint_vel removed to test if it's noise).
 
         Args:
             obs: [batch, obs_dim]
         Returns:
-            joint_states: [batch, joint_dim] - joint_pos + joint_vel
+            joint_states: [batch, joint_dim] - only joint_pos (no joint_vel)
         """
         # Use configurable indices if provided, otherwise use defaults
         if self.cfg.obs_structure is not None:
             obs_struct = self.cfg.obs_structure
             joint_pos = obs[:, obs_struct["joint_pos"][0] : obs_struct["joint_pos"][1]]
-            joint_vel = obs[:, obs_struct["joint_vel"][0] : obs_struct["joint_vel"][1]]
+            # NOTE: joint_vel removed - only using joint_pos
         else:
-            # Default structure: [joint_pos(6), joint_vel(6), ...]
+            # Default structure: [joint_pos(6), ...] (joint_vel removed)
             joint_pos = obs[:, 0:6]  # [batch, 6]
-            joint_vel = obs[:, 6:12]  # [batch, 6]
 
-        # Concatenate joint_pos and joint_vel
-        joint_states = torch.cat([joint_pos, joint_vel], dim=-1)  # [batch, joint_dim]
+        # Only return joint_pos (no joint_vel)
+        joint_states = joint_pos  # [batch, joint_dim] where joint_dim = 6
         return joint_states
 
     def _extract_context_features(self, obs: torch.Tensor):
         """
-        Extract context features from observations (joint_pos, joint_vel, etc.).
+        Extract context features from observations (only joint_pos, joint_vel removed).
         These are used as additional context but not as graph nodes.
 
         Args:
             obs: [batch, obs_dim]
         Returns:
-            context_features: [batch, context_dim] - joint_pos + joint_vel + other features
+            context_features: [batch, context_dim] - joint_pos + other features (no joint_vel)
         """
         # Use configurable indices if provided, otherwise use defaults
         if self.cfg.obs_structure is not None:
             obs_struct = self.cfg.obs_structure
             # Extract all features except node features (EE, Object) and action
-            # This includes: joint_pos, joint_vel, target_object_position, etc.
+            # NOTE: joint_vel removed - only using joint_pos
             context_parts = []
             if "joint_pos" in obs_struct:
                 context_parts.append(
                     obs[:, obs_struct["joint_pos"][0] : obs_struct["joint_pos"][1]]
                 )
-            if "joint_vel" in obs_struct:
-                context_parts.append(
-                    obs[:, obs_struct["joint_vel"][0] : obs_struct["joint_vel"][1]]
-                )
+            # NOTE: joint_vel removed - no longer included
             if "target_object_position" in obs_struct:
                 context_parts.append(
                     obs[
@@ -1643,15 +1633,16 @@ class GraphDiTPolicy(nn.Module):
                         obs.shape[0], 0, device=obs.device, dtype=obs.dtype
                     )
         else:
-            # Default structure: [joint_pos(6), joint_vel(6), object_pos(3), object_ori(4),
+            # Default structure: [joint_pos(6), object_pos(3), object_ori(4),
             #                     ee_pos(3), ee_ori(4), target_object_position(7), actions(6)]
-            # Extract: joint_pos(6) + joint_vel(6) + target_object_position(7) = 19 dims
+            # NOTE: joint_vel removed - only using joint_pos
+            # Extract: joint_pos(6) + target_object_position(7) = 13 dims (if target_object_position exists)
             # But we skip object_pos, object_ori, ee_pos, ee_ori, actions
             joint_pos = obs[:, 0:6]  # [batch, 6]
-            joint_vel = obs[:, 6:12]  # [batch, 6]
+            # NOTE: joint_vel removed - no longer extracted
             # target_object_position might be at different position, skip for now
             # Or extract if we know the exact position
-            context_features = torch.cat([joint_pos, joint_vel], dim=-1)  # [batch, 12]
+            context_features = joint_pos  # [batch, 6] (only joint_pos, no joint_vel)
 
         return context_features
 

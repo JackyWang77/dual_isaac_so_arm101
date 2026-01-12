@@ -348,10 +348,9 @@ class HDF5DemoDataset(Dataset):
                 )  # [T, history_len, 7]
 
                 # Build joint states history: [T, history_len, joint_dim]
+                # NOTE: Only using joint_pos (removed joint_vel to test if it's noise)
                 jp_start = self.obs_key_offsets.get("joint_pos", 0)
                 jp_dim = self.obs_key_dims.get("joint_pos", 6)
-                jv_start = self.obs_key_offsets.get("joint_vel", jp_start + jp_dim)
-                jv_dim = self.obs_key_dims.get("joint_vel", 6)
 
                 joint_states_history_seq = []
                 for i in range(T):
@@ -359,16 +358,11 @@ class HDF5DemoDataset(Dataset):
                     for j in range(max(0, i - self.action_history_length + 1), i + 1):
                         obs_j = obs_seq[j]
                         joint_pos = obs_j[jp_start : jp_start + jp_dim]
-                        joint_vel = obs_j[jv_start : jv_start + jv_dim]
                         joint_pos = np.pad(
                             joint_pos, (0, max(0, jp_dim - len(joint_pos)))
                         )[:jp_dim]
-                        joint_vel = np.pad(
-                            joint_vel, (0, max(0, jv_dim - len(joint_vel)))
-                        )[:jv_dim]
-                        joint_hist.append(
-                            np.concatenate([joint_pos, joint_vel]).astype(np.float32)
-                        )
+                        # Only use joint_pos (no joint_vel)
+                        joint_hist.append(joint_pos.astype(np.float32))
 
                     while len(joint_hist) < self.action_history_length:
                         joint_hist.insert(
@@ -376,7 +370,7 @@ class HDF5DemoDataset(Dataset):
                             (
                                 joint_hist[0].copy()
                                 if joint_hist
-                                else np.zeros(jp_dim + jv_dim, dtype=np.float32)
+                                else np.zeros(jp_dim, dtype=np.float32)
                             ),
                         )
 
@@ -465,7 +459,7 @@ class HDF5DemoDataset(Dataset):
             np.std(all_object_nodes, axis=0, keepdims=True) + 1e-8
         )
 
-        # CRITICAL: Normalize joint states (joint_pos + joint_vel)
+        # CRITICAL: Normalize joint states (only joint_pos, joint_vel removed to test if it's noise)
         self.joint_stats = {}
         self.joint_stats["mean"] = np.mean(all_joint_states, axis=0, keepdims=True)
         self.joint_stats["std"] = np.std(all_joint_states, axis=0, keepdims=True) + 1e-8
@@ -1012,13 +1006,14 @@ def train_graph_dit_policy(
         else 0
     )
 
-    # Infer joint_dim from dataset (joint_pos + joint_vel) if available
+    # Infer joint_dim from dataset (only joint_pos, joint_vel removed to test if it's noise)
     joint_dim = 0
     if hasattr(dataset, "obs_key_dims"):
         if "joint_pos" in dataset.obs_key_dims:
             joint_dim += dataset.obs_key_dims["joint_pos"]
-        if "joint_vel" in dataset.obs_key_dims:
-            joint_dim += dataset.obs_key_dims["joint_vel"]
+        # NOTE: joint_vel removed - testing if it's noise
+        # if "joint_vel" in dataset.obs_key_dims:
+        #     joint_dim += dataset.obs_key_dims["joint_vel"]
     if joint_dim == 0:
         joint_dim = None
 

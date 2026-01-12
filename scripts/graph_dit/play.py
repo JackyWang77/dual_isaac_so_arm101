@@ -392,14 +392,16 @@ def play_graph_dit_policy(
         return ee_node, object_node
 
     def _extract_joint_states_from_obs(obs_tensor):
-        """Extract joint position and velocity from concatenated obs.
+        """Extract joint position from concatenated obs.
+        
+        NOTE: Only using joint_pos (removed joint_vel to test if it's noise).
 
         Assumes layout:
-            joint_pos: 0-6, joint_vel: 6-12
+            joint_pos: 0-6
         """
         joint_pos = obs_tensor[:, 0:6]
-        joint_vel = obs_tensor[:, 6:12]
-        return torch.cat([joint_pos, joint_vel], dim=-1)
+        # Only return joint_pos (no joint_vel)
+        return joint_pos
 
     with torch.inference_mode():
         while simulation_app.is_running() and episode_count < num_episodes:
