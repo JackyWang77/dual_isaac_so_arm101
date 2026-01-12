@@ -372,7 +372,7 @@ def play_graph_dit_policy(
     
     # Initialize action smoothing (EMA) to reduce jitter
     # Smoothing factor: 0.1-0.3 recommended. Smaller = smoother but more delay, larger = less smoothing
-    smoothing_factor = 0.99
+    smoothing_factor = 1
     last_actions = [None] * num_envs  # Store last executed action for each environment
     
     step_count = 0

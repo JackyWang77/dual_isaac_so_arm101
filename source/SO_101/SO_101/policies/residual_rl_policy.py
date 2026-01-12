@@ -652,21 +652,56 @@ class ResidualRLPolicy(nn.Module):
         self._action_history[:, -1, :] = action_normalized
 
         # Extract EE and Object node features from observation
-        # Assuming obs layout: [joint_pos(6), joint_vel(6), obj_pos(3), obj_ori(4), ee_pos(3), ee_ori(4), ...]
+        # Use obs_structure if available (more robust), otherwise fallback to hardcoded offsets
         robot_state_dim = self.cfg.robot_state_dim  # Usually 12 (joint_pos + joint_vel)
 
         # Extract joint_states (joint_pos + joint_vel) for State-Action Self-Attention
         # joint_states is the first robot_state_dim elements of obs
         joint_states = obs[:, :robot_state_dim]  # [num_envs, robot_state_dim]
 
-        # Object position and orientation
-        obj_pos = obs[:, robot_state_dim : robot_state_dim + 3]
-        obj_ori = obs[:, robot_state_dim + 3 : robot_state_dim + 7]
-        object_node = torch.cat([obj_pos, obj_ori], dim=-1)  # [num_envs, 7]
+        # Try to use obs_structure from Graph DiT config (more robust)
+        if (
+            hasattr(self.graph_dit_cfg, "obs_structure")
+            and self.graph_dit_cfg.obs_structure is not None
+        ):
+            obs_struct = self.graph_dit_cfg.obs_structure
+            # Extract using obs_structure dict
+            if "object_position" in obs_struct:
+                obj_start, obj_end = obs_struct["object_position"]
+                obj_pos = obs[:, obj_start:obj_end]
+            else:
+                # Fallback: assume object_position starts at robot_state_dim
+                obj_pos = obs[:, robot_state_dim : robot_state_dim + 3]
 
-        # EE position and orientation
-        ee_pos = obs[:, robot_state_dim + 7 : robot_state_dim + 10]
-        ee_ori = obs[:, robot_state_dim + 10 : robot_state_dim + 14]
+            if "object_orientation" in obs_struct:
+                obj_ori_start, obj_ori_end = obs_struct["object_orientation"]
+                obj_ori = obs[:, obj_ori_start:obj_ori_end]
+            else:
+                # Fallback: assume object_orientation starts at robot_state_dim + 3
+                obj_ori = obs[:, robot_state_dim + 3 : robot_state_dim + 7]
+
+            if "ee_position" in obs_struct:
+                ee_pos_start, ee_pos_end = obs_struct["ee_position"]
+                ee_pos = obs[:, ee_pos_start:ee_pos_end]
+            else:
+                # Fallback: assume ee_position starts at robot_state_dim + 7
+                ee_pos = obs[:, robot_state_dim + 7 : robot_state_dim + 10]
+
+            if "ee_orientation" in obs_struct:
+                ee_ori_start, ee_ori_end = obs_struct["ee_orientation"]
+                ee_ori = obs[:, ee_ori_start:ee_ori_end]
+            else:
+                # Fallback: assume ee_orientation starts at robot_state_dim + 10
+                ee_ori = obs[:, robot_state_dim + 10 : robot_state_dim + 14]
+        else:
+            # Fallback: Hardcoded offsets (original behavior)
+            # Assuming obs layout: [joint_pos(6), joint_vel(6), obj_pos(3), obj_ori(4), ee_pos(3), ee_ori(4), ...]
+            obj_pos = obs[:, robot_state_dim : robot_state_dim + 3]
+            obj_ori = obs[:, robot_state_dim + 3 : robot_state_dim + 7]
+            ee_pos = obs[:, robot_state_dim + 7 : robot_state_dim + 10]
+            ee_ori = obs[:, robot_state_dim + 10 : robot_state_dim + 14]
+
+        object_node = torch.cat([obj_pos, obj_ori], dim=-1)  # [num_envs, 7]
         ee_node = torch.cat([ee_pos, ee_ori], dim=-1)  # [num_envs, 7]
 
         # Update node histories
@@ -841,7 +876,8 @@ class ResidualRLPolicy(nn.Module):
                 subtask_condition,
             )
 
-            # Get base action from diffusion - all inputs normalized
+            # Get base action from diffusion - all inputs already normalized!
+            # CRITICAL: Set normalize=False to avoid double normalization!
             base_action_normalized = self.graph_dit.get_base_action(
                 obs_normalized,
                 action_history,
@@ -849,8 +885,9 @@ class ResidualRLPolicy(nn.Module):
                 object_node_history_normalized,
                 joint_states_history_normalized,
                 subtask_condition,
+                normalize=False,  # ✅ CRITICAL: Inputs already normalized!
             )
-            # Denormalize base action
+            # Denormalize base action (get_base_action returns normalized when normalize=False)
             base_action = self._denormalize_action(base_action_normalized)
 
         # 2. Build PPO input: [Robot_State, Graph_Embedding, Base_Action_t]
@@ -931,6 +968,8 @@ class ResidualRLPolicy(nn.Module):
                 joint_states_history_normalized,
                 subtask_condition,
             )
+            # Get base action from diffusion - all inputs already normalized!
+            # CRITICAL: Set normalize=False to avoid double normalization!
             base_action_normalized = self.graph_dit.get_base_action(
                 obs_normalized,
                 action_history,
@@ -938,8 +977,9 @@ class ResidualRLPolicy(nn.Module):
                 object_node_history_normalized,
                 joint_states_history_normalized,
                 subtask_condition,
+                normalize=False,  # ✅ CRITICAL: Inputs already normalized!
             )
-            # Denormalize base action
+            # Denormalize base action (get_base_action returns normalized when normalize=False)
             base_action = self._denormalize_action(base_action_normalized)
 
         # Cache for later (in case evaluate is called)
@@ -1042,7 +1082,8 @@ class ResidualRLPolicy(nn.Module):
 
         if needs_replan.any():
             # DiT predicts base trajectory (only when buffer exhausted)
-            # NOTE: All inputs must be normalized!
+            # CRITICAL: All inputs are already normalized manually above!
+            # Must set normalize=False to avoid double normalization!
             with torch.no_grad():
                 base_trajectory_normalized = self.graph_dit.predict(
                     obs_normalized,
@@ -1052,7 +1093,8 @@ class ResidualRLPolicy(nn.Module):
                     joint_states_history_normalized,
                     subtask_condition,
                     deterministic=True,
-                )  # [batch, pred_horizon, action_dim] - normalized
+                    normalize=False,  # ✅ CRITICAL: Inputs already normalized!
+                )  # [batch, pred_horizon, action_dim] - normalized (not denormalized by predict)
 
             # Denormalize action trajectory for execution
             base_trajectory = self._denormalize_action(base_trajectory_normalized)
@@ -1265,6 +1307,8 @@ class ResidualRLPolicy(nn.Module):
                 joint_states_history_normalized,
                 subtask_condition,
             )
+            # Get base action from diffusion - all inputs already normalized!
+            # CRITICAL: Set normalize=False to avoid double normalization!
             base_action_normalized = self.graph_dit.get_base_action(
                 obs_normalized,
                 action_history,
@@ -1272,8 +1316,9 @@ class ResidualRLPolicy(nn.Module):
                 object_node_history_normalized,
                 joint_states_history_normalized,
                 subtask_condition,
+                normalize=False,  # ✅ CRITICAL: Inputs already normalized!
             )  # deterministic=True by default
-            # Denormalize base action
+            # Denormalize base action (get_base_action returns normalized when normalize=False)
             base_action = self._denormalize_action(base_action_normalized)
 
         # Build PPO input with base_action

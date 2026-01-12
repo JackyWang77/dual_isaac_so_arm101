@@ -2450,6 +2450,7 @@ class GraphDiTPolicy(nn.Module):
         joint_states_history: torch.Tensor | None = None,
         subtask_condition: torch.Tensor | None = None,
         num_diffusion_steps: int | None = None,
+        normalize: bool = True,
     ) -> torch.Tensor:
         """
         Get base action from DiT (for Residual RL).
@@ -2460,11 +2461,13 @@ class GraphDiTPolicy(nn.Module):
         Args:
             obs: Observations [batch_size, obs_dim]
             ... (same as predict)
+            normalize: If True, normalize inputs and denormalize outputs using stored stats.
+                      Set to False if inputs are already normalized.
 
         Returns:
             base_action: [batch_size, action_dim] - First action from predicted trajectory
         """
-        # Use predict with defaults
+        # Use predict with normalize parameter
         trajectory = self.predict(
             obs,
             action_history,
@@ -2474,6 +2477,7 @@ class GraphDiTPolicy(nn.Module):
             subtask_condition,
             num_diffusion_steps,
             deterministic=True,
+            normalize=normalize,  # ✅ Allow caller to control normalization
         )
 
         # Return first action of trajectory [batch, action_dim]

@@ -358,7 +358,7 @@ class ResidualActorCritic(ActorCritic):
         # Set ZERO_RESIDUAL_CHECK = True to test if DiT alone works
         # If DiT works alone but fails with PPO, reduce init_noise_std
         # ============================================================
-        ZERO_RESIDUAL_CHECK = True  # Set to True to diagnose
+        ZERO_RESIDUAL_CHECK = False  # ✅ CRITICAL: Set to False for training! True only for debugging DiT
         if ZERO_RESIDUAL_CHECK:
             final_action = base_action_t  # PPO completely disabled
         else:
