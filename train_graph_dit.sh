@@ -62,8 +62,6 @@ python scripts/graph_dit/train.py \
     --num_heads 4 \
     --pred_horizon 20 \
     --exec_horizon 10 \
-    --action_target_offset 5 \
-    --action_trajectory_start_offset 1 \
     --device cuda \
     --save_dir ./logs/graph_dit/lift_joint \
     --log_dir ./logs/graph_dit/lift_joint
