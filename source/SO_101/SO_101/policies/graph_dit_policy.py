@@ -23,7 +23,6 @@ from dataclasses import MISSING
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.checkpoint import checkpoint
 from isaaclab.utils import configclass
 
 
@@ -77,37 +76,6 @@ class ActionHistoryBuffer:
         self.write_idx = torch.zeros(num_envs, dtype=torch.long, device=self.device)
         # Track if buffer has been filled at least once (for proper history ordering)
         self.filled = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
-        # Track if buffer has been initialized with a specific value (instead of zeros)
-        self.initialized = False
-
-    def initialize_with(self, initial_value: torch.Tensor):
-        """Initialize buffer with a specific value instead of zeros.
-
-        This ensures inference behavior matches training (where history is padded
-        with the first action, not zeros).
-
-        Args:
-            initial_value: [num_envs, action_dim] or [action_dim] - value to fill the buffer with
-        """
-        if len(initial_value.shape) == 1:
-            initial_value = initial_value.unsqueeze(0).expand(self.num_envs, -1)
-
-        # Ensure correct shape
-        assert initial_value.shape == (
-            self.num_envs,
-            self.action_dim,
-        ), f"Expected initial_value shape ({self.num_envs}, {self.action_dim}), got {initial_value.shape}"
-
-        # Fill entire buffer with initial_value
-        self.buffer = (
-            initial_value.unsqueeze(1)
-            .expand(-1, self.history_length, -1)
-            .clone()
-            .to(self.device)
-        )
-        self.write_idx.zero_()
-        self.filled.zero_()
-        self.initialized = True
 
     def update(self, actions: torch.Tensor):
         """Add new actions to the buffer using ring buffer (no memory allocation).
@@ -182,7 +150,6 @@ class ActionHistoryBuffer:
             self.buffer.zero_()
             self.write_idx.zero_()
             self.filled.zero_()
-            self.initialized = False  # Mark as uninitialized so next update() will re-initialize
         else:
             # Reset only specified environments
             if env_ids.dim() == 0:
@@ -190,8 +157,6 @@ class ActionHistoryBuffer:
             self.buffer[env_ids].zero_()
             self.write_idx[env_ids] = 0
             self.filled[env_ids] = False
-            # Note: For per-env reset, we don't reset initialized flag
-            # The buffer will be re-initialized on next update() if needed
 
     def to(self, device: str | torch.device):
         """Move buffer to a different device.
@@ -274,50 +239,6 @@ class NodeHistoryBuffer:
         self.write_idx = torch.zeros(num_envs, dtype=torch.long, device=self.device)
         # Track if buffer has been filled at least once
         self.filled = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
-        # Track if buffer has been initialized with a specific value (instead of zeros)
-        self.initialized = False
-
-    def initialize_with(self, ee_node: torch.Tensor, object_node: torch.Tensor):
-        """Initialize buffer with specific values instead of zeros.
-
-        This ensures inference behavior matches training (where history is padded
-        with the first node features, not zeros).
-
-        Args:
-            ee_node: [num_envs, node_dim] or [node_dim] - EE node features to fill the buffer with
-            object_node: [num_envs, node_dim] or [node_dim] - Object node features to fill the buffer with
-        """
-        if len(ee_node.shape) == 1:
-            ee_node = ee_node.unsqueeze(0).expand(self.num_envs, -1)
-        if len(object_node.shape) == 1:
-            object_node = object_node.unsqueeze(0).expand(self.num_envs, -1)
-
-        # Ensure correct shapes
-        assert ee_node.shape == (
-            self.num_envs,
-            self.node_dim,
-        ), f"Expected ee_node shape ({self.num_envs}, {self.node_dim}), got {ee_node.shape}"
-        assert object_node.shape == (
-            self.num_envs,
-            self.node_dim,
-        ), f"Expected object_node shape ({self.num_envs}, {self.node_dim}), got {object_node.shape}"
-
-        # Fill entire buffers with initial values
-        self.ee_buffer = (
-            ee_node.unsqueeze(1)
-            .expand(-1, self.history_length, -1)
-            .clone()
-            .to(self.device)
-        )
-        self.object_buffer = (
-            object_node.unsqueeze(1)
-            .expand(-1, self.history_length, -1)
-            .clone()
-            .to(self.device)
-        )
-        self.write_idx.zero_()
-        self.filled.zero_()
-        self.initialized = True
 
     def update(self, ee_node: torch.Tensor, object_node: torch.Tensor):
         """Add new node features to the buffer using ring buffer (no memory allocation).
@@ -403,7 +324,6 @@ class NodeHistoryBuffer:
             self.object_buffer.zero_()
             self.write_idx.zero_()
             self.filled.zero_()
-            self.initialized = False  # Mark as uninitialized so next update() will re-initialize
         else:
             # Reset only specified environments
             if env_ids.dim() == 0:
@@ -412,8 +332,6 @@ class NodeHistoryBuffer:
             self.object_buffer[env_ids].zero_()
             self.write_idx[env_ids] = 0
             self.filled[env_ids] = False
-            # Note: For per-env reset, we don't reset initialized flag
-            # The buffer will be re-initialized on next update() if needed
 
     def to(self, device: str | torch.device):
         """Move buffer to a different device.
@@ -490,37 +408,6 @@ class JointStateHistoryBuffer:
         self.write_idx = torch.zeros(num_envs, dtype=torch.long, device=self.device)
         # Track if buffer has been filled at least once
         self.filled = torch.zeros(num_envs, dtype=torch.bool, device=self.device)
-        # Track if buffer has been initialized with a specific value (instead of zeros)
-        self.initialized = False
-
-    def initialize_with(self, initial_value: torch.Tensor):
-        """Initialize buffer with a specific value instead of zeros.
-
-        This ensures inference behavior matches training (where history is padded
-        with the first joint states, not zeros).
-
-        Args:
-            initial_value: [num_envs, joint_dim] or [joint_dim] - value to fill the buffer with
-        """
-        if len(initial_value.shape) == 1:
-            initial_value = initial_value.unsqueeze(0).expand(self.num_envs, -1)
-
-        # Ensure correct shape
-        assert initial_value.shape == (
-            self.num_envs,
-            self.joint_dim,
-        ), f"Expected initial_value shape ({self.num_envs}, {self.joint_dim}), got {initial_value.shape}"
-
-        # Fill entire buffer with initial_value
-        self.buffer = (
-            initial_value.unsqueeze(1)
-            .expand(-1, self.history_length, -1)
-            .clone()
-            .to(self.device)
-        )
-        self.write_idx.zero_()
-        self.filled.zero_()
-        self.initialized = True
 
     def update(self, joint_states: torch.Tensor):
         """Add new joint states to the buffer using ring buffer (no memory allocation).
@@ -593,7 +480,6 @@ class JointStateHistoryBuffer:
             self.buffer.zero_()
             self.write_idx.zero_()
             self.filled.zero_()
-            self.initialized = False  # Mark as uninitialized so next update() will re-initialize
         else:
             # Reset only specified environments
             if env_ids.dim() == 0:
@@ -601,8 +487,6 @@ class JointStateHistoryBuffer:
             self.buffer[env_ids].zero_()
             self.write_idx[env_ids] = 0
             self.filled[env_ids] = False
-            # Note: For per-env reset, we don't reset initialized flag
-            # The buffer will be re-initialized on next update() if needed
 
     def to(self, device: str | torch.device):
         """Move buffer to a different device.
@@ -692,22 +576,10 @@ class GraphDiTPolicyCfg:
     """Node feature dimension: position(3) + orientation(4) = 7"""
 
     edge_dim: int = 2
-    """Edge feature dimension: distance(1) + alignment(1) = 2
-    
-    Edge features for spatial reasoning:
-    - distance: L2 norm between EE and Object positions
-    - alignment: Quaternion dot product (orientation similarity)
-    """
+    """Edge feature dimension: distance(1) + orientation_similarity(1) = 2"""
 
     joint_dim: int | None = None
     """Joint states dimension (joint_pos + joint_vel). If None, joint states are not used."""
-
-    # Regularization
-    dropout_rate: float = 0.1
-    """Dropout rate for regularization."""
-
-    use_gradient_checkpointing: bool = False
-    """Enable gradient checkpointing to reduce memory usage (trades compute for memory)."""
 
     # Action history
     action_history_length: int = 4
@@ -837,7 +709,6 @@ class GraphAttentionWithEdgeBias(nn.Module):
         num_heads: int,
         edge_dim: int = 128,
         use_edge_modulation: bool = True,
-        dropout_rate: float = 0.1,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -876,8 +747,7 @@ class GraphAttentionWithEdgeBias(nn.Module):
                 nn.Linear(edge_dim, num_heads), nn.Tanh()
             )
 
-        # CRITICAL FIX: Add dropout for attention weights
-        self.dropout = nn.Dropout(dropout_rate)
+        self.dropout = nn.Dropout(0.1)
         self.scale = 1.0 / math.sqrt(self.head_dim)
 
     def forward(self, node_features: torch.Tensor, edge_features: torch.Tensor):
@@ -885,7 +755,7 @@ class GraphAttentionWithEdgeBias(nn.Module):
         Args:
             node_features: [batch, num_nodes, history_length, hidden_dim] or [batch, num_nodes, hidden_dim]
                           (2 nodes: EE, Object, with optional temporal history)
-            edge_features: [batch, edge_dim] - Edge features: distance(1) + alignment(1) = 2
+            edge_features: [batch, edge_dim] (distance + orientation_similarity)
         Returns:
             updated_node_features: [batch, num_nodes, hidden_dim] or [batch, num_nodes, history_length, hidden_dim]
         """
@@ -959,9 +829,8 @@ class GraphAttentionWithEdgeBias(nn.Module):
             )  # [batch, heads, seq_len, seq_len]
 
         if temporal_mode:
-            # For temporal mode: create attention bias for both spatial and temporal connections
-            # Spatial edges: same timestep, different nodes (EE ↔ Object)
-            # Temporal edges: adjacent timesteps, same node (EE(t) ↔ EE(t+1), Object(t) ↔ Object(t+1))
+            # For temporal mode: create attention bias for spatial connections (between different nodes)
+            # at the SAME timestep across all time steps
             # The node order is: [node0(t-3), node0(t-2), ..., node0(t),
             #                     node1(t-3), node1(t-2), ..., node1(t), ...]
             attention_bias = torch.zeros(
@@ -973,7 +842,6 @@ class GraphAttentionWithEdgeBias(nn.Module):
                 dtype=node_features.dtype,
             )
 
-            # 1. Spatial edges: same timestep, different nodes (EE ↔ Object)
             # Set edge bias for spatial connections at the same timestep
             # NOTE: edge_features currently describes the relationship between node0 and node1
             # For num_nodes > 2, this would need to be extended to support multiple edge types
@@ -997,22 +865,6 @@ class GraphAttentionWithEdgeBias(nn.Module):
             attention_bias[:, :, node1_indices, node0_indices] = (
                 edge_bias_expanded.permute(0, 1, 2)
             )
-
-            # 2. Temporal edges: adjacent timesteps, same node (EE(t) ↔ EE(t+1), Object(t) ↔ Object(t+1))
-            # This allows the model to learn "EE is moving" or "Object is moving" information
-            # Temporal bias: learnable or fixed (using a small fixed value for now)
-            temporal_bias = 0.1  # Can be made learnable: self.temporal_bias = nn.Parameter(torch.tensor(0.1))
-            for t in range(history_length - 1):
-                # EE(t) <-> EE(t+1)
-                ee_t_idx = t
-                ee_t1_idx = t + 1
-                attention_bias[:, :, ee_t_idx, ee_t1_idx] += temporal_bias
-                attention_bias[:, :, ee_t1_idx, ee_t_idx] += temporal_bias
-                # Object(t) <-> Object(t+1)
-                obj_t_idx = history_length + t
-                obj_t1_idx = history_length + t + 1
-                attention_bias[:, :, obj_t_idx, obj_t1_idx] += temporal_bias
-                attention_bias[:, :, obj_t1_idx, obj_t_idx] += temporal_bias
         else:
             # Non-temporal: simple graph with spatial connections
             attention_bias = torch.zeros(
@@ -1077,7 +929,6 @@ class GraphDiTUnit(nn.Module):
         edge_dim: int = 128,
         use_edge_modulation: bool = True,
         joint_dim: int | None = None,
-        dropout_rate: float = 0.1,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
@@ -1116,7 +967,7 @@ class GraphDiTUnit(nn.Module):
         # Step 1: State-action sequence self-attention
         # Now processes (joint_states, action) concatenated sequences
         self.action_self_attn = nn.MultiheadAttention(
-            hidden_dim, num_heads, batch_first=True, dropout=dropout_rate
+            hidden_dim, num_heads, batch_first=True, dropout=0.1
         )
         # AdaLN dynamically adjusts scale and shift based on timestep condition
         self.action_norm1 = AdaptiveLayerNorm(
@@ -1126,16 +977,16 @@ class GraphDiTUnit(nn.Module):
         self.action_ff = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim * 4),
             nn.GELU(),
-            nn.Dropout(dropout_rate),
+            nn.Dropout(0.1),
             nn.Linear(hidden_dim * 4, hidden_dim),
-            nn.Dropout(dropout_rate),
+            nn.Dropout(0.1),
         )
 
         # Step 2: Graph attention with edge features
         # CRITICAL INNOVATION: Use Edge-Conditioned Modulation (ECC-style)
         # Edge features control Value transformation, not just attention bias
         self.graph_attention = GraphAttentionWithEdgeBias(
-            hidden_dim, num_heads, edge_dim, use_edge_modulation=use_edge_modulation, dropout_rate=dropout_rate
+            hidden_dim, num_heads, edge_dim, use_edge_modulation=use_edge_modulation
         )
         # Use AdaLN for node features as well
         self.node_norm1 = AdaptiveLayerNorm(hidden_dim, hidden_dim)
@@ -1143,14 +994,14 @@ class GraphDiTUnit(nn.Module):
         self.node_ff = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim * 4),
             nn.GELU(),
-            nn.Dropout(dropout_rate),
+            nn.Dropout(0.1),
             nn.Linear(hidden_dim * 4, hidden_dim),
-            nn.Dropout(dropout_rate),
+            nn.Dropout(0.1),
         )
 
         # Step 3: Cross-attention (action queries node features + joint velocity memory)
         self.cross_attn = nn.MultiheadAttention(
-            hidden_dim, num_heads, batch_first=True, dropout=dropout_rate
+            hidden_dim, num_heads, batch_first=True, dropout=0.1
         )
         # Use AdaLN for cross-attention
         self.cross_norm1 = AdaptiveLayerNorm(hidden_dim, hidden_dim)
@@ -1158,15 +1009,14 @@ class GraphDiTUnit(nn.Module):
         self.cross_ff = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim * 4),
             nn.GELU(),
-            nn.Dropout(dropout_rate),
+            nn.Dropout(0.1),
             nn.Linear(hidden_dim * 4, hidden_dim),
-            nn.Dropout(dropout_rate),
+            nn.Dropout(0.1),
         )
 
     def forward(
         self,
-        action_history_embed: torch.Tensor,
-        noisy_action_embed: torch.Tensor,
+        action: torch.Tensor,
         node_features: torch.Tensor,
         edge_features: torch.Tensor,
         timestep_embed: torch.Tensor | None = None,
@@ -1174,25 +1024,23 @@ class GraphDiTUnit(nn.Module):
     ):
         """
         Args:
-            action_history_embed: Embedded action history [batch, history_len, hidden_dim]
-            noisy_action_embed: Embedded noisy action trajectory [batch, pred_horizon, hidden_dim]
-            node_features: Node features [batch, 2, hidden_dim] or [batch, 2, history_len, hidden_dim]
+            action: Action sequence [batch, seq_len, hidden_dim] (should be action history)
+            node_features: Node features [batch, 2, hidden_dim] (EE, Object)
             edge_features: Edge features [batch, edge_dim]
             timestep_embed: Timestep embedding [batch, hidden_dim] (optional)
-            joint_states_history: Joint states history [batch, history_len, joint_dim] (optional)
+            joint_states_history: Joint states history [batch, history_length, joint_dim] (optional)
         Returns:
-            denoised_embed: [batch, pred_horizon, hidden_dim] or [batch, history_len + pred_horizon, hidden_dim]
+            noise_pred: Predicted noise [batch, hidden_dim]
         """
         # Prepare condition embedding for AdaLN (timestep embedding)
         condition_emb = timestep_embed if timestep_embed is not None else None
 
-        # Ensure inputs are 3D
-        if len(action_history_embed.shape) == 2:
-            action_history_embed = action_history_embed.unsqueeze(1)  # [batch, 1, hidden_dim]
-        if len(noisy_action_embed.shape) == 2:
-            noisy_action_embed = noisy_action_embed.unsqueeze(1)  # [batch, 1, hidden_dim]
-
-        history_len = action_history_embed.shape[1]
+        # Ensure action is 3D: [batch, seq_len, hidden_dim]
+        if len(action.shape) == 2:
+            action = action.unsqueeze(
+                1
+            )  # [batch, hidden_dim] -> [batch, 1, hidden_dim]
+        seq_len = action.shape[1]
 
         # Step 1: State-action sequence self-attention
         # Design (UPDATED):
@@ -1211,7 +1059,7 @@ class GraphDiTUnit(nn.Module):
                 ..., self.joint_pos_dim :
             ]  # [batch, T, joint_vel_dim]
 
-            joint_history_len = joint_pos.shape[1]
+            batch_size, history_length, _ = joint_pos.shape
 
             # Encode joint positions / velocities: [batch, T, dim] -> [batch, T, hidden_dim]
             joint_pos_embed = self.joint_pos_encoder(
@@ -1221,31 +1069,52 @@ class GraphDiTUnit(nn.Module):
                 joint_vel
             )  # [batch, T, hidden_dim]
 
-            # Align lengths: use most recent timesteps if needed
-            min_len = min(history_len, joint_history_len)
-            if joint_history_len > min_len:
-                joint_pos_embed = joint_pos_embed[:, -min_len:, :]
-                joint_vel_embed = joint_vel_embed[:, -min_len:, :]
-            if history_len > min_len:
-                action_history_embed = action_history_embed[:, -min_len:, :]
-                history_len = min_len
+            # Determine how many history tokens we have in the action sequence
+            # Typical case: seq_len = history_length + 1 (H history + 1 noisy_action)
+            if seq_len > history_length:
+                # Split action into history and noisy_action
+                action_history_embed = action[
+                    :, :history_length, :
+                ]  # [batch, history_length, hidden_dim]
+                noisy_action_embed = action[
+                    :, history_length:, :
+                ]  # [batch, 1, hidden_dim]
+            else:
+                # No explicit noisy_action token: treat entire action sequence as history
+                action_history_embed = action[:, :history_length, :]
+                noisy_action_embed = action[:, 0:0, :]  # empty sequence
+
+            # Align joint_pos_embed with action history length (use most recent timesteps if needed)
+            if history_length > action_history_embed.shape[1]:
+                # Trim joint history to match action history length
+                trim_len = action_history_embed.shape[1]
+                joint_pos_embed = joint_pos_embed[:, -trim_len:, :]
+                history_length = trim_len
+            elif history_length < action_history_embed.shape[1]:
+                # Trim action history to match joint history length (use most recent)
+                trim_len = history_length
+                action_history_embed = action_history_embed[:, -trim_len:, :]
+                history_length = trim_len
 
             # Concatenate joint pos + joint vel + action history (NOT with noisy_action token)
-            # [batch, history_len, hidden_dim * 3] -> [batch, history_len, hidden_dim]
+            # [batch, history_length, hidden_dim * 3] -> [batch, history_length, hidden_dim]
             state_action_history = torch.cat(
                 [joint_pos_embed, joint_vel_embed, action_history_embed], dim=-1
             )
             state_action_history = self.state_action_proj(state_action_history)
 
-            # Concatenate history with noisy_action tokens
-            state_action_seq = torch.cat(
-                [state_action_history, noisy_action_embed], dim=1
-            )  # [batch, history_len + pred_horizon, hidden_dim]
+            # Re-attach noisy_action token (if it exists)
+            if noisy_action_embed.shape[1] > 0:
+                state_action_seq = torch.cat(
+                    [state_action_history, noisy_action_embed], dim=1
+                )  # [batch, seq_len, hidden_dim]
+            else:
+                state_action_seq = (
+                    state_action_history  # [batch, history_length, hidden_dim]
+                )
         else:
-            # Fallback: concatenate history and noisy_action (no joint states available)
-            state_action_seq = torch.cat(
-                [action_history_embed, noisy_action_embed], dim=1
-            )  # [batch, history_len + pred_horizon, hidden_dim]
+            # Fallback: use only action (no joint states available)
+            state_action_seq = action  # [batch, seq_len, hidden_dim]
 
         # Self-attention on state-action sequence
         state_action_residual = state_action_seq
@@ -1500,13 +1369,6 @@ class GraphDiTPolicy(nn.Module):
         super().__init__()
         self.cfg = cfg
 
-        # Initialize normalization stats (will be populated when loading from checkpoint)
-        # CRITICAL: These stats are required for proper inference
-        self.obs_stats = {}
-        self.action_stats = {}
-        self.node_stats = {}
-        self.joint_stats = {}
-
         # Node embedding: position(3) + orientation(4) = 7 -> hidden_dim
         self.node_embedding = nn.Sequential(
             nn.Linear(cfg.node_dim, cfg.hidden_dim),
@@ -1514,10 +1376,9 @@ class GraphDiTPolicy(nn.Module):
             nn.GELU(),
         )
 
-        # Edge embedding: current(2) + delta(2) = 4 -> graph_edge_dim
-        # Input is [current_features(2), delta_features(2)]
-        # Current features: [distance, alignment]
-        # Delta features: temporal change in edge features (velocity/trend information)
+        # Edge embedding: current(2) + delta(2) = 4 -> edge_dim
+        # CRITICAL FIX: Input is now [current_distance, current_alignment, delta_distance, delta_alignment]
+        # This includes velocity/trend information for better grasping behavior
         self.edge_embedding = nn.Sequential(
             nn.Linear(
                 cfg.edge_dim * 2, cfg.graph_edge_dim
@@ -1588,7 +1449,6 @@ class GraphDiTPolicy(nn.Module):
                     cfg.graph_edge_dim,
                     use_edge_modulation=cfg.use_edge_modulation,
                     joint_dim=cfg.joint_dim,
-                    dropout_rate=cfg.dropout_rate,
                 )
                 for _ in range(cfg.num_layers)
             ]
@@ -1600,7 +1460,7 @@ class GraphDiTPolicy(nn.Module):
             nn.Linear(cfg.hidden_dim, cfg.hidden_dim),
             nn.LayerNorm(cfg.hidden_dim),
             nn.GELU(),
-            nn.Dropout(cfg.dropout_rate),
+            nn.Dropout(0.1),
             nn.Linear(cfg.hidden_dim, cfg.action_dim),
         )
 
@@ -1640,20 +1500,10 @@ class GraphDiTPolicy(nn.Module):
         return emb  # [seq_len, hidden_dim]
 
     def _init_weights(self):
-        """Initialize network weights.
-        
-        Uses conservative initialization for output layers (gain=0.01)
-        and standard initialization for other layers (gain=1.0) to prevent
-        gradient vanishing in deep networks.
-        """
-        for name, m in self.named_modules():
+        """Initialize network weights."""
+        for m in self.modules():
             if isinstance(m, nn.Linear):
-                # For output layers (noise_head), use small gain for stability
-                # For other layers, use standard gain to prevent gradient vanishing
-                if "noise_head" in name and len(list(m.children())) == 0:  # Last layer
-                    nn.init.xavier_uniform_(m.weight, gain=0.01)
-                else:
-                    nn.init.xavier_uniform_(m.weight, gain=1.0)
+                nn.init.xavier_uniform_(m.weight, gain=0.01)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.LayerNorm):
@@ -1807,13 +1657,13 @@ class GraphDiTPolicy(nn.Module):
 
     def _compute_edge_features(self, ee_node: torch.Tensor, object_node: torch.Tensor):
         """
-        Compute edge features: distance + orientation alignment.
+        Compute edge features: distance + orientation similarity.
 
         Args:
             ee_node: [batch, 7] - EE position(3) + orientation(4)
             object_node: [batch, 7] - Object position(3) + orientation(4)
         Returns:
-            edge_features: [batch, 2] - [distance(1), alignment(1)]
+            edge_features: [batch, 2] - [distance, orientation_similarity]
         """
         # Extract positions and orientations
         ee_pos = ee_node[:, :3]  # [batch, 3]
@@ -1826,23 +1676,18 @@ class GraphDiTPolicy(nn.Module):
         ee_quat = F.normalize(ee_quat, p=2, dim=-1, eps=1e-6)  # [batch, 4]
         obj_quat = F.normalize(obj_quat, p=2, dim=-1, eps=1e-6)  # [batch, 4]
 
-        # 1. Relative position vector
-        relative_pos = obj_pos - ee_pos  # [batch, 3]
+        # 1. Distance (L2 norm)
+        distance = torch.norm(ee_pos - obj_pos, dim=-1, keepdim=True)  # [batch, 1]
 
-        # 2. Distance (L2 norm)
-        distance = torch.norm(relative_pos, dim=-1, keepdim=True)  # [batch, 1]
-
-        # 3. Orientation alignment (quaternion dot product)
+        # 2. Orientation similarity (quaternion dot product)
         # Quaternion dot product: q1 · q2 = w1*w2 + x1*x2 + y1*y2 + z1*z2
         quat_dot = torch.sum(ee_quat * obj_quat, dim=-1, keepdim=True)  # [batch, 1]
         # Take absolute value (q and -q represent same rotation)
-        alignment = torch.abs(quat_dot)  # [batch, 1], range [0, 1]
+        orientation_similarity = torch.abs(quat_dot)  # [batch, 1], range [0, 1]
 
-        # Concatenate features
         edge_features = torch.cat(
-            [distance, alignment], dim=-1
+            [distance, orientation_similarity], dim=-1
         )  # [batch, 2]
-
         return edge_features
 
     def _get_timestep_embed(self, timesteps: torch.Tensor):
@@ -1939,9 +1784,9 @@ class GraphDiTPolicy(nn.Module):
             # Vectorized edge computation for all timesteps at once
             edge_features_raw_all = self._compute_edge_features(
                 ee_history_flat, obj_history_flat
-            )  # [batch * history_length, 2] - distance(1) + alignment(1)
+            )  # [batch * history_length, 2]
             edge_features_temporal = edge_features_raw_all.view(
-                batch_size, history_length, self.cfg.edge_dim
+                batch_size, history_length, 2
             )  # [batch, history_length, 2]
 
             # CRITICAL FIX: Include both current edge features AND delta (velocity/trend information)
@@ -1959,7 +1804,7 @@ class GraphDiTPolicy(nn.Module):
                 edge_delta = current_edge - prev_edge  # [batch, 2] - velocity/trend
 
                 # Concatenate current edge features with delta for richer information
-                # [batch, 4] = [current_features(2), delta_features(2)]
+                # [batch, 4] = [current_distance, current_alignment, delta_distance, delta_alignment]
                 edge_features_raw = torch.cat(
                     [current_edge, edge_delta], dim=-1
                 )  # [batch, 4]
@@ -1995,7 +1840,7 @@ class GraphDiTPolicy(nn.Module):
                 2
             )  # [batch, 2, 1, hidden_dim]
 
-        # Embed edge features (now [batch, 10] = current(5) + delta(5))
+        # Embed edge features (now [batch, 4] = current + delta)
         edge_features_embed = self.edge_embedding(
             edge_features_raw
         )  # [batch, graph_edge_dim]
@@ -2169,54 +2014,20 @@ class GraphDiTPolicy(nn.Module):
         # Process through Graph DiT units
         # CRITICAL FIX: Preserve action sequence across layers for multi-layer temporal modeling
         # Each layer updates the action sequence, but maintains the temporal structure
-        # CRITICAL FIX: Explicitly separate history and noisy_action for clarity
-        history_len = (
-            self.action_history_length
-            if (action_history is not None and action_history.shape[1] > 0)
-            else 0
-        )
-        pred_horizon = self.pred_horizon
-
         for unit in self.graph_dit_units:
-            # Explicitly separate history and noisy_action from action_embed
-            if action_embed.shape[1] > pred_horizon:
-                # action_embed contains both history and noisy_action
-                history_embed_current = action_embed[:, :history_len, :]  # [batch, history_len, hidden_dim]
-                noisy_action_embed_current = action_embed[:, history_len:, :]  # [batch, pred_horizon, hidden_dim]
-            else:
-                # No history was concatenated, all tokens are noisy_action
-                history_embed_current = torch.zeros(
-                    batch_size, 0, self.cfg.hidden_dim, device=action_embed.device, dtype=action_embed.dtype
-                )  # [batch, 0, hidden_dim]
-                noisy_action_embed_current = action_embed  # [batch, pred_horizon, hidden_dim]
-
-            # Each unit processes: action history + noisy_action (with joint_states), nodes, edges
+            # Each unit processes: action (with joint_states), nodes, edges
             # Pass joint_states_history for state-action sequence self-attention
             # CRITICAL FIX: Pass condition_embed (not just timestep_embed) to AdaLN
-            # Gradient checkpointing: recompute forward pass during backward (trades compute for memory)
-            if self.training and self.cfg.use_gradient_checkpointing:
-                denoised_embed = checkpoint(
-                    unit,
-                    history_embed_current,
-                    noisy_action_embed_current,
-                    node_features,
-                    edge_features_embed,
-                    condition_for_adaln,
-                    joint_states_history,
-                    use_reentrant=False,
-                )
-            else:
-                denoised_embed = unit(
-                    action_history_embed=history_embed_current,
-                    noisy_action_embed=noisy_action_embed_current,
-                    node_features=node_features,
-                    edge_features=edge_features_embed,
-                    timestep_embed=condition_for_adaln,  # Use unified condition (timestep + subtask)
-                    joint_states_history=joint_states_history,
-                )
+            noise_embed = unit(
+                action_embed,
+                node_features,
+                edge_features_embed,
+                condition_for_adaln,  # Use unified condition (timestep + subtask)
+                joint_states_history=joint_states_history,
+            )
             # Update action_embed for next layer while preserving sequence structure
-            # denoised_embed: [batch, history_len + pred_horizon, hidden_dim]
-            action_embed = denoised_embed  # [batch, history_len + pred_horizon, hidden_dim]
+            # noise_embed: [batch, seq_len, hidden_dim] where seq_len = history_len + pred_horizon
+            action_embed = noise_embed  # [batch, seq_len, hidden_dim]
 
         # ==========================================================================
         # ACTION CHUNKING OUTPUT: Predict noise/velocity for entire trajectory
@@ -2294,6 +2105,7 @@ class GraphDiTPolicy(nn.Module):
 
         with torch.no_grad():
             batch_size = obs.shape[0]
+            device = obs.device
 
             # Extract node features (use history if provided)
             if ee_node_history is not None and object_node_history is not None:
@@ -2332,15 +2144,15 @@ class GraphDiTPolicy(nn.Module):
                     ee_history_flat, obj_history_flat
                 )
                 edge_features_temporal = edge_features_raw_all.view(
-                    batch_size, history_length, self.cfg.edge_dim
-                )  # [batch, history_length, 2]
+                    batch_size, history_length, 2
+                )
 
                 # Include current edge + delta
-                current_edge = edge_features_temporal[:, -1, :]  # [batch, 2]
+                current_edge = edge_features_temporal[:, -1, :]
                 if history_length > 1:
-                    prev_edge = edge_features_temporal[:, -2, :]  # [batch, 2]
-                    edge_delta = current_edge - prev_edge  # [batch, 2]
-                    edge_features_raw = torch.cat([current_edge, edge_delta], dim=-1)  # [batch, 4]
+                    prev_edge = edge_features_temporal[:, -2, :]
+                    edge_delta = current_edge - prev_edge
+                    edge_features_raw = torch.cat([current_edge, edge_delta], dim=-1)
                 else:
                     edge_delta = torch.zeros_like(current_edge)
                     edge_features_raw = torch.cat([current_edge, edge_delta], dim=-1)
@@ -2390,30 +2202,18 @@ class GraphDiTPolicy(nn.Module):
             for unit in self.graph_dit_units:
                 # Pass joint_states_history so unit can do proper State-Action Self-Attention
                 # This ensures extract_features matches the training-time behavior
-                # Explicitly separate: in extract_features, action_embed is history only
-                history_embed_current = action_embed  # [batch, history_len, hidden_dim]
-                noisy_action_embed_current = torch.zeros(
-                    action_embed.shape[0], 0, self.cfg.hidden_dim,
-                    device=action_embed.device, dtype=action_embed.dtype
-                )  # [batch, 0, hidden_dim] - empty noisy_action for feature extraction
-                
                 noise_embed = unit(
-                    action_history_embed=history_embed_current,
-                    noisy_action_embed=noisy_action_embed_current,
-                    node_features=node_features,
-                    edge_features=edge_features_embed,
-                    timestep_embed=None,  # timestep_embed (not needed for feature extraction)
-                    joint_states_history=joint_states_history,  # CRITICAL: Pass joint_states_history!
+                    action_embed,
+                    node_features,
+                    edge_features_embed,
+                    None,  # timestep_embed (not needed for feature extraction)
+                    joint_states_history,  # CRITICAL: Pass joint_states_history!
                 )
-                # Extract history part from output (noisy_action part is empty)
-                if noise_embed.shape[1] > action_embed.shape[1]:
-                    action_embed = noise_embed[:, :action_embed.shape[1], :]
-                else:
-                    action_embed = (
-                        noise_embed.unsqueeze(1)
-                        if len(noise_embed.shape) == 2
-                        else noise_embed
-                    )
+                action_embed = (
+                    noise_embed.unsqueeze(1)
+                    if len(noise_embed.shape) == 2
+                    else noise_embed
+                )
 
             # Final graph embedding (aggregated scene understanding)
             # Handle various output shapes from graph_dit_units
@@ -2450,7 +2250,6 @@ class GraphDiTPolicy(nn.Module):
         joint_states_history: torch.Tensor | None = None,
         subtask_condition: torch.Tensor | None = None,
         num_diffusion_steps: int | None = None,
-        normalize: bool = True,
     ) -> torch.Tensor:
         """
         Get base action from DiT (for Residual RL).
@@ -2461,13 +2260,11 @@ class GraphDiTPolicy(nn.Module):
         Args:
             obs: Observations [batch_size, obs_dim]
             ... (same as predict)
-            normalize: If True, normalize inputs and denormalize outputs using stored stats.
-                      Set to False if inputs are already normalized.
 
         Returns:
             base_action: [batch_size, action_dim] - First action from predicted trajectory
         """
-        # Use predict with normalize parameter
+        # Use predict with defaults
         trajectory = self.predict(
             obs,
             action_history,
@@ -2477,7 +2274,6 @@ class GraphDiTPolicy(nn.Module):
             subtask_condition,
             num_diffusion_steps,
             deterministic=True,
-            normalize=normalize,  # ✅ Allow caller to control normalization
         )
 
         # Return first action of trajectory [batch, action_dim]
@@ -2495,7 +2291,6 @@ class GraphDiTPolicy(nn.Module):
         subtask_condition: torch.Tensor | None = None,
         num_diffusion_steps: int | None = None,
         deterministic: bool = True,
-        normalize: bool = True,
     ) -> torch.Tensor:
         """
         Predict action TRAJECTORY from observations (inference mode).
@@ -2516,27 +2311,13 @@ class GraphDiTPolicy(nn.Module):
                 - DDPM: default 50-100 steps
                 - Flow Matching: default 1-10 steps (much faster!)
             deterministic: If True, use deterministic prediction
-            normalize: If True, normalize inputs and denormalize outputs using stored stats.
-                      Set to False if inputs are already normalized.
 
         Returns:
             action_trajectory: Predicted actions [batch_size, pred_horizon, action_dim]
                               First step is t+1, last step is t+pred_horizon
         """
-        # Normalize inputs if requested
-        if normalize:
-            obs, action_history, ee_node_history, object_node_history, joint_states_history = (
-                self.normalize_inputs(
-                    obs,
-                    action_history,
-                    ee_node_history,
-                    object_node_history,
-                    joint_states_history,
-                )
-            )
-
         if self.cfg.mode == "flow_matching":
-            action_trajectory = self._flow_matching_predict(
+            return self._flow_matching_predict(
                 obs,
                 action_history,
                 ee_node_history,
@@ -2547,7 +2328,7 @@ class GraphDiTPolicy(nn.Module):
                 deterministic,
             )
         else:  # ddpm
-            action_trajectory = self._ddpm_predict(
+            return self._ddpm_predict(
                 obs,
                 action_history,
                 ee_node_history,
@@ -2557,12 +2338,6 @@ class GraphDiTPolicy(nn.Module):
                 num_diffusion_steps,
                 deterministic,
             )
-
-        # Denormalize output if we normalized inputs
-        if normalize:
-            action_trajectory = self.denormalize_action(action_trajectory)
-
-        return action_trajectory
 
     def _ddpm_predict(
         self,
@@ -2747,8 +2522,7 @@ class GraphDiTPolicy(nn.Module):
             joint_states_history: Joint states history [batch_size, hist_len, joint_dim] (optional)
             subtask_condition: Subtask condition (one-hot) [batch_size, num_subtasks] (optional)
             timesteps: Diffusion timesteps [batch_size] (optional, sampled if not provided)
-            mask: Valid mask [batch_size] or [batch_size, pred_horizon] (optional)
-                  True = valid, False = padding/invalid
+            mask: Boolean mask for valid samples [batch_size] (optional, True = valid, False = padding)
 
         Returns:
             dict: Loss dictionary with 'total_loss' and other losses
@@ -2794,10 +2568,7 @@ class GraphDiTPolicy(nn.Module):
         With Action Chunking:
         - actions: [batch, pred_horizon, action_dim] - target trajectory
         - noise_pred: [batch, pred_horizon, action_dim] - predicted noise for trajectory
-        - mask: Valid mask with shape:
-              - [batch]: per-sample mask (all horizon steps share same validity)
-              - [batch, pred_horizon]: per-horizon-step mask (for trajectory end handling)
-              True = valid, False = padding/invalid
+        - mask: [batch] - True for valid samples, False for padding (used in demo-level training)
         """
         batch_size = obs.shape[0]
         device = obs.device
@@ -2912,10 +2683,7 @@ class GraphDiTPolicy(nn.Module):
         With Action Chunking:
         - actions: [batch, pred_horizon, action_dim] - target trajectory
         - v_pred: [batch, pred_horizon, action_dim] - predicted velocity for trajectory
-        - mask: Valid mask with shape:
-              - [batch]: per-sample mask (all horizon steps share same validity)
-              - [batch, pred_horizon]: per-horizon-step mask (for trajectory end handling)
-              True = valid, False = padding/invalid
+        - mask: [batch] - True for valid samples, False for padding (used in demo-level training)
         """
         batch_size = obs.shape[0]
         device = obs.device
@@ -3020,123 +2788,6 @@ class GraphDiTPolicy(nn.Module):
 
         return result
 
-    def normalize_inputs(
-        self,
-        obs: torch.Tensor,
-        action_history: torch.Tensor | None = None,
-        ee_node_history: torch.Tensor | None = None,
-        object_node_history: torch.Tensor | None = None,
-        joint_states_history: torch.Tensor | None = None,
-    ) -> tuple:
-        """Normalize inputs using stored stats (for inference).
-
-        This ensures inference behavior matches training behavior.
-
-        Args:
-            obs: Observations [batch_size, obs_dim]
-            action_history: Action history [batch_size, history_length, action_dim] (optional)
-            ee_node_history: EE node history [batch_size, history_length, 7] (optional)
-            object_node_history: Object node history [batch_size, history_length, 7] (optional)
-            joint_states_history: Joint states history [batch_size, history_length, joint_dim] (optional)
-
-        Returns:
-            Tuple of normalized inputs in the same order as input arguments.
-        """
-        device = obs.device
-        dtype = obs.dtype
-
-        # Normalize observations
-        if self.obs_stats and "mean" in self.obs_stats:
-            obs_mean = torch.tensor(
-                self.obs_stats["mean"], device=device, dtype=dtype
-            ).squeeze(0)  # Remove keepdims dimension
-            obs_std = torch.tensor(
-                self.obs_stats["std"], device=device, dtype=dtype
-            ).squeeze(0)
-            obs = (obs - obs_mean) / obs_std
-
-        # Normalize action history
-        if (
-            action_history is not None
-            and self.action_stats
-            and "mean" in self.action_stats
-        ):
-            action_mean = torch.tensor(
-                self.action_stats["mean"], device=device, dtype=dtype
-            ).squeeze(0)
-            action_std = torch.tensor(
-                self.action_stats["std"], device=device, dtype=dtype
-            ).squeeze(0)
-            action_history = (action_history - action_mean) / action_std
-
-        # Normalize EE node history
-        if (
-            ee_node_history is not None
-            and self.node_stats
-            and "ee_mean" in self.node_stats
-        ):
-            ee_mean = torch.tensor(
-                self.node_stats["ee_mean"], device=device, dtype=dtype
-            ).squeeze(0)
-            ee_std = torch.tensor(
-                self.node_stats["ee_std"], device=device, dtype=dtype
-            ).squeeze(0)
-            ee_node_history = (ee_node_history - ee_mean) / ee_std
-
-        # Normalize Object node history
-        if (
-            object_node_history is not None
-            and self.node_stats
-            and "object_mean" in self.node_stats
-        ):
-            obj_mean = torch.tensor(
-                self.node_stats["object_mean"], device=device, dtype=dtype
-            ).squeeze(0)
-            obj_std = torch.tensor(
-                self.node_stats["object_std"], device=device, dtype=dtype
-            ).squeeze(0)
-            object_node_history = (object_node_history - obj_mean) / obj_std
-
-        # Normalize joint states history
-        if (
-            joint_states_history is not None
-            and self.joint_stats
-            and "mean" in self.joint_stats
-        ):
-            joint_mean = torch.tensor(
-                self.joint_stats["mean"], device=device, dtype=dtype
-            ).squeeze(0)
-            joint_std = torch.tensor(
-                self.joint_stats["std"], device=device, dtype=dtype
-            ).squeeze(0)
-            joint_states_history = (joint_states_history - joint_mean) / joint_std
-
-        return obs, action_history, ee_node_history, object_node_history, joint_states_history
-
-    def denormalize_action(self, action: torch.Tensor) -> torch.Tensor:
-        """Denormalize action output (for inference).
-
-        Converts normalized action back to original scale.
-
-        Args:
-            action: Normalized action [batch_size, pred_horizon, action_dim] or [batch_size, action_dim]
-
-        Returns:
-            Denormalized action in original scale.
-        """
-        if self.action_stats and "mean" in self.action_stats:
-            device = action.device
-            dtype = action.dtype
-            action_mean = torch.tensor(
-                self.action_stats["mean"], device=device, dtype=dtype
-            ).squeeze(0)
-            action_std = torch.tensor(
-                self.action_stats["std"], device=device, dtype=dtype
-            ).squeeze(0)
-            action = action * action_std + action_mean
-        
-        return action
-
     def save(self, path: str):
         """Save policy to file.
 
@@ -3147,10 +2798,6 @@ class GraphDiTPolicy(nn.Module):
             {
                 "policy_state_dict": self.state_dict(),
                 "cfg": self.cfg,
-                "obs_stats": self.obs_stats,
-                "action_stats": self.action_stats,
-                "node_stats": self.node_stats,
-                "joint_stats": self.joint_stats,
             },
             path,
         )
@@ -3165,7 +2812,7 @@ class GraphDiTPolicy(nn.Module):
             device: Device to load the model on.
 
         Returns:
-            GraphDiTPolicy: Loaded policy with normalization stats.
+            GraphDiTPolicy: Loaded policy.
         """
         # weights_only=False is needed for PyTorch 2.6+ to load custom config classes
         checkpoint = torch.load(path, map_location=device, weights_only=False)
@@ -3181,19 +2828,5 @@ class GraphDiTPolicy(nn.Module):
         policy.to(device)
         policy.eval()
 
-        # CRITICAL: Load normalization stats for inference
-        # These stats are required to normalize inputs and denormalize outputs
-        # during inference, matching the training behavior
-        policy.obs_stats = checkpoint.get("obs_stats", {})
-        policy.action_stats = checkpoint.get("action_stats", {})
-        policy.node_stats = checkpoint.get("node_stats", {})
-        policy.joint_stats = checkpoint.get("joint_stats", {})
-
         print(f"[GraphDiTPolicy] Loaded model from: {path}")
-        print(
-            f"[GraphDiTPolicy] Loaded normalization stats: "
-            f"obs={bool(policy.obs_stats)}, action={bool(policy.action_stats)}, "
-            f"node={bool(policy.node_stats)}, joint={bool(policy.joint_stats)}"
-        )
-
         return policy
