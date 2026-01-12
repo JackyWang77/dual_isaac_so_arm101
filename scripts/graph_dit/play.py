@@ -377,6 +377,131 @@ def play_graph_dit_policy(
     
     step_count = 0
     
+    # ==========================================================================
+    # 🔧 FIX: Helper function to process observation and extract features
+    # ==========================================================================
+    def process_obs_to_tensor(obs):
+        """Process observation dict/array to tensor format matching training.
+        
+        Returns:
+            obs_tensor: [num_envs, 32] - processed observation (target_object_position removed)
+        """
+        if isinstance(obs, dict):
+            # Check if there's a 'policy' key (Isaac Lab wrapper format)
+            if "policy" in obs:
+                obs_val = obs["policy"]
+                if isinstance(obs_val, torch.Tensor):
+                    obs_tensor_raw = obs_val.to(device)
+                elif isinstance(obs_val, np.ndarray):
+                    obs_tensor_raw = torch.from_numpy(obs_val).to(device)
+                else:
+                    obs_tensor_raw = torch.tensor(obs_val, device=device)
+                
+                # Ensure correct shape [num_envs, obs_dim]
+                if len(obs_tensor_raw.shape) == 1:
+                    obs_tensor_raw = obs_tensor_raw.unsqueeze(0)
+                elif len(obs_tensor_raw.shape) > 2:
+                    obs_tensor_raw = obs_tensor_raw.view(obs_tensor_raw.shape[0], -1)
+                
+                # Remove target_object_position if present (39 -> 32 dims)
+                if obs_tensor_raw.shape[1] == 39:
+                    obs_tensor = torch.cat([
+                        obs_tensor_raw[:, :26],  # Before target_object_position
+                        obs_tensor_raw[:, 33:],  # After target_object_position
+                    ], dim=1)
+                elif obs_tensor_raw.shape[1] == 32:
+                    obs_tensor = obs_tensor_raw
+                else:
+                    print(f"[Play] Warning: Unexpected obs dim {obs_tensor_raw.shape[1]}, expected 32 or 39")
+                    obs_tensor = obs_tensor_raw
+            else:
+                # Concatenate dictionary observations
+                obs_keys_order = [
+                    "joint_pos", "joint_vel", "object_position", "object_orientation",
+                    "ee_position", "ee_orientation", "actions",
+                ]
+                obs_list = []
+                for key in obs_keys_order:
+                    if key in obs:
+                        obs_val = obs[key]
+                        if isinstance(obs_val, torch.Tensor):
+                            obs_list.append(obs_val.flatten(start_dim=1))
+                        elif isinstance(obs_val, np.ndarray):
+                            obs_list.append(torch.from_numpy(obs_val).flatten(start_dim=1))
+                        else:
+                            obs_list.append(torch.tensor(obs_val).flatten(start_dim=1))
+                obs_tensor = torch.cat(obs_list, dim=1).to(device) if obs_list else None
+        else:
+            obs_tensor = torch.from_numpy(obs).to(device) if isinstance(obs, np.ndarray) else obs.to(device)
+            if len(obs_tensor.shape) == 1:
+                obs_tensor = obs_tensor.unsqueeze(0)
+            elif len(obs_tensor.shape) > 2:
+                obs_tensor = obs_tensor.view(obs_tensor.shape[0], -1)
+        return obs_tensor
+    
+    # ==========================================================================
+    # 🔧 FIX: Helper function to initialize buffers with first observation
+    # ==========================================================================
+    def initialize_buffers_from_obs(obs_tensor, env_ids=None):
+        """Initialize history buffers with first observation (matches training behavior).
+        
+        Training pads history with first action/node/joint, NOT zeros.
+        This function ensures inference matches training.
+        
+        Args:
+            obs_tensor: [num_envs, obs_dim] or [len(env_ids), obs_dim]
+            env_ids: If provided, only initialize these environments
+        """
+        # Extract first action from obs (last 6 dims: actions)
+        # obs layout: joint_pos[0:6], joint_vel[6:12], obj_pos[12:15], obj_ori[15:19],
+        #             ee_pos[19:22], ee_ori[22:26], actions[26:32]
+        first_action = obs_tensor[:, 26:26+action_dim].clone()  # [batch, action_dim]
+        
+        # Extract first node features
+        first_ee_node = torch.cat([
+            obs_tensor[:, 19:22],  # ee_position
+            obs_tensor[:, 22:26],  # ee_orientation
+        ], dim=-1)  # [batch, 7]
+        first_object_node = torch.cat([
+            obs_tensor[:, 12:15],  # object_position
+            obs_tensor[:, 15:19],  # object_orientation
+        ], dim=-1)  # [batch, 7]
+        
+        # Extract first joint states
+        if joint_dim is not None:
+            first_joint_state = torch.cat([
+                obs_tensor[:, 0:6],   # joint_pos
+                obs_tensor[:, 6:12],  # joint_vel
+            ], dim=-1)  # [batch, joint_dim]
+        
+        if env_ids is None:
+            # Initialize all environments
+            action_history_buffers.initialize_with(first_action)
+            node_history_buffers.initialize_with(first_ee_node, first_object_node)
+            if joint_dim is not None and joint_state_history_buffers is not None:
+                joint_state_history_buffers.initialize_with(first_joint_state)
+            print(f"[Play] 🔧 Initialized all history buffers with first observation (matches training)")
+        else:
+            # Initialize only specified environments (for per-env reset)
+            # Note: Buffer classes don't support per-env initialize_with, so we manually set
+            for i, env_id in enumerate(env_ids):
+                env_id_int = env_id.item() if hasattr(env_id, 'item') else env_id
+                # Fill entire history with first value (matches training padding)
+                action_history_buffers.buffer[env_id_int] = first_action[i].unsqueeze(0).expand(action_history_length, -1).clone()
+                action_history_buffers.write_idx[env_id_int] = 0
+                action_history_buffers.filled[env_id_int] = False
+                
+                node_history_buffers.ee_buffer[env_id_int] = first_ee_node[i].unsqueeze(0).expand(action_history_length, -1).clone()
+                node_history_buffers.object_buffer[env_id_int] = first_object_node[i].unsqueeze(0).expand(action_history_length, -1).clone()
+                node_history_buffers.write_idx[env_id_int] = 0
+                node_history_buffers.filled[env_id_int] = False
+                
+                if joint_dim is not None and joint_state_history_buffers is not None:
+                    joint_state_history_buffers.buffer[env_id_int] = first_joint_state[i].unsqueeze(0).expand(action_history_length, -1).clone()
+                    joint_state_history_buffers.write_idx[env_id_int] = 0
+                    joint_state_history_buffers.filled[env_id_int] = False
+            print(f"[Play] 🔧 Re-initialized history buffers for {len(env_ids)} environments with new first observation")
+    
     def _extract_node_features_from_obs(obs_tensor):
         """Extract EE and Object node features from concatenated obs.
         
@@ -409,115 +534,20 @@ def play_graph_dit_policy(
         joint_vel = obs_tensor[:, 6:12]
         return torch.cat([joint_pos, joint_vel], dim=-1)
     
+    # ==========================================================================
+    # 🔧 FIX: Process initial observation and initialize buffers BEFORE main loop
+    # ==========================================================================
+    # Process initial observation to initialize buffers (matches training behavior)
+    initial_obs_tensor = process_obs_to_tensor(obs)
+    
+    # 🔧 FIX: Initialize buffers with first observation (NOT zeros!)
+    # This matches training behavior where history is padded with first action
+    initialize_buffers_from_obs(initial_obs_tensor)
+    
     with torch.inference_mode():
         while simulation_app.is_running() and episode_count < num_episodes:
-            # Process observations
-            if isinstance(obs, dict):
-                # Check if there's a 'policy' key (Isaac Lab wrapper format)
-                if "policy" in obs:
-                    # Direct policy observations (already concatenated)
-                    # But it might still contain target_object_position (39 dims)
-                    # We need to extract only the keys we used during training (32 dims)
-                    obs_val = obs["policy"]
-                    if isinstance(obs_val, torch.Tensor):
-                        obs_tensor_raw = obs_val.to(device)
-                    elif isinstance(obs_val, np.ndarray):
-                        obs_tensor_raw = torch.from_numpy(obs_val).to(device)
-                    else:
-                        obs_tensor_raw = torch.tensor(obs_val, device=device)
-                    
-                    # Ensure correct shape [num_envs, obs_dim]
-                    if len(obs_tensor_raw.shape) == 1:
-                        obs_tensor_raw = obs_tensor_raw.unsqueeze(0)
-                    elif len(obs_tensor_raw.shape) > 2:
-                        obs_tensor_raw = obs_tensor_raw.view(
-                            obs_tensor_raw.shape[0], -1
-                        )
-                    
-                    # Check if dimensions match training (32) or raw env (39 with target_object_position)
-                    # If it's 39, we need to remove target_object_position (7 dims: positions 3 + orientations 4)
-                    # Training order: joint_pos(6), joint_vel(6), object_position(3), object_orientation(4),
-                    #                  ee_position(3), ee_orientation(4), actions(6) = 32 dims
-                    # Raw env order:   joint_pos(6), joint_vel(6), object_position(3), object_orientation(4),
-                    #                  ee_position(3), ee_orientation(4), target_object_position(7), actions(6) = 39 dims
-                    if obs_tensor_raw.shape[1] == 39:
-                        # Remove target_object_position (indices 26:33, which is after ee_orientation and before actions)
-                        # Keep: [0:26] (joint_pos, joint_vel, object_pos, object_ori, ee_pos, ee_ori)
-                        # and [33:39] (actions)
-                        obs_tensor = torch.cat(
-                            [
-                                obs_tensor_raw[
-                                    :, :26
-                                ],  # Everything before target_object_position
-                                obs_tensor_raw[
-                                    :, 33:
-                                ],  # Everything after target_object_position (actions)
-                            ],
-                            dim=1,
-                        )  # Should be 32 dims
-                    elif obs_tensor_raw.shape[1] == 32:
-                        # Already correct (training format)
-                        obs_tensor = obs_tensor_raw
-                    else:
-                        # Unknown dimension, use as is (might cause issues)
-                        print(
-                            f"[Play] Warning: Unexpected obs dim {obs_tensor_raw.shape[1]}, expected 32 or 39"
-                        )
-                        obs_tensor = obs_tensor_raw
-                else:
-                    # Concatenate dictionary observations in the correct order
-                    # Skip target_object_position even if it exists (redundant with object_position + object_orientation)
-                    obs_keys_order = [
-                        "joint_pos",
-                        "joint_vel",
-                        "object_position",
-                        "object_orientation",
-                        "ee_position",
-                        "ee_orientation",
-                        # "target_object_position",  # Skip: redundant with object_position + object_orientation
-                        "actions",  # last action (if available)
-                    ]
-                    obs_list = []
-                    for key in obs_keys_order:
-                        if key in obs:
-                            obs_val = obs[key]
-                            if isinstance(obs_val, torch.Tensor):
-                                obs_list.append(obs_val.flatten(start_dim=1))
-                            elif isinstance(obs_val, np.ndarray):
-                                obs_list.append(
-                                    torch.from_numpy(obs_val).flatten(start_dim=1)
-                                )
-                            else:
-                                obs_list.append(
-                                    torch.tensor(obs_val).flatten(start_dim=1)
-                                )
-                    if obs_list:
-                        obs_tensor = torch.cat(obs_list, dim=1).to(device)
-                    else:
-                        # Fallback: use all dict values except target_object_position
-                        obs_list = []
-                        for key, val in obs.items():
-                            if key == "target_object_position":
-                                continue  # Skip redundant command
-                            if isinstance(val, torch.Tensor):
-                                obs_list.append(val.flatten(start_dim=1))
-                            elif isinstance(val, np.ndarray):
-                                obs_list.append(
-                                    torch.from_numpy(val).flatten(start_dim=1)
-                                )
-                            else:
-                                obs_list.append(torch.tensor(val).flatten(start_dim=1))
-                        obs_tensor = torch.cat(obs_list, dim=1).to(device)
-            else:
-                obs_tensor = (
-                    torch.from_numpy(obs).to(device)
-                    if isinstance(obs, np.ndarray)
-                    else obs
-                )
-                if len(obs_tensor.shape) == 1:
-                    obs_tensor = obs_tensor.unsqueeze(0)
-                elif len(obs_tensor.shape) > 2:
-                    obs_tensor = obs_tensor.view(obs_tensor.shape[0], -1)
+            # Process observations (use helper function)
+            obs_tensor = process_obs_to_tensor(obs)
             
             # CRITICAL: No need to manually normalize obs - policy.predict(normalize=True) will handle it
             # Just ensure dimensions match (obs_tensor should be 32 dims after removing target_object_position)
@@ -696,9 +726,8 @@ def play_graph_dit_policy(
             if done.any():
                 done_env_ids = torch.where(done)[0]  # Get all done environment IDs
                 
-                # Reset history buffers for done environments
-                # Buffer classes handle reset automatically (zeros buffers and resets indices)
-                # Buffers will be re-initialized on next update() call with first observation
+                # 🔧 FIX: Reset history buffers for done environments
+                # First reset (clear to zeros)
                 action_history_buffers.reset(env_ids=done_env_ids)
                 node_history_buffers.reset(env_ids=done_env_ids)
                 if (
@@ -707,9 +736,17 @@ def play_graph_dit_policy(
                 ):
                     joint_state_history_buffers.reset(env_ids=done_env_ids)
                 
+                # 🔧 FIX: Re-initialize with new observation (matches training behavior!)
+                # Get the new observation for done environments (obs is already updated after env.step)
+                # Need to process the new obs first (obs is the new observation after env.step)
+                new_obs_tensor = process_obs_to_tensor(obs)  # Process new obs after env.step
+                done_obs_tensor = new_obs_tensor[done_env_ids]  # [num_done_envs, obs_dim]
+                initialize_buffers_from_obs(done_obs_tensor, env_ids=done_env_ids)
+                
                 # Reset action smoothing state for done environments
                 for env_id in done_env_ids:
-                    last_actions[env_id] = None
+                    env_id_int = env_id.item() if hasattr(env_id, 'item') else env_id
+                    last_actions[env_id_int] = None
 
                 for i in range(num_envs):
                     if done[i]:
