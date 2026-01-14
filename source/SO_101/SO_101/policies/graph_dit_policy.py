@@ -559,11 +559,10 @@ class GraphDiTPolicyCfg:
     noise_schedule: str = "cosine"
     """Noise schedule: 'cosine', 'linear'."""
 
-    mode: str = "ddpm"
-    """Training/inference mode: 'ddpm' (Denoising Diffusion Probabilistic Model) or 'flow_matching'.
+    mode: str = "flow_matching"
+    """Training/inference mode: 'flow_matching' (Rectified Flow).
 
-    - 'ddpm': Standard diffusion process, requires 50-100 steps for inference
-    - 'flow_matching': Flow matching (Rectified Flow), requires 1-10 steps for inference (much faster)
+    Flow matching requires only 1-10 steps for inference (fast).
     """
 
     num_subtasks: int = 2
@@ -1283,7 +1282,7 @@ class NoiseScheduler:
         else:
             raise ValueError(f"Unknown schedule: {schedule}")
 
-        # CRITICAL FIX: Correct DDPM formula
+        # Compute alpha values for noise schedule
         # alpha_t = alpha_bar_t / alpha_bar_{t-1}
         # For t=0, alpha_0 = alpha_bar_0 (since alpha_bar_{-1} = 1.0)
         # For t>0, alpha_t = alpha_bar_t / alpha_bar_{t-1}
@@ -1334,7 +1333,7 @@ class NoiseScheduler:
     def get_alpha_bar_t(self, t: torch.Tensor):
         """Get alpha_bar_t (alphas_cumprod) for timestep t.
 
-        CRITICAL FIX: Clamp to prevent division by near-zero values in DDPM prediction.
+        Clamp to prevent division by near-zero values.
         """
         alpha_bar = self.alphas_cumprod.to(t.device)[t]
         # Clamp to prevent numerical explosion when alpha_bar is very close to 0
@@ -1343,7 +1342,7 @@ class NoiseScheduler:
     def get_alpha_bar_t_prev(self, t: torch.Tensor):
         """Get alpha_bar_t_prev for timestep t.
 
-        CRITICAL FIX: Clamp to prevent division by near-zero values in DDPM prediction.
+        Clamp to prevent division by near-zero values.
         """
         alpha_bar_prev = self.alphas_cumprod_prev.to(t.device)[t]
         # Clamp to prevent numerical explosion when alpha_bar_prev is very close to 0
@@ -2298,128 +2297,23 @@ class GraphDiTPolicy(nn.Module):
             object_node_history: Object node history [batch_size, history_length, 7] (optional)
             joint_states_history: Joint states history [batch_size, history_length, joint_dim] (optional)
             subtask_condition: Subtask condition (one-hot) [batch_size, num_subtasks] (optional)
-            num_diffusion_steps: Number of steps for inference
-                - DDPM: default 50-100 steps
-                - Flow Matching: default 1-10 steps (much faster!)
+            num_diffusion_steps: Number of steps for inference (default 1-10 for Flow Matching)
             deterministic: If True, use deterministic prediction
 
         Returns:
             action_trajectory: Predicted actions [batch_size, pred_horizon, action_dim]
                               First step is t+1, last step is t+pred_horizon
         """
-        if self.cfg.mode == "flow_matching":
-            return self._flow_matching_predict(
-                obs,
-                action_history,
-                ee_node_history,
-                object_node_history,
-                joint_states_history,
-                subtask_condition,
-                num_diffusion_steps,
-                deterministic,
-            )
-        else:  # ddpm
-            return self._ddpm_predict(
-                obs,
-                action_history,
-                ee_node_history,
-                object_node_history,
-                joint_states_history,
-                subtask_condition,
-                num_diffusion_steps,
-                deterministic,
-            )
-
-    def _ddpm_predict(
-        self,
-        obs: torch.Tensor,
-        action_history: torch.Tensor | None,
-        ee_node_history: torch.Tensor | None,
-        object_node_history: torch.Tensor | None,
-        joint_states_history: torch.Tensor | None,
-        subtask_condition: torch.Tensor | None,
-        num_diffusion_steps: int | None,
-        deterministic: bool,
-    ) -> torch.Tensor:
-        """DDPM prediction: iterative denoising for action trajectory.
-
-        With Action Chunking, returns [batch, pred_horizon, action_dim].
-        """
-        self.eval()
-        num_steps = (
-            num_diffusion_steps
-            if num_diffusion_steps is not None
-            else self.cfg.diffusion_steps
+        return self._flow_matching_predict(
+            obs,
+            action_history,
+            ee_node_history,
+            object_node_history,
+            joint_states_history,
+            subtask_condition,
+            num_diffusion_steps,
+            deterministic,
         )
-
-        with torch.no_grad():
-            batch_size = obs.shape[0]
-            device = obs.device
-            pred_horizon = self.pred_horizon
-
-            # CRITICAL FIX: Resample timesteps from T-1 to 0 for proper sparse inference
-            training_steps = self.cfg.diffusion_steps
-            if num_steps < training_steps:
-                timestep_schedule = (
-                    torch.linspace(
-                        training_steps - 1, 0, steps=num_steps, device=device
-                    )
-                    .round()
-                    .long()
-                )
-            else:
-                timestep_schedule = torch.arange(
-                    training_steps - 1, -1, -1, device=device, dtype=torch.long
-                )
-
-            # Initialize with random noise TRAJECTORY [batch, pred_horizon, action_dim]
-            action_t = torch.randn(
-                batch_size, pred_horizon, self.cfg.action_dim, device=device
-            )
-
-            # Iterative denoising
-            for step in range(num_steps):
-                t = timestep_schedule[step].expand(batch_size)  # [batch_size]
-
-                # Predict noise for entire trajectory
-                noise_pred = self.forward(
-                    obs,
-                    noisy_action=action_t,  # [batch, pred_horizon, action_dim]
-                    action_history=action_history,
-                    ee_node_history=ee_node_history,
-                    object_node_history=object_node_history,
-                    joint_states_history=joint_states_history,
-                    subtask_condition=subtask_condition,
-                    timesteps=t,
-                )  # [batch, pred_horizon, action_dim]
-
-                # DDIM-style deterministic jump for sparse timestep schedule
-                # Reshape alpha for trajectory broadcasting: [batch, 1, 1]
-                alpha_bar_t = self.noise_scheduler.get_alpha_bar_t(t).view(-1, 1, 1)
-
-                # Predict x_0 (clean trajectory)
-                pred_x0 = (
-                    action_t - torch.sqrt(1.0 - alpha_bar_t) * noise_pred
-                ) / torch.sqrt(alpha_bar_t)
-
-                if step < num_steps - 1:
-                    t_next = timestep_schedule[step + 1].expand(batch_size)
-                    alpha_bar_next = self.noise_scheduler.get_alpha_bar_t(t_next).view(
-                        -1, 1, 1
-                    )
-
-                    # DDIM-style deterministic jump
-                    action_t = (
-                        torch.sqrt(alpha_bar_next) * pred_x0
-                        + torch.sqrt(1.0 - alpha_bar_next) * noise_pred
-                    )
-                else:
-                    action_t = pred_x0
-
-            if not deterministic:
-                action_t = action_t + 0.05 * torch.randn_like(action_t)
-
-            return action_t  # [batch, pred_horizon, action_dim]
 
     def _flow_matching_predict(
         self,
@@ -2435,10 +2329,10 @@ class GraphDiTPolicy(nn.Module):
         """Flow Matching prediction: ODE solving for action trajectory.
 
         With Action Chunking, returns [batch, pred_horizon, action_dim].
-        Flow Matching is MUCH faster than DDPM (2-4 steps vs 50-100).
+        Flow Matching requires only 2-10 steps for fast inference.
         """
         self.eval()
-        # Flow Matching typically needs fewer steps (1-10) vs DDPM (50-100)
+        # Flow Matching typically needs 1-10 steps
         num_steps = (
             num_diffusion_steps
             if num_diffusion_steps is not None
@@ -2502,7 +2396,7 @@ class GraphDiTPolicy(nn.Module):
         mask: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         """
-        Compute loss for training (DDPM or Flow Matching).
+        Compute loss for training (Flow Matching).
 
         Args:
             obs: Observations [batch_size, obs_dim]
@@ -2512,151 +2406,22 @@ class GraphDiTPolicy(nn.Module):
             object_node_history: Object node history [batch_size, hist_len, 7] (optional)
             joint_states_history: Joint states history [batch_size, hist_len, joint_dim] (optional)
             subtask_condition: Subtask condition (one-hot) [batch_size, num_subtasks] (optional)
-            timesteps: Diffusion timesteps [batch_size] (optional, sampled if not provided)
+            timesteps: Diffusion timesteps [batch_size] (optional, not used in flow matching)
             mask: Boolean mask for valid samples [batch_size] (optional, True = valid, False = padding)
 
         Returns:
             dict: Loss dictionary with 'total_loss' and other losses
         """
-        if self.cfg.mode == "flow_matching":
-            return self._flow_matching_loss(
-                obs,
-                actions,
-                action_history,
-                ee_node_history,
-                object_node_history,
-                joint_states_history,
-                subtask_condition,
-                mask,
-            )
-        else:  # ddpm
-            return self._ddpm_loss(
-                obs,
-                actions,
-                action_history,
-                ee_node_history,
-                object_node_history,
-                joint_states_history,
-                subtask_condition,
-                timesteps,
-                mask,
-            )
-
-    def _ddpm_loss(
-        self,
-        obs: torch.Tensor,
-        actions: torch.Tensor,
-        action_history: torch.Tensor | None,
-        ee_node_history: torch.Tensor | None,
-        object_node_history: torch.Tensor | None,
-        joint_states_history: torch.Tensor | None,
-        subtask_condition: torch.Tensor | None,
-        timesteps: torch.Tensor | None,
-        mask: torch.Tensor | None = None,
-    ) -> dict[str, torch.Tensor]:
-        """DDPM loss: predict noise for action trajectory.
-
-        With Action Chunking:
-        - actions: [batch, pred_horizon, action_dim] - target trajectory
-        - noise_pred: [batch, pred_horizon, action_dim] - predicted noise for trajectory
-        - mask: [batch] - True for valid samples, False for padding (used in demo-level training)
-        """
-        batch_size = obs.shape[0]
-        device = obs.device
-
-        # Ensure actions is trajectory format [batch, pred_horizon, action_dim]
-        if len(actions.shape) == 2:
-            # Backward compatibility: single action -> repeat for trajectory
-            actions = actions.unsqueeze(1).expand(-1, self.pred_horizon, -1)
-
-        pred_horizon = actions.shape[1]  # Get actual horizon from actions
-
-        # Sample timesteps if not provided (same timestep for all positions in trajectory)
-        if timesteps is None:
-            timesteps = torch.randint(
-                0, self.cfg.diffusion_steps, (batch_size,), device=device
-            )
-
-        # Sample noise (same shape as actions trajectory)
-        noise = torch.randn_like(actions)  # [batch, pred_horizon, action_dim]
-
-        # Add noise to actions trajectory
-        # NoiseScheduler.add_noise handles trajectory shape automatically
-        noisy_actions = self.noise_scheduler.add_noise(
-            actions, noise, timesteps
-        )  # [batch, pred_horizon, action_dim]
-
-        # Predict noise for entire trajectory
-        noise_pred = self.forward(
+        return self._flow_matching_loss(
             obs,
-            noisy_action=noisy_actions,
-            action_history=action_history,
-            ee_node_history=ee_node_history,
-            object_node_history=object_node_history,
-            joint_states_history=joint_states_history,
-            subtask_condition=subtask_condition,
-            timesteps=timesteps,
-        )  # [batch, pred_horizon, action_dim]
-
-        # Compute loss (MSE between predicted and actual noise for entire trajectory)
-        # CRITICAL: Apply mask to exclude padding timesteps from loss
-        # CRITICAL: Handle "half-cut" data where mask is [batch, pred_horizon] instead of [batch]
-        if mask is not None:
-            # Handle both mask shapes:
-            # - [batch] -> old format (whole sample mask)
-            # - [batch, pred_horizon] -> new format (per-horizon-step mask for "half-cut" data)
-            if len(mask.shape) == 1:
-                # Old format: [batch] -> [batch, 1, 1] for broadcasting
-                mask_expanded = mask.float().view(-1, 1, 1)  # [batch, 1, 1]
-                # Count valid elements: pred_horizon * action_dim per valid sample
-                total_valid_elements = (
-                    (mask.float() * pred_horizon * actions.shape[-1]).sum().clamp(min=1)
-                )
-            else:
-                # New format: [batch, pred_horizon] -> [batch, pred_horizon, 1] for broadcasting
-                mask_expanded = mask.float().unsqueeze(-1)  # [batch, pred_horizon, 1]
-                # Count valid elements: sum over all valid horizon steps, then multiply by action_dim
-                total_valid_elements = (mask.float().sum() * actions.shape[-1]).clamp(
-                    min=1
-                )
-
-            # Compute per-element loss
-            per_element_loss = F.mse_loss(
-                noise_pred, noise, reduction="none"
-            )  # [batch, pred_horizon, action_dim]
-            # CRITICAL FIX: Zero out padding timesteps BEFORE averaging
-            # This prevents padding from contributing to loss at all (handles both demo-level and horizon-level padding)
-            masked_loss = (
-                per_element_loss * mask_expanded
-            )  # [batch, pred_horizon, action_dim]
-            # Sum over horizon and action_dim for each sample (padding samples/steps will be 0)
-            per_sample_sum = masked_loss.sum(dim=(1, 2))  # [batch]
-            # Average over all valid elements (not samples!)
-            mse_loss = per_sample_sum.sum() / total_valid_elements
-            total_loss = mse_loss
-        else:
-            # No mask: compute standard MSE loss
-            mse_loss = F.mse_loss(noise_pred, noise)  # Average over all dimensions
-            total_loss = mse_loss
-
-        result = {
-            "total_loss": total_loss,
-            "mse_loss": mse_loss,
-        }
-
-        # Add debug info if in debug mode (can be enabled via environment variable)
-        import os
-
-        if os.getenv("DEBUG_LOSS", "False").lower() == "true":
-            result["debug"] = {
-                "noise_pred": noise_pred.detach(),
-                "noise": noise.detach(),
-                "actions": actions.detach(),
-                "noisy_actions": noisy_actions.detach(),
-                "timesteps": timesteps.detach() if timesteps is not None else None,
-            }
-
-        return result
+            actions,
+            action_history,
+            ee_node_history,
+            object_node_history,
+            joint_states_history,
+            subtask_condition,
+            mask,
+        )
 
     def _flow_matching_loss(
         self,

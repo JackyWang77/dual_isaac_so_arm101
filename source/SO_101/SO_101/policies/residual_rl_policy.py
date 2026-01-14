@@ -60,7 +60,6 @@ from dataclasses import MISSING
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from isaaclab.utils import configclass
 
 from .graph_dit_policy import GraphDiTPolicy, GraphDiTPolicyCfg
@@ -93,8 +92,8 @@ class ResidualRLPolicyCfg:
     """Activation function for value network."""
 
     # Input dimensions
-    robot_state_dim: int = 12
-    """Robot state dimension (joint_pos + joint_vel, e.g., 6+6=12)."""
+    robot_state_dim: int = 6
+    """Robot state dimension (joint_pos only, e.g., 6 joints)."""
 
     value_obs_dim: int | None = None
     """Input dimension for value network. If None, computed automatically."""
@@ -125,6 +124,36 @@ class ResidualRLPolicyCfg:
     # Freeze settings
     freeze_backbone: bool = True
     """Whether to freeze the Graph DiT backbone (recommended)."""
+
+    # Joint-only residual (gripper excluded)
+    joint_only_residual: bool = True
+    """Whether to apply residual only to joints (exclude gripper).
+
+    When True:
+    - Actor outputs residual for joints only (dim = action_dim - 1)
+    - Gripper action is directly from DiT (no residual)
+    - This is recommended because gripper is binary (open/close)
+    """
+
+    gripper_dim: int = 1
+    """Dimension of gripper action (default: 1 for binary gripper)."""
+
+    # EMA smoothing for base action (DiT output)
+    use_ema_smoothing: bool = True
+    """Whether to apply EMA smoothing to DiT's base action before adding residual.
+
+    Flow: DiT → EMA Smooth → + Residual → Action
+    This smooths out DiT's jitter while allowing PPO to make precise corrections.
+    """
+
+    ema_alpha: float = 0.3
+    """EMA alpha (higher = faster response, lower = smoother).
+
+    smoothed = alpha * new + (1 - alpha) * old
+    - 0.1: Very smooth, slow response
+    - 0.3: Balanced (recommended)
+    - 0.5: Faster response, less smooth
+    """
 
 
 class ResidualRLPolicy(nn.Module):
@@ -220,6 +249,24 @@ class ResidualRLPolicy(nn.Module):
         # PPO Input = [Robot_State, Graph_Feature, Base_Action_t] → Residual_t
         # ============================================================
         action_dim = self.graph_dit_cfg.action_dim
+        self.action_dim = action_dim
+
+        # ============================================================
+        # CRITICAL: Joint-only residual (gripper excluded)
+        # ============================================================
+        if cfg.joint_only_residual:
+            self.joint_dim = action_dim - cfg.gripper_dim  # e.g., 6 - 1 = 5 joints
+            self.gripper_dim = cfg.gripper_dim
+            residual_output_dim = self.joint_dim  # Actor only outputs joints residual
+            print(
+                f"[ResidualRLPolicy] Joint-only residual: joint_dim={self.joint_dim}, "
+                f"gripper_dim={self.gripper_dim} (gripper uses DiT directly, no residual)"
+            )
+        else:
+            self.joint_dim = action_dim
+            self.gripper_dim = 0
+            residual_output_dim = action_dim  # Actor outputs full residual
+            print(f"[ResidualRLPolicy] Full residual: action_dim={action_dim}")
 
         # Add base_action_t dimension to PPO input
         ppo_input_dim_with_base = ppo_input_dim + action_dim
@@ -237,14 +284,14 @@ class ResidualRLPolicy(nn.Module):
             actor_layers.append(activation_fn())
             input_dim = hidden_dim_layer
         actor_layers.append(
-            nn.Linear(input_dim, action_dim)
-        )  # Output: single step residual
+            nn.Linear(input_dim, residual_output_dim)
+        )  # Output: joints-only residual (or full if joint_only_residual=False)
 
         self.residual_actor = nn.Sequential(*actor_layers)
 
-        # Log std for action noise (learnable) - single action
+        # Log std for action noise (learnable) - joints only
         self.log_std = nn.Parameter(
-            torch.ones(action_dim) * math.log(cfg.init_noise_std), requires_grad=True
+            torch.ones(residual_output_dim) * math.log(cfg.init_noise_std), requires_grad=True
         )
 
         # Residual scale (learnable, starts small)
@@ -510,10 +557,9 @@ class ResidualRLPolicy(nn.Module):
         action_dim = self.graph_dit_cfg.action_dim
         history_len = self.action_history_length
 
-        # Get joint_dim from config or default to robot_state_dim
-        joint_dim = (
-            getattr(self.graph_dit_cfg, "joint_dim", None) or self.cfg.robot_state_dim
-        )
+        # joint_states_history stores robot state (joint_pos)
+        # This matches what _update_history_buffers extracts from obs
+        robot_state_dim = self.cfg.robot_state_dim  # 6 = joint_pos only
 
         # Initialize with zeros
         self._action_history = torch.zeros(
@@ -525,9 +571,9 @@ class ResidualRLPolicy(nn.Module):
         self._object_node_history = torch.zeros(
             num_envs, history_len, 7, device=device, dtype=torch.float32
         )
-        # CRITICAL: Add joint_states_history for State-Action Self-Attention in GraphDiTUnit
+        # CRITICAL: joint_states_history stores full robot_state (joint_pos + joint_vel)
         self._joint_states_history = torch.zeros(
-            num_envs, history_len, joint_dim, device=device, dtype=torch.float32
+            num_envs, history_len, robot_state_dim, device=device, dtype=torch.float32
         )
         self._last_action = torch.zeros(
             num_envs, action_dim, device=device, dtype=torch.float32
@@ -542,9 +588,20 @@ class ResidualRLPolicy(nn.Module):
         # Start with exec_horizon so first step triggers DiT prediction
         self._buffer_indices.fill_(self.exec_horizon)
 
+        # EMA smoothing state for base action (only for joints)
+        if self.cfg.use_ema_smoothing:
+            self._ema_smoothed_joints = torch.zeros(
+                num_envs, self.joint_dim, device=device, dtype=torch.float32
+            )
+            self._ema_initialized = torch.zeros(num_envs, dtype=torch.bool, device=device)
+            print(
+                f"[ResidualRLPolicy] Initialized EMA smoother: alpha={self.cfg.ema_alpha}, "
+                f"joint_dim={self.joint_dim} (gripper excluded from smoothing)"
+            )
+
         print(
             f"[ResidualRLPolicy] Initialized history buffers: num_envs={num_envs}, "
-            f"history_len={history_len}, action_dim={action_dim}, joint_dim={joint_dim}"
+            f"history_len={history_len}, action_dim={action_dim}, robot_state_dim={robot_state_dim}"
         )
         print(
             f"[ResidualRLPolicy] Initialized BASE action buffer: exec_horizon={self.exec_horizon} "
@@ -569,6 +626,56 @@ class ResidualRLPolicy(nn.Module):
         std = self.norm_action_std.to(action.device)
 
         return (action - mean) / std
+
+    def _apply_ema_smoothing(self, base_action: torch.Tensor) -> torch.Tensor:
+        """Apply EMA smoothing to DiT's base action (joints only, gripper excluded).
+
+        Flow: DiT → EMA Smooth → (then add residual)
+
+        Args:
+            base_action: [batch, action_dim] - DiT's base action (denormalized)
+
+        Returns:
+            Smoothed base action [batch, action_dim]
+            - Joints: EMA smoothed
+            - Gripper: unchanged (binary, needs instant response)
+        """
+        if not self.cfg.use_ema_smoothing:
+            return base_action
+
+        batch_size = base_action.shape[0]
+        device = base_action.device
+
+        # Initialize EMA state if needed
+        if not hasattr(self, "_ema_smoothed_joints") or self._ema_smoothed_joints is None:
+            self._ema_smoothed_joints = torch.zeros(
+                batch_size, self.joint_dim, device=device, dtype=torch.float32
+            )
+            self._ema_initialized = torch.zeros(batch_size, dtype=torch.bool, device=device)
+
+        # Extract joints and gripper
+        base_joints = base_action[:, :self.joint_dim]  # [batch, joint_dim]
+
+        # EMA update for joints
+        alpha = self.cfg.ema_alpha
+
+        # For uninitialized envs, use current value directly
+        uninitialized = ~self._ema_initialized
+        if uninitialized.any():
+            self._ema_smoothed_joints[uninitialized] = base_joints[uninitialized]
+            self._ema_initialized[uninitialized] = True
+
+        # EMA: smoothed = alpha * new + (1 - alpha) * old
+        self._ema_smoothed_joints = alpha * base_joints + (1 - alpha) * self._ema_smoothed_joints
+
+        # Combine smoothed joints with original gripper
+        if self.cfg.joint_only_residual and self.gripper_dim > 0:
+            base_gripper = base_action[:, self.joint_dim:]  # [batch, gripper_dim]
+            smoothed_action = torch.cat([self._ema_smoothed_joints, base_gripper], dim=-1)
+        else:
+            smoothed_action = self._ema_smoothed_joints
+
+        return smoothed_action
 
     def _normalize_ee_node_history(self, ee_node_history: torch.Tensor) -> torch.Tensor:
         """Normalize EE node history for DiT input.
@@ -653,9 +760,9 @@ class ResidualRLPolicy(nn.Module):
 
         # Extract EE and Object node features from observation
         # Use obs_structure if available (more robust), otherwise fallback to hardcoded offsets
-        robot_state_dim = self.cfg.robot_state_dim  # Usually 12 (joint_pos + joint_vel)
+        robot_state_dim = self.cfg.robot_state_dim  # 6 (joint_pos only)
 
-        # Extract joint_states (joint_pos + joint_vel) for State-Action Self-Attention
+        # Extract joint_states (joint_pos) for State-Action Self-Attention
         # joint_states is the first robot_state_dim elements of obs
         joint_states = obs[:, :robot_state_dim]  # [num_envs, robot_state_dim]
 
@@ -741,6 +848,10 @@ class ResidualRLPolicy(nn.Module):
             if self._base_action_buffer is not None:
                 self._base_action_buffer.zero_()
                 self._buffer_indices.fill_(self.exec_horizon)
+            # Reset EMA smoother state
+            if hasattr(self, "_ema_smoothed_joints") and self._ema_smoothed_joints is not None:
+                self._ema_smoothed_joints.zero_()
+                self._ema_initialized.fill_(False)
         else:
             self._action_history[env_ids].zero_()
             self._ee_node_history[env_ids].zero_()
@@ -753,6 +864,10 @@ class ResidualRLPolicy(nn.Module):
             if self._base_action_buffer is not None:
                 self._base_action_buffer[env_ids].zero_()
                 self._buffer_indices[env_ids] = self.exec_horizon
+            # Reset EMA smoother state for specific envs
+            if hasattr(self, "_ema_smoothed_joints") and self._ema_smoothed_joints is not None:
+                self._ema_smoothed_joints[env_ids].zero_()
+                self._ema_initialized[env_ids] = False
 
     def _extract_robot_state(self, obs: torch.Tensor) -> torch.Tensor:
         """Extract robot state (joint_pos, joint_vel) from observation.
@@ -877,7 +992,6 @@ class ResidualRLPolicy(nn.Module):
             )
 
             # Get base action from diffusion - all inputs already normalized!
-            # CRITICAL: Set normalize=False to avoid double normalization!
             base_action_normalized = self.graph_dit.get_base_action(
                 obs_normalized,
                 action_history,
@@ -885,9 +999,8 @@ class ResidualRLPolicy(nn.Module):
                 object_node_history_normalized,
                 joint_states_history_normalized,
                 subtask_condition,
-                normalize=False,  # ✅ CRITICAL: Inputs already normalized!
             )
-            # Denormalize base action (get_base_action returns normalized when normalize=False)
+            # Denormalize base action for execution
             base_action = self._denormalize_action(base_action_normalized)
 
         # 2. Build PPO input: [Robot_State, Graph_Embedding, Base_Action_t]
@@ -900,14 +1013,22 @@ class ResidualRLPolicy(nn.Module):
         # Clamp residual scale
         scale = torch.clamp(self.residual_scale, 0.01, self.cfg.max_residual_scale)
 
-        # 4. Sample residual action
+        # 4. Sample residual action (joints only if joint_only_residual=True)
         residual_std = torch.exp(self.log_std).expand(batch_size, -1)
         residual_dist = torch.distributions.Normal(residual_mean, residual_std)
-        residual_action = residual_dist.sample()  # [batch, action_dim]
+        residual_action = residual_dist.sample()  # [batch, joint_dim] or [batch, action_dim]
         log_probs = residual_dist.log_prob(residual_action).sum(dim=-1)  # [batch]
 
         # 5. Combine: final_action = base_action + scale * residual_action
-        final_action = base_action + scale * residual_action
+        # CRITICAL: Gripper uses DiT directly (no residual) if joint_only_residual=True
+        if self.cfg.joint_only_residual:
+            # Joints: base + residual
+            final_joints = base_action[:, :self.joint_dim] + scale * residual_action
+            # Gripper: directly from DiT (no residual)
+            final_gripper = base_action[:, self.joint_dim:]
+            final_action = torch.cat([final_joints, final_gripper], dim=-1)
+        else:
+            final_action = base_action + scale * residual_action
 
         # 6. Value network
         obs_for_value = obs
@@ -969,7 +1090,6 @@ class ResidualRLPolicy(nn.Module):
                 subtask_condition,
             )
             # Get base action from diffusion - all inputs already normalized!
-            # CRITICAL: Set normalize=False to avoid double normalization!
             base_action_normalized = self.graph_dit.get_base_action(
                 obs_normalized,
                 action_history,
@@ -977,9 +1097,8 @@ class ResidualRLPolicy(nn.Module):
                 object_node_history_normalized,
                 joint_states_history_normalized,
                 subtask_condition,
-                normalize=False,  # ✅ CRITICAL: Inputs already normalized!
             )
-            # Denormalize base action (get_base_action returns normalized when normalize=False)
+            # Denormalize base action for execution
             base_action = self._denormalize_action(base_action_normalized)
 
         # Cache for later (in case evaluate is called)
@@ -1005,8 +1124,15 @@ class ResidualRLPolicy(nn.Module):
             residual_action = residual_dist.sample()
             log_probs = residual_dist.log_prob(residual_action).sum(dim=-1)
 
-        # 4. Combine
-        final_action = base_action + scale * residual_action
+        # 4. Combine: Joints get residual, Gripper uses DiT directly
+        if self.cfg.joint_only_residual:
+            # Joints: base + residual
+            final_joints = base_action[:, :self.joint_dim] + scale * residual_action
+            # Gripper: directly from DiT (no residual)
+            final_gripper = base_action[:, self.joint_dim:]
+            final_action = torch.cat([final_joints, final_gripper], dim=-1)
+        else:
+            final_action = base_action + scale * residual_action
 
         # [CRITICAL FIX] Update buffer indices after execution!
         # Without this, DiT would always predict step 0 or get stuck
@@ -1083,7 +1209,6 @@ class ResidualRLPolicy(nn.Module):
         if needs_replan.any():
             # DiT predicts base trajectory (only when buffer exhausted)
             # CRITICAL: All inputs are already normalized manually above!
-            # Must set normalize=False to avoid double normalization!
             with torch.no_grad():
                 base_trajectory_normalized = self.graph_dit.predict(
                     obs_normalized,
@@ -1093,8 +1218,7 @@ class ResidualRLPolicy(nn.Module):
                     joint_states_history_normalized,
                     subtask_condition,
                     deterministic=True,
-                    normalize=False,  # ✅ CRITICAL: Inputs already normalized!
-                )  # [batch, pred_horizon, action_dim] - normalized (not denormalized by predict)
+                )  # [batch, pred_horizon, action_dim] - normalized output
 
             # Denormalize action trajectory for execution
             base_trajectory = self._denormalize_action(base_trajectory_normalized)
@@ -1109,9 +1233,15 @@ class ResidualRLPolicy(nn.Module):
         # STEP 2: Get current base_action_t from buffer
         # ============================================================
         env_indices = torch.arange(batch_size, device=device)
-        base_action_t = self._base_action_buffer[
+        base_action_t_raw = self._base_action_buffer[
             env_indices, self._buffer_indices, :
         ]  # [batch, action_dim]
+
+        # ============================================================
+        # STEP 2.5: Apply EMA smoothing to base action (joints only)
+        # Flow: DiT → EMA Smooth → + Residual → Action
+        # ============================================================
+        base_action_t = self._apply_ema_smoothing(base_action_t_raw)
 
         # ============================================================
         # STEP 3: PPO corrects step-by-step - Compute residual based on CURRENT obs
@@ -1158,7 +1288,7 @@ class ResidualRLPolicy(nn.Module):
         # Debug: print dimensions and VALUES on first call
         if not hasattr(self, "_debug_printed"):
             print(
-                f"[ResidualRLPolicy] === DiT predicts in chunks + PPO corrects step-by-step ==="
+                "[ResidualRLPolicy] === DiT predicts in chunks + PPO corrects step-by-step ==="
             )
             print(f"[ResidualRLPolicy] obs shape: {obs.shape}")
             print(f"[ResidualRLPolicy] obs_normalized shape: {obs_normalized.shape}")
@@ -1206,23 +1336,50 @@ class ResidualRLPolicy(nn.Module):
 
     @property
     def action_mean(self) -> torch.Tensor:
-        """Get mean of final action distribution."""
+        """Get mean of final action distribution.
+
+        For joint_only_residual:
+        - Joints: base_joint + scale * residual_mean
+        - Gripper: base_gripper (no residual)
+        """
         if self.distribution is None:
             raise RuntimeError(
                 "Distribution not initialized. Call update_distribution() first."
             )
         scale = torch.clamp(self.residual_scale, 0.01, self.cfg.max_residual_scale)
-        return self._base_action_for_dist + scale * self.distribution.mean
+
+        if self.cfg.joint_only_residual:
+            # Joints: base + residual
+            joint_mean = self._base_action_for_dist[:, :self.joint_dim] + scale * self.distribution.mean
+            # Gripper: directly from DiT
+            gripper_mean = self._base_action_for_dist[:, self.joint_dim:]
+            return torch.cat([joint_mean, gripper_mean], dim=-1)
+        else:
+            return self._base_action_for_dist + scale * self.distribution.mean
 
     @property
     def action_std(self) -> torch.Tensor:
-        """Get std of residual action distribution."""
+        """Get std of residual action distribution.
+
+        For joint_only_residual:
+        - Joints: scale * residual_std
+        - Gripper: 0 (deterministic from DiT)
+        """
         if self.distribution is None:
             raise RuntimeError(
                 "Distribution not initialized. Call update_distribution() first."
             )
         scale = torch.clamp(self.residual_scale, 0.01, self.cfg.max_residual_scale)
-        return scale * self.distribution.stddev
+
+        if self.cfg.joint_only_residual:
+            # Joints: scale * std
+            joint_std = scale * self.distribution.stddev
+            # Gripper: 0 (deterministic)
+            batch_size = joint_std.shape[0]
+            gripper_std = torch.zeros(batch_size, self.gripper_dim, device=joint_std.device)
+            return torch.cat([joint_std, gripper_std], dim=-1)
+        else:
+            return scale * self.distribution.stddev
 
     @property
     def entropy(self) -> torch.Tensor:
@@ -1237,15 +1394,22 @@ class ResidualRLPolicy(nn.Module):
         """Get log probabilities of actions (for PPO).
 
         Note: This computes log_prob of the RESIDUAL, not the final action.
+        For joint_only_residual: Only computes log_prob for joints (gripper is deterministic).
         """
         if self.distribution is None:
             raise RuntimeError(
                 "Distribution not initialized. Call update_distribution() first."
             )
 
-        # Recover residual from final action
+        # Recover residual from final action (joints only if joint_only_residual)
         scale = torch.clamp(self.residual_scale, 0.01, self.cfg.max_residual_scale)
-        residual = (actions - self._base_action_for_dist) / scale
+        if self.cfg.joint_only_residual:
+            # Only recover joint residual
+            joint_actions = actions[:, :self.joint_dim]
+            base_joints = self._base_action_for_dist[:, :self.joint_dim]
+            residual = (joint_actions - base_joints) / scale
+        else:
+            residual = (actions - self._base_action_for_dist) / scale
 
         return self.distribution.log_prob(residual).sum(dim=-1)
 
@@ -1308,7 +1472,6 @@ class ResidualRLPolicy(nn.Module):
                 subtask_condition,
             )
             # Get base action from diffusion - all inputs already normalized!
-            # CRITICAL: Set normalize=False to avoid double normalization!
             base_action_normalized = self.graph_dit.get_base_action(
                 obs_normalized,
                 action_history,
@@ -1316,9 +1479,8 @@ class ResidualRLPolicy(nn.Module):
                 object_node_history_normalized,
                 joint_states_history_normalized,
                 subtask_condition,
-                normalize=False,  # ✅ CRITICAL: Inputs already normalized!
             )  # deterministic=True by default
-            # Denormalize base action (get_base_action returns normalized when normalize=False)
+            # Denormalize base action for execution
             base_action = self._denormalize_action(base_action_normalized)
 
         # Build PPO input with base_action

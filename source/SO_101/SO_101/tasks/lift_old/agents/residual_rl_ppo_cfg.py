@@ -56,7 +56,7 @@ def _create_residual_rl_cfg() -> ResidualRLPolicyCfg:
         value_hidden_dims=[256, 128, 64],
         value_activation="elu",
         # Input dimensions
-        robot_state_dim=12,  # joint_pos(6) + joint_vel(6)
+        robot_state_dim=6,  # joint_pos(6) only (no joint_vel)
         # Residual scaling (start VERY small for Residual RL!)
         residual_scale=0.05,  # Reduced from 0.1
         max_residual_scale=0.3,  # Reduced from 0.5

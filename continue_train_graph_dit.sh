@@ -47,39 +47,22 @@ fi
 # Extract checkpoint directory and detect mode from path
 CHECKPOINT_DIR=$(dirname "$CHECKPOINT")
 
-# Try to detect mode from checkpoint path (lift_joint_flow_matching or lift_joint_ddpm)
-if [[ "$CHECKPOINT_DIR" == *"_flow_matching"* ]]; then
-    DETECTED_MODE="flow_matching"
-elif [[ "$CHECKPOINT_DIR" == *"_ddpm"* ]]; then
-    DETECTED_MODE="ddpm"
-else
-    DETECTED_MODE="flow_matching"  # Default fallback
-fi
-
-# Mode selection (default: detected from path, or flow_matching)
-MODE="${2:-$DETECTED_MODE}"
+# Mode is always flow_matching now
+MODE="flow_matching"
 # LR schedule selection (default: constant)
-LR_SCHEDULE="${3:-constant}"
-
-# Validate mode
-if [ "$MODE" != "ddpm" ] && [ "$MODE" != "flow_matching" ]; then
-    echo "❌ Error: Invalid mode '$MODE'"
-    echo ""
-    echo "Usage:"
-    echo "  $0 [checkpoint_path] [ddpm|flow_matching] [constant|cosine]"
-    echo ""
-    echo "Examples:"
-    echo "  $0                                    # Auto-detect latest checkpoint"
-    echo "  $0 <checkpoint_path>                 # Use specific checkpoint (mode auto-detected)"
-    echo "  $0 <checkpoint_path> flow_matching   # Use specific checkpoint + mode"
-    echo "  $0 <checkpoint_path> flow_matching cosine  # Use checkpoint + mode + lr_schedule"
-    exit 1
-fi
+LR_SCHEDULE="${2:-constant}"
 
 # Validate lr_schedule
 if [ "$LR_SCHEDULE" != "constant" ] && [ "$LR_SCHEDULE" != "cosine" ]; then
     echo "❌ Error: Invalid lr_schedule '$LR_SCHEDULE'"
-    echo "  Valid options: constant, cosine"
+    echo ""
+    echo "Usage:"
+    echo "  $0 [checkpoint_path] [constant|cosine]"
+    echo ""
+    echo "Examples:"
+    echo "  $0                                    # Auto-detect latest checkpoint"
+    echo "  $0 <checkpoint_path>                 # Use specific checkpoint"
+    echo "  $0 <checkpoint_path> cosine          # Use checkpoint + cosine lr_schedule"
     exit 1
 fi
 

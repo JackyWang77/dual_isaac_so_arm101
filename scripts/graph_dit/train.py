@@ -823,7 +823,7 @@ def train_graph_dit_policy(
     log_dir: str = "./logs/graph_dit",
     resume_checkpoint: str | None = None,
     action_history_length: int = 4,
-    mode: str = "ddpm",
+    mode: str = "flow_matching",
     pred_horizon: int = 16,
     exec_horizon: int = 8,
     lr_schedule: str = "constant",
@@ -856,12 +856,12 @@ def train_graph_dit_policy(
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    # Add mode suffix to save/log directories (e.g., reach_joint_ddpm, reach_joint_flow_matching)
+    # Add mode suffix to save/log directories (e.g., reach_joint_flow_matching)
     base_save_dir = Path(save_dir)
     base_log_dir = Path(log_dir)
 
     # Append mode suffix to the base directory name
-    # e.g., ./logs/graph_dit/reach_joint -> ./logs/graph_dit/reach_joint_ddpm
+    # e.g., ./logs/graph_dit/reach_joint -> ./logs/graph_dit/reach_joint_flow_matching
     save_dir_with_mode = base_save_dir.parent / f"{base_save_dir.name}_{mode}"
     log_dir_with_mode = base_log_dir.parent / f"{base_log_dir.name}_{mode}"
 
@@ -883,9 +883,7 @@ def train_graph_dit_policy(
     print(f"[Train] ===== Graph-DiT Policy Training with ACTION CHUNKING =====")
     print(f"[Train] Task: {task_name}")
     print(f"[Train] Dataset: {dataset_path}")
-    print(
-        f"[Train] Mode: {mode.upper()} ({'50-100 steps' if mode == 'ddpm' else '1-10 steps, much faster!'})"
-    )
+    print(f"[Train] Mode: {mode.upper()} (1-10 steps, fast inference)")
     print(f"[Train] Obs dim: {obs_dim}, Action dim: {action_dim}")
     print(f"[Train] Action history length: {action_history_length}")
     print(
@@ -1046,7 +1044,7 @@ def train_graph_dit_policy(
         action_history_length=action_history_length,
         pred_horizon=pred_horizon,  # ACTION CHUNKING: predict this many future steps
         exec_horizon=exec_horizon,  # RHC: execute this many steps before re-planning
-        mode=mode,  # "ddpm" or "flow_matching"
+        mode=mode,  # "flow_matching"
         device=device,
         obs_structure=obs_structure,  # CRITICAL: Pass dynamic obs_structure instead of hardcoded indices
     )
@@ -1279,28 +1277,6 @@ def train_graph_dit_policy(
                                 f"  Time t: Min={t.min().item():.4f}, Max={t.max().item():.4f}, Mean={t.mean().item():.4f}"
                             )
 
-                    elif "noise_pred" in debug and "noise" in debug:
-                        # DDPM mode
-                        noise_pred = debug["noise_pred"]
-                        noise = debug["noise"]
-                        actions = debug["actions"]
-
-                        print(f"[DDPM Debug]")
-                        print(
-                            f"  Target Noise Mean: {noise.mean().item():.4f}, Std: {noise.std().item():.4f}"
-                        )
-                        print(
-                            f"  Pred Noise Mean: {noise_pred.mean().item():.4f}, Std: {noise_pred.std().item():.4f}"
-                        )
-                        print(
-                            f"  Input Action (Data) Min: {actions.min().item():.4f}, Max: {actions.max().item():.4f}"
-                        )
-
-                        # Check loss per dimension
-                        diff = (noise_pred - noise) ** 2
-                        if len(diff.shape) == 3:
-                            mse_per_dim = diff.mean(dim=(0, 1)).detach().cpu().numpy()
-                            print(f"  Mean MSE per action dim: {mse_per_dim}")
                 else:
                     # Fallback: print basic info
                     print(f"  Loss: {loss.item():.6f}")
@@ -1461,9 +1437,9 @@ def main():
     parser.add_argument(
         "--mode",
         type=str,
-        default="ddpm",
-        choices=["ddpm", "flow_matching"],
-        help="Training mode: 'ddpm' (slower, 50-100 steps) or 'flow_matching' (faster, 1-10 steps)",
+        default="flow_matching",
+        choices=["flow_matching"],
+        help="Training mode: flow_matching (1-10 steps, fast inference)",
     )
 
     # ACTION CHUNKING arguments (Diffusion Policy's key innovation)

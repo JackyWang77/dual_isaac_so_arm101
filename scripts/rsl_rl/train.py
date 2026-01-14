@@ -148,7 +148,7 @@ def main(
     try:
         # Import the full module path so it's available for eval()
         module = importlib.import_module(
-            "SO_101.policies.graph_dit_rsl_rl_actor_critic"
+            "SO_101.policies.residual_rl_actor_critic"
         )
         # Make SO_101 available in the current namespace for eval()
         if "SO_101" not in sys.modules:
@@ -156,12 +156,12 @@ def main(
         # Ensure the module is in the global namespace
         globals()["SO_101"] = sys.modules["SO_101"]
         globals()["SO_101"].policies = sys.modules["SO_101.policies"]
-        globals()["SO_101"].policies.graph_dit_rsl_rl_actor_critic = module
+        globals()["SO_101"].policies.residual_rl_actor_critic = module
     except ImportError as e:
         print(
-            f"[WARNING] Could not import SO_101.policies.graph_dit_rsl_rl_actor_critic: {e}"
+            f"[WARNING] Could not import SO_101.policies.residual_rl_actor_critic: {e}"
         )
-        print("[WARNING] This may cause issues if using custom Graph DiT ActorCritic.")
+        print("[WARNING] This may cause issues if using custom Residual ActorCritic.")
 
     # override configurations with non-hydra CLI arguments
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
@@ -239,10 +239,10 @@ def main(
     # Method: Import the module and inject it into builtins so eval() can find it.
     import builtins
 
-    import SO_101.policies.graph_dit_rsl_rl_actor_critic  # noqa: F401
+    import SO_101.policies.residual_rl_actor_critic  # noqa: F401
 
     # Inject SO_101 into builtins so eval() can access it
-    # This ensures that when RSL-RL executes eval("SO_101.policies.graph_dit_rsl_rl_actor_critic.GraphDiTActorCritic"),
+    # This ensures that when RSL-RL executes eval() to load custom ActorCritic,
     # it can find SO_101 in the namespace
     if not hasattr(builtins, "SO_101"):
         builtins.SO_101 = sys.modules["SO_101"]

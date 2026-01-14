@@ -173,10 +173,10 @@ def main(
     import builtins
     import sys
 
-    import SO_101.policies.graph_dit_rsl_rl_actor_critic  # noqa: F401
+    import SO_101.policies.residual_rl_actor_critic  # noqa: F401
 
     # Inject SO_101 into builtins so eval() can access it
-    # This ensures that when RSL-RL executes eval("SO_101.policies.graph_dit_rsl_rl_actor_critic.GraphDiTActorCritic"),
+    # This ensures that when RSL-RL executes eval() to load custom ActorCritic,
     # it can find SO_101 in the namespace
     if not hasattr(builtins, "SO_101"):
         builtins.SO_101 = sys.modules["SO_101"]

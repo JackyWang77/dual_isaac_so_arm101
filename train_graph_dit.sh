@@ -6,18 +6,17 @@ MODE="${1:-flow_matching}"
 # LR schedule selection (default: constant)
 LR_SCHEDULE="${2:-constant}"
 
-# Validate mode
-if [ "$MODE" != "ddpm" ] && [ "$MODE" != "flow_matching" ]; then
+# Validate mode (only flow_matching supported)
+if [ "$MODE" != "flow_matching" ]; then
     echo "❌ Error: Invalid mode '$MODE'"
     echo ""
     echo "Usage:"
-    echo "  $0 [ddpm|flow_matching] [constant|cosine]"
+    echo "  $0 [flow_matching] [constant|cosine]"
     echo ""
     echo "Examples:"
     echo "  $0                        # Train with Flow Matching + constant LR (default)"
     echo "  $0 flow_matching          # Train with Flow Matching + constant LR"
     echo "  $0 flow_matching cosine   # Train with Flow Matching + cosine LR schedule"
-    echo "  $0 ddpm constant          # Train with DDPM + constant LR"
     exit 1
 fi
 

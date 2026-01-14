@@ -97,9 +97,7 @@ from datetime import datetime
 import gymnasium as gym
 import SO_101.tasks  # noqa: F401  # Register environments
 import torch
-# Import both ActorCritic types for RSL-RL namespace
-from SO_101.policies.graph_dit_rsl_rl_actor_critic import \
-    GraphDiTActorCritic  # noqa: F401
+# Import ActorCritic for RSL-RL namespace
 from SO_101.policies.residual_rl_actor_critic import \
     ResidualActorCritic  # noqa: F401
 
@@ -219,7 +217,6 @@ def main():
         import builtins
         import sys
 
-        import SO_101.policies.graph_dit_rsl_rl_actor_critic  # noqa: F401
         import SO_101.policies.residual_rl_actor_critic  # noqa: F401
 
         # Inject SO_101 into builtins so eval() can access it

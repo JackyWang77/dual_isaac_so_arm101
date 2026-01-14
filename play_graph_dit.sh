@@ -5,7 +5,7 @@
 #   bash play_graph_dit.sh [task] [mode|checkpoint_path]
 #
 #   task: reach (default) or lift
-#   mode: ddpm, flow_matching, or checkpoint path
+#   mode: flow_matching or checkpoint path
 
 TASK="${1:-lift}"
 ARG2="${2:-}"
@@ -37,7 +37,7 @@ else
     # If checkpoint path is provided directly, use it
     if [ -n "$MODE" ] && [ -f "$MODE" ]; then
         LATEST_CHECKPOINT="$MODE"
-    elif [ -n "$MODE" ] && [ "$MODE" != "ddpm" ] && [ "$MODE" != "flow_matching" ]; then
+    elif [ -n "$MODE" ] && [ "$MODE" != "flow_matching" ]; then
         # If it's not a mode and not a file, treat as checkpoint path
         LATEST_CHECKPOINT="$MODE"
     else
@@ -63,12 +63,11 @@ if [ -z "$LATEST_CHECKPOINT" ] || [ ! -f "$LATEST_CHECKPOINT" ]; then
     echo "  $0 [task] [mode|checkpoint]"
     echo ""
     echo "  task: reach or lift (default: lift)"
-    echo "  mode: ddpm, flow_matching, or checkpoint path"
+    echo "  mode: flow_matching or checkpoint path"
     echo ""
     echo "Examples:"
     echo "  $0 lift                              # Auto-detect latest lift checkpoint"
     echo "  $0 lift flow_matching                # Use latest lift Flow Matching model"
-    echo "  $0 reach ddpm                        # Use latest reach DDPM model"
     echo "  $0 lift ./logs/graph_dit/lift_joint_flow_matching/2025-12-17_20-57-54/best_model.pt"
     exit 1
 fi
@@ -91,4 +90,4 @@ python scripts/graph_dit/play.py \
     --checkpoint "$LATEST_CHECKPOINT" \
     --num_envs 2 \
     --num_episodes 20
-    # --num_diffusion_steps  # Auto-detect based on mode (DDPM: 50, Flow Matching: 10)
+    # --num_diffusion_steps  # Default: 2 for Flow Matching

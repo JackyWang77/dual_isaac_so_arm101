@@ -43,7 +43,7 @@ if [ -z "$PRETRAINED_CHECKPOINT" ]; then
     echo ""
     echo "Examples:"
     echo "  $0 ./logs/graph_dit/lift_joint_flow_matching/2025-12-17_21-22-22/best_model.pt"
-    echo "  $0 ./logs/graph_dit/lift_joint_ddpm/2025-12-17_20-00-00/best_model.pt 128 500"
+    echo "  $0 ./logs/graph_dit/lift_joint_flow_matching/2025-12-17_20-00-00/best_model.pt 128 500"
     exit 1
 fi
 

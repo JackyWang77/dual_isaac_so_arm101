@@ -361,6 +361,12 @@ class ResidualActorCritic(ActorCritic):
         ZERO_RESIDUAL_CHECK = False  # ✅ CRITICAL: Set to False for training! True only for debugging DiT
         if ZERO_RESIDUAL_CHECK:
             final_action = base_action_t  # PPO completely disabled
+        elif self.policy.cfg.joint_only_residual:
+            # Joint-only residual: Joints get residual, Gripper uses DiT directly
+            joint_dim = self.policy.joint_dim
+            final_joints = base_action_t[:, :joint_dim] + scale * residual
+            final_gripper = base_action_t[:, joint_dim:]  # Gripper from DiT (no residual)
+            final_action = torch.cat([final_joints, final_gripper], dim=-1)
         else:
             final_action = base_action_t + scale * residual
 
@@ -371,6 +377,18 @@ class ResidualActorCritic(ActorCritic):
         # INCREMENT BUFFER INDEX for next step
         if self.policy._buffer_indices is not None:
             self.policy._buffer_indices += 1
+
+        # DEBUG: Print action every 500 steps (env 0 only)
+        if not hasattr(self, "_act_step_count"):
+            self._act_step_count = 0
+        self._act_step_count += 1
+        if self._act_step_count % 500 == 1:
+            print(f"\n[DEBUG ActorCritic] Step {self._act_step_count}:")
+            print(f"  base_action_t[0]: {base_action_t[0].tolist()}")
+            print(f"  residual[0]:      {residual[0].tolist()}")
+            print(f"  scale:            {scale.item():.4f}")
+            print(f"  final_action[0]:  {final_action[0].tolist()}")
+            print(f"  buffer_idx[0]:    {self.policy._buffer_indices[0].item()}")
 
         return final_action
 

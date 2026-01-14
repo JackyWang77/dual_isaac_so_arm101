@@ -51,7 +51,7 @@ def play_graph_dit_policy(
     num_diffusion_steps: int | None = None,
 ):
     """Play trained Graph-DiT policy.
-
+    
     Args:
         task_name: Environment task name.
         checkpoint_path: Path to trained policy checkpoint.
@@ -59,24 +59,24 @@ def play_graph_dit_policy(
         num_episodes: Number of episodes to run.
         device: Device to run on.
     """
-
+    
     print(f"[Play] ===== Graph-DiT Policy Playback =====")
     print(f"[Play] Task: {task_name}")
     print(f"[Play] Checkpoint: {checkpoint_path}")
     print(f"[Play] Num envs: {num_envs}")
-
+    
     # Create environment
     print(f"\n[Play] Creating environment...")
     env_cfg = parse_env_cfg(task_name, device=device, num_envs=num_envs)
     env = gym.make(task_name, cfg=env_cfg)
-
+    
     # Get observation and action spaces
     obs_space = env.observation_space
     action_space = env.action_space
-
+    
     print(f"[Play] Observation space: {obs_space}")
     print(f"[Play] Action space: {action_space}")
-
+    
     # Compute observation dimension
     def get_obs_dim(space):
         """Recursively compute observation dimension from space."""
@@ -165,9 +165,9 @@ def play_graph_dit_policy(
                     f"[Play] Warning: Could not compute obs_dim from space, using default. Error: {e}"
                 )
                 return 39  # Default fallback for reach task
-
+    
     obs_dim = get_obs_dim(obs_space)
-
+    
     # For action space, handle vectorized case
     if hasattr(action_space, "shape") and action_space.shape is not None:
         if isinstance(action_space.shape, tuple) and len(action_space.shape) > 1:
@@ -182,45 +182,36 @@ def play_graph_dit_policy(
             )
     else:
         action_dim = 6  # Default fallback for reach task (joint states)
-
+    
     print(f"[Play] Obs dim: {obs_dim}, Action dim: {action_dim}")
-
+    
     # Load policy and normalization stats
     print(f"\n[Play] Loading policy from: {checkpoint_path}")
     # weights_only=False is needed for PyTorch 2.6+ to load custom config classes
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-
+    
     # Load policy
     policy = GraphDiTPolicy.load(checkpoint_path, device=device)
     policy.eval()
-
+    
     # Determine mode and set default diffusion steps if not provided
     cfg = checkpoint.get("cfg", None)
     if cfg is not None:
-        mode = getattr(cfg, "mode", "ddpm")
+        mode = getattr(cfg, "mode", "flow_matching")
         print(f"[Play] Policy mode: {mode.upper()}")
-        # Set default steps based on mode if not provided
-        # CRITICAL FIX: For 50Hz control, use minimal steps for real-time performance
-        # Flow Matching can generate high-quality actions in 2-4 steps
+        # Set default steps for Flow Matching (2-4 steps for 50Hz real-time control)
         if num_diffusion_steps is None:
-            if mode == "flow_matching":
-                num_diffusion_steps = (
-                    2  # Flow Matching: 2-4 steps for 50Hz real-time control
-                )
-            else:
-                num_diffusion_steps = 10  # DDPM: Reduced from 50 for faster inference (but consider flow_matching for real-time)
-            print(
-                f"[Play] Using default diffusion steps for {mode}: {num_diffusion_steps}"
-            )
+            num_diffusion_steps = 2  # Flow Matching: 2-4 steps for real-time control
+            print(f"[Play] Using default diffusion steps: {num_diffusion_steps}")
     else:
         if num_diffusion_steps is None:
-            num_diffusion_steps = 50  # Default fallback
+            num_diffusion_steps = 2  # Default for Flow Matching
             print(f"[Play] Using default diffusion steps: {num_diffusion_steps}")
-
+    
     # Load normalization stats (if available)
     obs_stats = checkpoint.get("obs_stats", None)
     action_stats = checkpoint.get("action_stats", None)
-
+    
     if obs_stats is not None:
         print(f"[Play] Loaded observation normalization stats")
         # Handle both numpy arrays and torch tensors
@@ -234,7 +225,7 @@ def play_graph_dit_policy(
         print(f"[Play] Warning: No observation stats found, skipping normalization")
         obs_mean = None
         obs_std = None
-
+    
     if action_stats is not None:
         print(f"[Play] Loaded action normalization stats")
         # Handle both numpy arrays and torch tensors
@@ -248,7 +239,7 @@ def play_graph_dit_policy(
         print(f"[Play] Warning: No action stats found, skipping denormalization")
         action_mean = None
         action_std = None
-
+    
     # CRITICAL FIX: Load node feature normalization stats
     node_stats = checkpoint.get("node_stats", None)
     if node_stats is not None:
@@ -322,12 +313,12 @@ def play_graph_dit_policy(
     print(
         f"[Play] Inference frequency: every {exec_horizon} steps (vs every step without chunking)"
     )
-
+    
     obs, info = env.reset()
     episode_count = 0
     episode_rewards = []
     current_episode_rewards = torch.zeros(num_envs, device=device)
-
+    
     # Initialize action, node, and joint history buffers for each environment
     action_history_buffers = [
         torch.zeros(action_history_length, action_dim, device=device)
@@ -347,6 +338,13 @@ def play_graph_dit_policy(
         if joint_dim is not None
         else None
     )
+    
+    # ==========================================================================
+    # EMA SMOOTHING for action smoothing (joints only, gripper excluded)
+    # ==========================================================================
+    ema_alpha = 0.3  # EMA weight: higher = more responsive, lower = smoother
+    ema_smoothed_joints = None  # Will be initialized on first action [num_envs, joint_dim]
+    print(f"[Play] EMA smoothing enabled: alpha={ema_alpha} (joints only, gripper excluded)")
 
     # ==========================================================================
     # RECEDING HORIZON CONTROL (RHC) - Action Buffers
@@ -368,12 +366,12 @@ def play_graph_dit_policy(
     ]  # Normalized versions for history
 
     step_count = 0
-
+    
     def _extract_node_features_from_obs(obs_tensor):
         """Extract EE and Object node features from concatenated obs.
-
+        
         Note: Assumes obs_keys order is:
-        joint_pos, joint_vel, object_position, object_orientation,
+        joint_pos, joint_vel, object_position, object_orientation, 
         ee_position, ee_orientation, actions
         (target_object_position is skipped even if present in data)
         """
@@ -386,11 +384,11 @@ def play_graph_dit_policy(
         obj_ori = obs_tensor[:, 15:19]  # [batch, 4] - object_orientation
         ee_pos = obs_tensor[:, 19:22]  # [batch, 3] - ee_position
         ee_ori = obs_tensor[:, 22:26]  # [batch, 4] - ee_orientation
-
+        
         ee_node = torch.cat([ee_pos, ee_ori], dim=-1)  # [batch, 7]
         object_node = torch.cat([obj_pos, obj_ori], dim=-1)  # [batch, 7]
         return ee_node, object_node
-
+    
     def _extract_joint_states_from_obs(obs_tensor):
         """Extract joint position from concatenated obs.
         
@@ -402,7 +400,7 @@ def play_graph_dit_policy(
         joint_pos = obs_tensor[:, 0:6]
         # Only return joint_pos (no joint_vel)
         return joint_pos
-
+    
     with torch.inference_mode():
         while simulation_app.is_running() and episode_count < num_episodes:
             # Process observations
@@ -419,7 +417,7 @@ def play_graph_dit_policy(
                         obs_tensor_raw = torch.from_numpy(obs_val).to(device)
                     else:
                         obs_tensor_raw = torch.tensor(obs_val, device=device)
-
+                    
                     # Ensure correct shape [num_envs, obs_dim]
                     if len(obs_tensor_raw.shape) == 1:
                         obs_tensor_raw = obs_tensor_raw.unsqueeze(0)
@@ -427,7 +425,7 @@ def play_graph_dit_policy(
                         obs_tensor_raw = obs_tensor_raw.view(
                             obs_tensor_raw.shape[0], -1
                         )
-
+                    
                     # Check if dimensions match training (32) or raw env (39 with target_object_position)
                     # If it's 39, we need to remove target_object_position (7 dims: positions 3 + orientations 4)
                     # Training order: joint_pos(6), joint_vel(6), object_position(3), object_orientation(4),
@@ -512,7 +510,7 @@ def play_graph_dit_policy(
                     obs_tensor = obs_tensor.unsqueeze(0)
                 elif len(obs_tensor.shape) > 2:
                     obs_tensor = obs_tensor.view(obs_tensor.shape[0], -1)
-
+            
             # Normalize observations (if stats available)
             # Ensure dimensions match (obs_tensor should be 32 dims after removing target_object_position)
             if obs_mean is not None and obs_std is not None:
@@ -529,7 +527,7 @@ def play_graph_dit_policy(
                 obs_tensor_normalized = (obs_tensor - obs_mean) / obs_std
             else:
                 obs_tensor_normalized = obs_tensor
-
+            
             # Extract current node features (before normalization for node history)
             # obs_tensor is now 32 dims (after removing target_object_position)
             # Indices: joint_pos[0:6], joint_vel[6:12], object_position[12:15], object_orientation[15:19],
@@ -540,7 +538,7 @@ def play_graph_dit_policy(
             
             # 🟢 VISUAL DEBUG: Extract current EE position for comparison
             current_ee_pos = ee_node_current[:, :3].cpu().numpy()  # [num_envs, 3] - EE position
-
+            
             # Extract current joint states (position + velocity) from raw obs
             if joint_dim is not None:
                 joint_states_current = _extract_joint_states_from_obs(
@@ -552,7 +550,7 @@ def play_graph_dit_policy(
             ee_node_history_batch = []
             object_node_history_batch = []
             joint_state_history_batch = [] if joint_dim is not None else None
-
+            
             for env_id in range(num_envs):
                 # Get histories for this environment
                 action_history_batch.append(
@@ -568,7 +566,7 @@ def play_graph_dit_policy(
                     joint_state_history_batch.append(
                         joint_state_history_buffers[env_id].clone()
                     )  # [H, joint_dim]
-
+            
             # Stack into batch format
             action_history_tensor = torch.stack(action_history_batch, dim=0).to(
                 device
@@ -609,10 +607,10 @@ def play_graph_dit_policy(
                 joint_states_history_tensor = (
                     joint_states_history_tensor - joint_mean
                 ) / joint_std
-
+            
             # Get subtask condition (optional)
             subtask_condition = None
-
+            
             # ==========================================================================
             # RECEDING HORIZON CONTROL: Check if we need to re-plan
             # ==========================================================================
@@ -627,30 +625,30 @@ def play_graph_dit_policy(
             if needs_replan:
                 # Predict action trajectory for ALL environments (batched inference)
                 # Output: [num_envs, pred_horizon, action_dim]
-                action_trajectory_normalized = policy.predict(
-                    obs_tensor_normalized,
-                    action_history=action_history_tensor,
-                    ee_node_history=ee_node_history_tensor,
-                    object_node_history=object_node_history_tensor,
-                    joint_states_history=joint_states_history_tensor,
-                    subtask_condition=subtask_condition,
-                    num_diffusion_steps=num_diffusion_steps,
-                    deterministic=True,
-                )  # [num_envs, pred_horizon, action_dim]
-
+            action_trajectory_normalized = policy.predict(
+                obs_tensor_normalized,
+                action_history=action_history_tensor,
+                ee_node_history=ee_node_history_tensor,
+                object_node_history=object_node_history_tensor,
+                joint_states_history=joint_states_history_tensor,
+                subtask_condition=subtask_condition,
+                num_diffusion_steps=num_diffusion_steps,
+                deterministic=True, 
+            )  # [num_envs, pred_horizon, action_dim]
+            
                 # Denormalize trajectory
-                if action_mean is not None and action_std is not None:
+            if action_mean is not None and action_std is not None:
                     # Broadcast mean/std for trajectory: [action_dim] -> [1, 1, action_dim]
-                    action_trajectory = (
-                        action_trajectory_normalized * action_std.unsqueeze(0)
-                        + action_mean.unsqueeze(0)
+                action_trajectory = (
+                    action_trajectory_normalized * action_std.unsqueeze(0)
+                    + action_mean.unsqueeze(0)
+                )
+            else:
+                action_trajectory = action_trajectory_normalized
+                if step_count == 0:
+                    print(
+                        f"[Play] Warning: No action normalization stats, using normalized actions directly"
                     )
-                else:
-                    action_trajectory = action_trajectory_normalized
-                    if step_count == 0:
-                        print(
-                            f"[Play] Warning: No action normalization stats, using normalized actions directly"
-                        )
 
                 # 🟢 VISUAL DEBUG: Store target joint positions for visualization
                 # action_trajectory is [num_envs, pred_horizon, action_dim]
@@ -668,9 +666,9 @@ def play_graph_dit_policy(
                     print(
                         f"\n[🟢 VISUAL DEBUG Step {step_count}] =========="
                     )
-                    print(f"  Target Joint (action): {target_joint[:3].tolist()} (first 3 joints)")
-                    print(f"  Current Joint:         {current_joint[:3].tolist()} (first 3 joints)")
-                    print(f"  Joint Diff:             {np.abs(target_joint - current_joint)[:3].tolist()}")
+                    print(f"  Target Joint (action): {target_joint.tolist()}")
+                    print(f"  Current Joint:         {current_joint.tolist()}")
+                    print(f"  Joint Diff:            {np.abs(target_joint - current_joint).tolist()}")
                     print(f"  Current EE Position:    {current_ee_pos_debug.tolist()}")
                     print(f"  Object Position:        {object_pos_debug.tolist()}")
                     print(f"  EE-Object Distance:      {np.linalg.norm(current_ee_pos_debug - object_pos_debug):.3f}")
@@ -713,13 +711,28 @@ def play_graph_dit_policy(
                 actions_normalized_list, dim=0
             )  # [num_envs, action_dim]
 
+            # Map gripper (last dimension) to binary: > -0.25 -> 1 (open), <= -0.25 -> -1 (close)
+            if action_dim >= 6:
+                gripper_raw = actions[:, 5]  # [num_envs]
+                actions[:, 5] = torch.where(gripper_raw > -0.2, torch.tensor(1.0, device=device), torch.tensor(-1.0, device=device))
+
+            # EMA smoothing for joints only (gripper excluded)
+            if action_dim >= 6:
+                joints = actions[:, :5]  # [num_envs, 5]
+                gripper = actions[:, 5:6]  # [num_envs, 1]
+                if ema_smoothed_joints is None:
+                    ema_smoothed_joints = joints.clone()
+                else:
+                    ema_smoothed_joints = ema_alpha * joints + (1 - ema_alpha) * ema_smoothed_joints
+                    actions = torch.cat([ema_smoothed_joints, gripper], dim=-1)  # [num_envs, 6]
+
             # Update history buffers (shift and add new)
             # IMPORTANT: Store normalized actions in history buffer, as policy expects normalized action_history
             for env_id in range(num_envs):
                 # Shift action history (use normalized actions, not denormalized!)
                 action_history_buffers[env_id] = torch.cat(
                     [
-                        action_history_buffers[env_id][1:],
+                    action_history_buffers[env_id][1:],
                         actions_normalized[
                             env_id : env_id + 1
                         ],  # [1, action_dim] - Use normalized actions!
@@ -730,7 +743,7 @@ def play_graph_dit_policy(
                 # Shift node histories
                 ee_node_history_buffers[env_id] = torch.cat(
                     [
-                        ee_node_history_buffers[env_id][1:],
+                    ee_node_history_buffers[env_id][1:],
                         ee_node_current[env_id : env_id + 1],
                     ],
                     dim=0,
@@ -738,7 +751,7 @@ def play_graph_dit_policy(
 
                 object_node_history_buffers[env_id] = torch.cat(
                     [
-                        object_node_history_buffers[env_id][1:],
+                    object_node_history_buffers[env_id][1:],
                         object_node_current[env_id : env_id + 1],
                     ],
                     dim=0,
@@ -752,10 +765,10 @@ def play_graph_dit_policy(
                         ],
                         dim=0,
                     )
-
+            
             # Step environment
             obs, rewards, terminated, truncated, info = env.step(actions)
-
+            
             # Accumulate rewards (rewards might be numpy or tensor)
             if isinstance(rewards, np.ndarray):
                 current_episode_rewards += torch.from_numpy(rewards).to(device)
@@ -765,7 +778,7 @@ def play_graph_dit_policy(
                     if hasattr(rewards, "to")
                     else torch.tensor(rewards, device=device)
                 )
-
+            
             # Check for episode completion and reset history buffers + action buffers
             done = terminated | truncated
             if done.any():
@@ -774,7 +787,7 @@ def play_graph_dit_policy(
                         episode_rewards.append(current_episode_rewards[i].item())
                         episode_count += 1
                         current_episode_rewards[i] = 0.0
-
+                        
                         # Reset history buffers for this environment
                         action_history_buffers[i].zero_()
                         ee_node_history_buffers[i].zero_()
@@ -784,17 +797,21 @@ def play_graph_dit_policy(
                             and joint_state_history_buffers is not None
                         ):
                             joint_state_history_buffers[i].zero_()
-
+                        
                         # CRITICAL: Clear action buffer on episode reset!
                         # This forces re-planning at the start of each new episode
                         action_buffers[i].clear()
                         action_buffers_normalized[i].clear()
 
+                        # Reset EMA state for this environment
+                        if ema_smoothed_joints is not None:
+                            ema_smoothed_joints[i] = 0.0
+
                         if episode_count >= num_episodes:
                             break
-
+            
             step_count += 1
-
+            
             # Print progress
             if step_count % 100 == 0:
                 avg_reward = (
@@ -806,7 +823,7 @@ def play_graph_dit_policy(
                     f"[Play] Step: {step_count}, Episodes: {episode_count}/{num_episodes}, "
                     f"Avg reward (last 10): {avg_reward:.3f}"
                 )
-
+    
     # Print final statistics
     if episode_rewards:
         print(f"\n[Play] ===== Final Statistics =====")
@@ -816,7 +833,7 @@ def play_graph_dit_policy(
         )
         print(f"[Play] Max reward: {max(episode_rewards):.3f}")
         print(f"[Play] Min reward: {min(episode_rewards):.3f}")
-
+    
     # Close environment
     env.close()
     print(f"\n[Play] Playback completed!")
@@ -825,7 +842,7 @@ def play_graph_dit_policy(
 def main():
     """Main playback function."""
     parser = argparse.ArgumentParser(description="Play Graph-DiT Policy")
-
+    
     parser.add_argument("--task", type=str, required=True, help="Task name")
     parser.add_argument(
         "--checkpoint", type=str, required=True, help="Policy checkpoint path"
@@ -841,11 +858,11 @@ def main():
         "--num_diffusion_steps",
         type=int,
         default=None,
-        help="Number of diffusion steps for inference (None = auto based on mode, DDPM: 50, Flow Matching: 10)",
+        help="Number of diffusion steps for inference (default: 2 for Flow Matching)",
     )
-
+    
     args = parser.parse_args()
-
+    
     # Run playback
     play_graph_dit_policy(
         task_name=args.task,
