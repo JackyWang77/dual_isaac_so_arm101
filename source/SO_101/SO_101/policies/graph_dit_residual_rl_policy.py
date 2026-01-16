@@ -1,0 +1,893 @@
+# Copyright (c) 2024-2026, SO-ARM101 Project
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+"""
+GraphDiT + Residual RL Policy (OUR METHOD) - High-Frequency Z Version
+
+核心改进：
+1) base_action: 低频（每 exec_horizon 步从 DiT 获取轨迹）
+2) z_layers: 高频（每步调用 extract_z_fast，只跑 Graph-Attention）
+3) z_adapter: trainable（把 frozen z 转成 RL-friendly z）
+4) GateNet + DeepValueCritic: 保持不变
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Dict, Optional, Tuple, Union, List
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.distributions import Normal
+
+
+TensorOrArray = Union[torch.Tensor, np.ndarray]
+
+
+# =========================================================
+# Utilities (保持不变)
+# =========================================================
+def to_tensor(x: Any, device: str) -> torch.Tensor:
+    if isinstance(x, torch.Tensor):
+        return x.to(device)
+    if isinstance(x, np.ndarray):
+        return torch.from_numpy(x).to(device)
+    return torch.tensor(x, device=device)
+
+
+def flatten_obs(obs: Any, device: str) -> torch.Tensor:
+    """IsaacLab obs often is dict with key 'policy'. We prioritize it."""
+    if isinstance(obs, dict):
+        if "policy" in obs:
+            t = to_tensor(obs["policy"], device=device).float()
+        else:
+            parts = []
+            for k in sorted(obs.keys()):
+                v = to_tensor(obs[k], device=device).float()
+                if v.ndim == 1:
+                    v = v.unsqueeze(0)
+                parts.append(v.flatten(start_dim=1))
+            t = torch.cat(parts, dim=1)
+    else:
+        t = to_tensor(obs, device=device).float()
+
+    if t.ndim == 1:
+        t = t.unsqueeze(0)
+    if t.ndim > 2:
+        t = t.view(t.shape[0], -1)
+    return t
+
+
+def orthogonal_init(m: nn.Module, gain: float = 1.0) -> None:
+    for mod in m.modules():
+        if isinstance(mod, nn.Linear):
+            nn.init.orthogonal_(mod.weight, gain=gain)
+            if mod.bias is not None:
+                nn.init.zeros_(mod.bias)
+
+
+def mlp(in_dim: int, hidden: Tuple[int, ...], out_dim: int, act: str = "silu") -> nn.Sequential:
+    acts = {
+        "relu": nn.ReLU,
+        "elu": nn.ELU,
+        "gelu": nn.GELU,
+        "tanh": nn.Tanh,
+        "silu": nn.SiLU,
+        "leaky_relu": nn.LeakyReLU,
+    }
+    Act = acts.get(act.lower(), nn.SiLU)
+    layers: List[nn.Module] = []
+    last = in_dim
+    for h in hidden:
+        layers += [nn.Linear(last, h), Act()]
+        last = h
+    layers.append(nn.Linear(last, out_dim))
+    return nn.Sequential(*layers)
+
+
+# =========================================================
+# GAE (保持不变)
+# =========================================================
+@torch.no_grad()
+def compute_gae(
+    rewards: torch.Tensor,
+    dones: torch.Tensor,
+    values: torch.Tensor,
+    last_value: torch.Tensor,
+    gamma: float = 0.99,
+    lam: float = 0.95,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    T, N = rewards.shape
+    adv = torch.zeros_like(rewards)
+    last_gae = torch.zeros(N, device=rewards.device)
+
+    for t in reversed(range(T)):
+        nonterminal = 1.0 - dones[t].float()
+        next_value = last_value if t == T - 1 else values[t + 1]
+        delta = rewards[t] + gamma * nonterminal * next_value - values[t]
+        last_gae = delta + gamma * lam * nonterminal * last_gae
+        adv[t] = last_gae
+
+    ret = adv + values
+    return adv, ret
+
+
+# =========================================================
+# Config (新增 obs_structure 相关配置)
+# =========================================================
+@dataclass
+class GraphDiTResidualRLCfg:
+    # dims
+    obs_dim: int
+    action_dim: int
+    z_dim: int = 128
+    num_layers: int = 6  # K
+
+    # observation structure (用于从 obs 提取 ee_node, obj_node)
+    # 如果为 None，使用默认结构
+    obs_structure: Optional[Dict[str, Tuple[int, int]]] = None
+    robot_state_dim: int = 6  # joint_pos dimension
+
+    # actor input: [obs, a_base, z_bar]
+    actor_hidden: Tuple[int, ...] = (256, 256)
+    critic_hidden: Tuple[int, ...] = (256, 256)
+    gate_hidden: Tuple[int, ...] = (256,)
+    
+    # NEW: z_adapter hidden dims
+    z_adapter_hidden: Tuple[int, ...] = (256,)
+
+    # residual distribution
+    log_std_init: float = -0.7
+    log_std_min: float = -10.0
+    log_std_max: float = 1.0
+
+    # residual scaling
+    alpha_init: float = 0.10
+
+    # EMA smoothing for base_action (joints only, gripper excluded)
+    ema_alpha: float = 0.3  # EMA weight: higher = more responsive, lower = smoother
+    joint_dim: int = 5  # Number of joint dimensions (gripper is excluded from EMA)
+
+    # advantage weighted regression
+    beta: float = 1.0
+    weight_clip_max: float = 20.0
+
+    # losses
+    cV: float = 1.0
+    cEnt: float = 0.0
+    cGate: float = 0.02
+
+    # gae
+    gamma: float = 0.99
+    lam: float = 0.95
+
+    # init
+    orthogonal_init: bool = True
+    activation: str = "silu"
+
+    # device
+    device: str = "cuda"
+
+    # residual mask
+    residual_action_mask: Optional[torch.Tensor] = None
+
+
+# =========================================================
+# Modules: Gate / Actor / Critic (保持不变)
+# =========================================================
+class LayerWiseGateNet(nn.Module):
+    """
+    Input: z_layers [B, K, z_dim]
+    Output: w [B, K] softmax weights
+    """
+    def __init__(self, K: int, z_dim: int, hidden: Tuple[int, ...], act: str = "silu"):
+        super().__init__()
+        self.K = K
+        self.z_dim = z_dim
+        self.net = mlp(K * z_dim, hidden, K, act=act)
+
+    def forward(self, z_layers: torch.Tensor) -> torch.Tensor:
+        B, K, D = z_layers.shape
+        assert K == self.K and D == self.z_dim
+        x = z_layers.reshape(B, K * D)
+        logits = self.net(x)
+        w = torch.softmax(logits, dim=-1)
+        return w
+
+
+class ResidualGaussianActor(nn.Module):
+    def __init__(
+        self,
+        in_dim: int,
+        action_dim: int,
+        hidden: Tuple[int, ...],
+        act: str,
+        log_std_init: float,
+        log_std_min: float,
+        log_std_max: float,
+    ):
+        super().__init__()
+        self.body = mlp(in_dim, hidden, hidden[-1], act=act)
+        self.mu = nn.Linear(hidden[-1], action_dim)
+
+        self.log_std = nn.Parameter(torch.ones(action_dim) * log_std_init)
+        self.log_std_min = log_std_min
+        self.log_std_max = log_std_max
+
+    def dist(self, x: torch.Tensor) -> Normal:
+        h = self.body(x)
+        mu = self.mu(h)
+        log_std = torch.clamp(self.log_std, self.log_std_min, self.log_std_max)
+        std = torch.exp(log_std).expand_as(mu)
+        return Normal(mu, std)
+
+
+class DeepValueCritic(nn.Module):
+    def __init__(self, K: int, z_dim: int, hidden: Tuple[int, ...], act: str):
+        super().__init__()
+        self.K = K
+        self.z_dim = z_dim
+
+        self.trunk = mlp(z_dim, hidden, hidden[-1], act=act)
+        self.layer_heads = nn.ModuleList([nn.Linear(hidden[-1], 1) for _ in range(K)])
+        self.bar_head = nn.Linear(hidden[-1], 1)
+
+    def forward_layers(self, z_layers: torch.Tensor) -> torch.Tensor:
+        B, K, D = z_layers.shape
+        assert K == self.K and D == self.z_dim
+
+        Vs = []
+        for k in range(K):
+            zk = z_layers[:, k, :]
+            hk = self.trunk(zk)
+            vk = self.layer_heads[k](hk)
+            Vs.append(vk)
+        V_layers = torch.cat(Vs, dim=1)
+        return V_layers
+
+    def forward_bar(self, z_bar: torch.Tensor) -> torch.Tensor:
+        h = self.trunk(z_bar)
+        v = self.bar_head(h).squeeze(-1)
+        return v
+
+
+# =========================================================
+# NEW: Z Adapter (把 frozen z 转成 RL-friendly z)
+# =========================================================
+class ZAdapter(nn.Module):
+    """
+    Trainable adapter: frozen DiT z → RL-friendly z
+    
+    DiT 的 z 是为 denoise 训练的，可能不是 RL 最优表示
+    Adapter 让 RL 梯度可以微调 z 的使用方式
+    """
+    def __init__(self, z_dim: int, hidden: Tuple[int, ...], act: str = "silu"):
+        super().__init__()
+        
+        if len(hidden) == 0:
+            # 直接线性变换
+            self.net = nn.Linear(z_dim, z_dim)
+        else:
+            layers: List[nn.Module] = []
+            acts = {"relu": nn.ReLU, "elu": nn.ELU, "gelu": nn.GELU, 
+                    "tanh": nn.Tanh, "silu": nn.SiLU}
+            Act = acts.get(act.lower(), nn.SiLU)
+            
+            last = z_dim
+            for h in hidden:
+                layers += [nn.Linear(last, h), nn.LayerNorm(h), Act()]
+                last = h
+            layers.append(nn.Linear(last, z_dim))
+            
+            self.net = nn.Sequential(*layers)
+        
+        # 初始化为近似恒等映射
+        self._init_near_identity()
+    
+    def _init_near_identity(self):
+        """初始化为近似恒等映射，训练初期 adapter 几乎不改变 z"""
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.orthogonal_(m.weight, gain=0.1)  # 小 gain
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+    
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
+        # Residual connection: z_out = z + adapter(z)
+        # 这样初始化后 adapter ≈ 0，z_out ≈ z
+        return z + self.net(z)
+
+
+# =========================================================
+# Backbone Adapter (修改：加入 extract_z_fast)
+# =========================================================
+class GraphDiTBackboneAdapter:
+    """
+    Adapter interface for GraphDiT backbone.
+    
+    Methods:
+    - predict_base_trajectory(): 低频，返回整条轨迹
+    - extract_z_fast(): 高频，只跑 Graph-Attention
+    """
+    def __init__(self, graph_dit_policy: nn.Module):
+        self.backbone = graph_dit_policy
+
+    @torch.no_grad()
+    def predict_base_trajectory(self, **kwargs) -> torch.Tensor:
+        """低频：预测完整轨迹 [B, pred_horizon, act_dim]"""
+        return self.backbone.predict(**kwargs)
+
+    @torch.no_grad()
+    def extract_z_fast(
+        self, 
+        ee_node: torch.Tensor, 
+        obj_node: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        高频：只跑 Graph-Attention，返回 z_layers [B, K, z_dim]
+        
+        Args:
+            ee_node: [B, 7] - EE position(3) + orientation(4)
+            obj_node: [B, 7] - Object position(3) + orientation(4)
+        
+        Returns:
+            z_layers: [B, K, z_dim]
+        """
+        if not hasattr(self.backbone, "extract_z_fast"):
+            raise NotImplementedError(
+                "GraphDiTPolicy must implement extract_z_fast(ee_node, obj_node) -> [B,K,z_dim]"
+            )
+        return self.backbone.extract_z_fast(ee_node, obj_node)
+    
+    @property
+    def node_stats(self) -> Dict[str, Optional[torch.Tensor]]:
+        """获取 normalization stats（如果有）"""
+        stats = {}
+        if hasattr(self.backbone, 'cfg'):
+            # 尝试从 checkpoint 加载的 stats
+            pass
+        return stats
+
+
+# =========================================================
+# OUR POLICY: GraphDiT + Residual RL Head (高频 z 版本)
+# =========================================================
+class GraphDiTResidualRLPolicy(nn.Module):
+    """
+    Online inference:
+        1. base_action_t = 从 RHC buffer pop（低频，每 exec_horizon 步更新）
+        2. z_layers_t = extract_z_fast(ee_node, obj_node)（高频，每步更新！）
+        3. z_adapted = ZAdapter(z_layers)（trainable）
+        4. z_bar_t = GateNet(z_adapted)
+        5. delta_a_t ~ Actor(obs, base_action, z_bar)
+        6. a_t = base + alpha * delta
+    
+    关键改进：
+    - z 每步更新（高频），反映当前时刻的 EE-Object 关系
+    - base_action 低频更新，利用 DiT 的轨迹规划能力
+    - ZAdapter 让 frozen z 可以被 RL 梯度微调使用方式
+    """
+
+    def __init__(
+        self,
+        cfg: GraphDiTResidualRLCfg,
+        backbone: GraphDiTBackboneAdapter,
+        pred_horizon: int = 16,
+        exec_horizon: int = 8,
+        num_diffusion_steps: int = 2,
+    ):
+        super().__init__()
+        self.cfg = cfg
+        self.device_str = cfg.device
+
+        self.backbone = backbone
+        self.pred_horizon = pred_horizon
+        self.exec_horizon = exec_horizon
+        self.num_diffusion_steps = num_diffusion_steps
+
+        # ============================================================
+        # NEW: Z Adapter (trainable)
+        # ============================================================
+        self.z_adapter = ZAdapter(
+            z_dim=cfg.z_dim,
+            hidden=cfg.z_adapter_hidden,
+            act=cfg.activation,
+        )
+
+        # Gate (对 adapted z 做 softmax 融合)
+        self.gate = LayerWiseGateNet(
+            K=cfg.num_layers,
+            z_dim=cfg.z_dim,
+            hidden=cfg.gate_hidden,
+            act=cfg.activation,
+        )
+
+        # Actor input dim: obs + base_action + z_bar
+        actor_in_dim = cfg.obs_dim + cfg.action_dim + cfg.z_dim
+        self.actor = ResidualGaussianActor(
+            in_dim=actor_in_dim,
+            action_dim=cfg.action_dim,
+            hidden=cfg.actor_hidden,
+            act=cfg.activation,
+            log_std_init=cfg.log_std_init,
+            log_std_min=cfg.log_std_min,
+            log_std_max=cfg.log_std_max,
+        )
+
+        # Critic (对 adapted z 做 deep supervision)
+        self.critic = DeepValueCritic(
+            K=cfg.num_layers,
+            z_dim=cfg.z_dim,
+            hidden=cfg.critic_hidden,
+            act=cfg.activation,
+        )
+
+        # Residual scaling
+        self.alpha = nn.Parameter(torch.tensor(cfg.alpha_init, dtype=torch.float32))
+
+        # Residual mask
+        if cfg.residual_action_mask is not None:
+            self.register_buffer(
+                "residual_action_mask",
+                cfg.residual_action_mask.float().view(1, -1),
+            )
+        else:
+            self.residual_action_mask = None
+
+        # ============================================================
+        # RHC buffers (for base_action, 低频)
+        # ============================================================
+        self._base_action_buffers: Optional[List[List[torch.Tensor]]] = None
+        self._num_envs: Optional[int] = None
+
+        # ============================================================
+        # EMA smoothing for base_action (joints only)
+        # ============================================================
+        self.ema_alpha = cfg.ema_alpha
+        self.joint_dim = cfg.joint_dim
+        self._ema_smoothed_joints: Optional[torch.Tensor] = None  # [num_envs, joint_dim]
+
+        # ============================================================
+        # Normalization stats (从 backbone 获取或手动设置)
+        # ============================================================
+        self.register_buffer('norm_ee_node_mean', None, persistent=False)
+        self.register_buffer('norm_ee_node_std', None, persistent=False)
+        self.register_buffer('norm_object_node_mean', None, persistent=False)
+        self.register_buffer('norm_object_node_std', None, persistent=False)
+
+        # Init
+        if cfg.orthogonal_init:
+            orthogonal_init(self.gate, gain=np.sqrt(2))
+            orthogonal_init(self.actor, gain=np.sqrt(2))
+            orthogonal_init(self.critic, gain=np.sqrt(2))
+            nn.init.orthogonal_(self.actor.mu.weight, gain=0.01)
+            nn.init.zeros_(self.actor.mu.bias)
+
+    # -----------------------------
+    # Normalization stats setter
+    # -----------------------------
+    def set_normalization_stats(
+        self,
+        ee_node_mean: Optional[torch.Tensor] = None,
+        ee_node_std: Optional[torch.Tensor] = None,
+        object_node_mean: Optional[torch.Tensor] = None,
+        object_node_std: Optional[torch.Tensor] = None,
+    ):
+        """设置 normalization stats（从 checkpoint 加载后调用）"""
+        def _to_tensor(x):
+            """Convert numpy array or tensor to torch.Tensor"""
+            if x is None:
+                return None
+            if isinstance(x, np.ndarray):
+                return torch.from_numpy(x).float()
+            if isinstance(x, torch.Tensor):
+                return x.float()
+            return torch.tensor(x, dtype=torch.float32)
+
+        if ee_node_mean is not None:
+            self.norm_ee_node_mean = _to_tensor(ee_node_mean)
+            self.norm_ee_node_std = _to_tensor(ee_node_std)
+        if object_node_mean is not None:
+            self.norm_object_node_mean = _to_tensor(object_node_mean)
+            self.norm_object_node_std = _to_tensor(object_node_std)
+
+    # -----------------------------
+    # Buffer management
+    # -----------------------------
+    def init_env_buffers(self, num_envs: int) -> None:
+        """初始化 RHC buffers 和 EMA 状态"""
+        self._base_action_buffers = [[] for _ in range(num_envs)]
+        self._num_envs = num_envs
+        # EMA state will be initialized lazily in get_base_action()
+        self._ema_smoothed_joints = None
+
+    def reset_envs(self, env_ids: torch.Tensor) -> None:
+        """重置指定 env 的 buffers 和 EMA 状态"""
+        if self._base_action_buffers is None:
+            return
+        for i in env_ids.tolist():
+            if i < len(self._base_action_buffers):
+                self._base_action_buffers[i].clear()
+        # Reset EMA state for reset environments
+        if self._ema_smoothed_joints is not None:
+            self._ema_smoothed_joints[env_ids] = 0.0
+
+    # -----------------------------
+    # Node extraction from obs
+    # -----------------------------
+    def _extract_nodes_from_obs(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        从 obs 提取 ee_node 和 obj_node
+        
+        Args:
+            obs: [B, obs_dim]
+        
+        Returns:
+            ee_node: [B, 7] - position(3) + orientation(4)
+            obj_node: [B, 7] - position(3) + orientation(4)
+        """
+        cfg = self.cfg
+        
+        if cfg.obs_structure is not None:
+            obs_struct = cfg.obs_structure
+            obj_pos = obs[:, obs_struct["object_position"][0]:obs_struct["object_position"][1]]
+            obj_ori = obs[:, obs_struct["object_orientation"][0]:obs_struct["object_orientation"][1]]
+            ee_pos = obs[:, obs_struct["ee_position"][0]:obs_struct["ee_position"][1]]
+            ee_ori = obs[:, obs_struct["ee_orientation"][0]:obs_struct["ee_orientation"][1]]
+        else:
+            # Default structure: [joint_pos(6), obj_pos(3), obj_ori(4), ee_pos(3), ee_ori(4), ...]
+            robot_state_dim = cfg.robot_state_dim
+            obj_pos = obs[:, robot_state_dim:robot_state_dim + 3]
+            obj_ori = obs[:, robot_state_dim + 3:robot_state_dim + 7]
+            ee_pos = obs[:, robot_state_dim + 7:robot_state_dim + 10]
+            ee_ori = obs[:, robot_state_dim + 10:robot_state_dim + 14]
+        
+        ee_node = torch.cat([ee_pos, ee_ori], dim=-1)      # [B, 7]
+        obj_node = torch.cat([obj_pos, obj_ori], dim=-1)   # [B, 7]
+        
+        return ee_node, obj_node
+
+    def _normalize_nodes(
+        self, 
+        ee_node: torch.Tensor, 
+        obj_node: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Normalize nodes (如果有 stats)"""
+        if self.norm_ee_node_mean is not None:
+            ee_node = (ee_node - self.norm_ee_node_mean.to(ee_node.device)) / (self.norm_ee_node_std.to(ee_node.device) + 1e-8)
+        if self.norm_object_node_mean is not None:
+            obj_node = (obj_node - self.norm_object_node_mean.to(obj_node.device)) / (self.norm_object_node_std.to(obj_node.device) + 1e-8)
+        return ee_node, obj_node
+
+    # -----------------------------
+    # High-frequency z extraction
+    # -----------------------------
+    def _get_z_layers_fast(self, obs: torch.Tensor) -> torch.Tensor:
+        """
+        高频获取 z_layers：每步调用
+        
+        1. 从 obs 提取当前 ee_node, obj_node
+        2. Normalize
+        3. 调用 backbone.extract_z_fast()（frozen）
+        4. 通过 z_adapter（trainable）
+        
+        Returns:
+            z_layers_adapted: [B, K, z_dim]
+        """
+        # 1. Extract nodes
+        ee_node, obj_node = self._extract_nodes_from_obs(obs)
+        
+        # 2. Normalize
+        ee_node_norm, obj_node_norm = self._normalize_nodes(ee_node, obj_node)
+        
+        # 3. Frozen z extraction
+        z_layers_frozen = self.backbone.extract_z_fast(ee_node_norm, obj_node_norm)  # [B, K, z_dim]
+        
+        # 4. Adapter (trainable)
+        B, K, D = z_layers_frozen.shape
+        z_flat = z_layers_frozen.reshape(B * K, D)
+        z_adapted_flat = self.z_adapter(z_flat)
+        z_layers_adapted = z_adapted_flat.reshape(B, K, D)
+        
+        return z_layers_adapted
+
+    # -----------------------------
+    # Latent aggregation
+    # -----------------------------
+    def aggregate_latent(self, z_layers: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        z_layers: [B, K, z_dim]
+        returns:
+            z_bar: [B, z_dim]
+            w:     [B, K]
+        """
+        w = self.gate(z_layers)                                 # [B, K]
+        z_bar = torch.sum(w.unsqueeze(-1) * z_layers, dim=1)    # [B, z_dim]
+        return z_bar, w
+
+    # -----------------------------
+    # Base action (低频, RHC)
+    # -----------------------------
+    @torch.no_grad()
+    def get_base_action(
+        self,
+        obs_norm: torch.Tensor,
+        action_history: Optional[torch.Tensor] = None,
+        ee_node_history: Optional[torch.Tensor] = None,
+        object_node_history: Optional[torch.Tensor] = None,
+        joint_states_history: Optional[torch.Tensor] = None,
+        subtask_condition: Optional[torch.Tensor] = None,
+        deterministic: bool = True,
+    ) -> torch.Tensor:
+        """
+        Return base action [B, act_dim] using RHC buffer.
+        低频：只在 buffer 空时调用 DiT
+        """
+        B = obs_norm.shape[0]
+        
+        if self._base_action_buffers is None or len(self._base_action_buffers) != B:
+            # Offline mode: 直接预测
+            traj = self.backbone.predict_base_trajectory(
+                obs=obs_norm,
+                action_history=action_history,
+                ee_node_history=ee_node_history,
+                object_node_history=object_node_history,
+                joint_states_history=joint_states_history,
+                subtask_condition=subtask_condition,
+                num_diffusion_steps=self.num_diffusion_steps,
+                deterministic=deterministic,
+            )
+            return traj[:, 0, :]
+
+        # Online mode: 使用 buffer
+        need_replan = any(len(self._base_action_buffers[i]) == 0 for i in range(B))
+        
+        if need_replan:
+            traj = self.backbone.predict_base_trajectory(
+                obs=obs_norm,
+                action_history=action_history,
+                ee_node_history=ee_node_history,
+                object_node_history=object_node_history,
+                joint_states_history=joint_states_history,
+                subtask_condition=subtask_condition,
+                num_diffusion_steps=self.num_diffusion_steps,
+                deterministic=deterministic,
+            )
+
+            for i in range(B):
+                if len(self._base_action_buffers[i]) == 0:
+                    for t in range(min(self.exec_horizon, traj.shape[1])):
+                        self._base_action_buffers[i].append(traj[i, t, :].detach())
+
+        base_actions = []
+        for i in range(B):
+            base_actions.append(self._base_action_buffers[i].pop(0))
+        base_action = torch.stack(base_actions, dim=0)  # [B, action_dim]
+
+        # Apply EMA smoothing to joints only (gripper excluded)
+        if self.joint_dim < base_action.shape[-1]:
+            joints = base_action[:, : self.joint_dim]  # [B, joint_dim]
+            gripper = base_action[:, self.joint_dim :]  # [B, action_dim - joint_dim]
+
+            # Initialize EMA state if needed
+            if self._ema_smoothed_joints is None:
+                self._ema_smoothed_joints = joints.clone()
+            elif self._ema_smoothed_joints.shape[0] != B:
+                # Resize if batch size changed
+                old_smoothed = self._ema_smoothed_joints
+                self._ema_smoothed_joints = torch.zeros(
+                    B, self.joint_dim, device=joints.device, dtype=joints.dtype
+                )
+                if old_smoothed.shape[0] <= B:
+                    self._ema_smoothed_joints[: old_smoothed.shape[0]] = old_smoothed
+
+            # Apply EMA: smoothed = alpha * new + (1 - alpha) * old
+            self._ema_smoothed_joints = (
+                self.ema_alpha * joints + (1 - self.ema_alpha) * self._ema_smoothed_joints
+            )
+
+            # Concatenate smoothed joints with gripper
+            base_action = torch.cat([self._ema_smoothed_joints, gripper], dim=-1)
+
+        return base_action
+
+    # -----------------------------
+    # Main act()
+    # -----------------------------
+    @torch.no_grad()
+    def act(
+        self,
+        obs_raw: Any,
+        obs_norm: Optional[torch.Tensor] = None,
+        action_history: Optional[torch.Tensor] = None,
+        ee_node_history: Optional[torch.Tensor] = None,
+        object_node_history: Optional[torch.Tensor] = None,
+        joint_states_history: Optional[torch.Tensor] = None,
+        subtask_condition: Optional[torch.Tensor] = None,
+        deterministic: bool = False,
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        """
+        Returns:
+            action: [B, act_dim]
+            info: dict for training
+        """
+        obs = flatten_obs(obs_raw, device=self.device_str)
+
+        if obs_norm is None:
+            obs_norm = obs
+
+        # ============================================================
+        # 1. Base action (低频，从 buffer)
+        # ============================================================
+        a_base = self.get_base_action(
+            obs_norm=obs_norm,
+            action_history=action_history,
+            ee_node_history=ee_node_history,
+            object_node_history=object_node_history,
+            joint_states_history=joint_states_history,
+            subtask_condition=subtask_condition,
+            deterministic=True,
+        )
+
+        # ============================================================
+        # 2. z_layers (高频！每步调用 extract_z_fast)
+        # ============================================================
+        z_layers = self._get_z_layers_fast(obs)  # [B, K, z_dim], 已经过 adapter
+
+        # 3. GateNet 融合
+        z_bar, w = self.aggregate_latent(z_layers)
+
+        # 4. Actor
+        x = torch.cat([obs_norm, a_base, z_bar], dim=-1)
+        dist = self.actor.dist(x)
+        
+        if deterministic:
+            delta = dist.mean
+        else:
+            delta = dist.rsample()
+
+        # Residual mask
+        if self.residual_action_mask is not None:
+            delta = delta * self.residual_action_mask
+
+        # 5. Final action
+        alpha = torch.clamp(self.alpha, 0.0, 1.0)
+        a = a_base + alpha * delta
+
+        log_prob = dist.log_prob(delta).sum(dim=-1)
+        entropy = dist.entropy().sum(dim=-1)
+        v_bar = self.critic.forward_bar(z_bar)
+
+        info = {
+            "obs": obs,  # 原始 obs（用于训练时重新计算 z_layers 以获得梯度）
+            "obs_norm": obs_norm,
+            "a_base": a_base,
+            "delta": delta,
+            "log_prob": log_prob,
+            "entropy": entropy,
+            "z_layers": z_layers,  # 注意：rollout 时的 z_layers 没有梯度（因为 @torch.no_grad）
+            "z_bar": z_bar,
+            "gate_w": w,
+            "v_bar": v_bar,
+            "alpha": alpha.detach(),
+        }
+        return a, info
+
+    # -----------------------------
+    # Loss (保持不变，但 z_layers 现在是高频的)
+    # -----------------------------
+    def compute_loss(
+        self,
+        batch: Dict[str, torch.Tensor],
+    ) -> Dict[str, torch.Tensor]:
+        """
+        batch keys:
+            obs_norm:   [B, obs_dim]
+            a_base:     [B, act_dim]
+            action:     [B, act_dim]
+            obs:        [B, obs_dim]  # 原始 obs（用于重新计算 z_layers 以获得梯度）
+            returns:    [B]
+            adv:        [B]
+        
+        Note: z_layers 需要重新计算（而不是从 batch 中取），
+        因为 rollout 时 act() 有 @torch.no_grad()，无法获得 z_adapter 的梯度。
+        """
+        obs_norm = batch["obs_norm"]
+        obs = batch.get("obs", obs_norm)  # 如果没有提供原始 obs，使用 obs_norm
+        a_base = batch["a_base"]
+        action = batch["action"]
+        returns = batch["returns"]
+        adv = batch["adv"]
+
+        # Recompute z_layers with gradients (for training z_adapter)
+        z_layers = self._get_z_layers_fast(obs)  # [B, K, z_dim], 有梯度！
+
+        # Recompute gate + z_bar (for grad)
+        z_bar_new, w = self.aggregate_latent(z_layers)
+
+        # Actor distribution
+        x = torch.cat([obs_norm, a_base, z_bar_new], dim=-1)
+        dist = self.actor.dist(x)
+
+        # Recover delta
+        alpha = torch.clamp(self.alpha, 0.0, 1.0)
+        delta = (action - a_base) / (alpha + 1e-8)
+
+        if self.residual_action_mask is not None:
+            delta = delta * self.residual_action_mask
+
+        log_prob = dist.log_prob(delta).sum(dim=-1)
+        entropy = dist.entropy().sum(dim=-1)
+
+        # AWR weights
+        w_adv = torch.exp(adv / max(self.cfg.beta, 1e-8))
+        w_adv = torch.clamp(w_adv, 0.0, self.cfg.weight_clip_max)
+        w_adv = w_adv / (w_adv.mean() + 1e-8)
+
+        # Actor loss
+        loss_actor = -(w_adv.detach() * log_prob).mean()
+
+        # Deep critic supervision
+        V_layers = self.critic.forward_layers(z_layers)
+        K = V_layers.shape[1]
+        omega = torch.arange(1, K + 1, device=V_layers.device, dtype=torch.float32)
+        omega = omega / omega.sum()
+        
+        returns_expand = returns.unsqueeze(-1).expand_as(V_layers)
+        loss_v_layers = ((V_layers - returns_expand) ** 2)
+        loss_critic = (loss_v_layers * omega.view(1, -1)).mean()
+
+        # Baseline head
+        V_bar = self.critic.forward_bar(z_bar_new)
+        loss_v_bar = F.mse_loss(V_bar, returns)
+
+        # Gate entropy
+        gate_entropy = -(w * torch.log(w + 1e-8)).sum(dim=-1).mean()
+        loss_gate = -gate_entropy
+
+        # Total
+        loss_total = (
+            loss_actor
+            + self.cfg.cV * (loss_critic + 0.5 * loss_v_bar)
+            + self.cfg.cGate * loss_gate
+            - self.cfg.cEnt * entropy.mean()
+        )
+
+        return {
+            "loss_total": loss_total,
+            "loss_actor": loss_actor.detach(),
+            "loss_critic_layers": loss_critic.detach(),
+            "loss_critic_bar": loss_v_bar.detach(),
+            "loss_gate": loss_gate.detach(),
+            "gate_entropy": gate_entropy.detach(),
+            "entropy": entropy.mean().detach(),
+            "alpha": alpha.detach(),
+        }
+    
+    # -----------------------------
+    # Save / Load
+    # -----------------------------
+    def save(self, path: str):
+        """Save policy"""
+        torch.save({
+            "policy_state_dict": self.state_dict(),
+            "cfg": self.cfg,
+        }, path)
+        print(f"[GraphDiTResidualRLPolicy] Saved to: {path}")
+    
+    @classmethod
+    def load(cls, path: str, backbone: GraphDiTBackboneAdapter, device: str = "cuda"):
+        """Load policy"""
+        checkpoint = torch.load(path, map_location=device, weights_only=False)
+        cfg = checkpoint["cfg"]
+        
+        policy = cls(cfg, backbone)
+        policy.load_state_dict(checkpoint["policy_state_dict"])
+        policy.to(device)
+        
+        print(f"[GraphDiTResidualRLPolicy] Loaded from: {path}")
+        return policy

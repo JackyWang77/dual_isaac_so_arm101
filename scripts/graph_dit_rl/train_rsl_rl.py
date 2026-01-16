@@ -97,9 +97,9 @@ from datetime import datetime
 import gymnasium as gym
 import SO_101.tasks  # noqa: F401  # Register environments
 import torch
-# Import ActorCritic for RSL-RL namespace
-from SO_101.policies.residual_rl_actor_critic import \
-    ResidualActorCritic  # noqa: F401
+# DEPRECATED: Old ResidualActorCritic has been removed
+# from SO_101.policies.residual_rl_actor_critic import \
+#     ResidualActorCritic  # noqa: F401
 
 
 def main():
@@ -173,6 +173,26 @@ def main():
         # Override CLI arguments
         if args_cli.num_envs is not None:
             env_cfg.scene.num_envs = args_cli.num_envs
+            agent_cfg.num_envs = args_cli.num_envs
+            print(f"[Train] ✅ Updated agent_cfg.num_envs to {args_cli.num_envs}")
+            # CRITICAL: Also update policy config's num_envs for phase detection!
+            # The policy config's num_envs was set in __post_init__ with the default value (1)
+            # We need to update it to match the actual num_envs from CLI
+            if hasattr(agent_cfg, 'policy') and agent_cfg.policy is not None:
+                # Update ResidualActorCriticCfg's num_envs
+                if hasattr(agent_cfg.policy, 'num_envs'):
+                    agent_cfg.policy.num_envs = args_cli.num_envs
+                    print(f"[Train] ✅ Updated policy.num_envs to {args_cli.num_envs}")
+                else:
+                    # If num_envs doesn't exist, add it
+                    agent_cfg.policy.num_envs = args_cli.num_envs
+                    print(f"[Train] ✅ Set policy.num_envs to {args_cli.num_envs}")
+                # Also check residual_rl_cfg (though it shouldn't have num_envs)
+                if hasattr(agent_cfg.policy, 'residual_rl_cfg'):
+                    # Remove num_envs from residual_rl_cfg if it exists (it shouldn't)
+                    if hasattr(agent_cfg.policy.residual_rl_cfg, 'num_envs'):
+                        delattr(agent_cfg.policy.residual_rl_cfg, 'num_envs')
+                        print(f"[Train] ✅ Removed num_envs from residual_rl_cfg")
         if args_cli.max_iterations is not None:
             agent_cfg.max_iterations = args_cli.max_iterations
         if args_cli.save_interval is not None:
@@ -217,7 +237,8 @@ def main():
         import builtins
         import sys
 
-        import SO_101.policies.residual_rl_actor_critic  # noqa: F401
+        # DEPRECATED: Old ResidualActorCritic has been removed
+        # import SO_101.policies.residual_rl_actor_critic  # noqa: F401
 
         # Inject SO_101 into builtins so eval() can access it
         if not hasattr(builtins, "SO_101"):
@@ -227,7 +248,7 @@ def main():
         print(f"\n[Train] Creating RSL-RL runner...")
         print(f"[Train] Policy class: {agent_cfg.policy.class_name}")
 
-        # ✅ Safe device selection with fallback
+        # Safe device selection with fallback
         device = getattr(args_cli, "device", None) or agent_cfg.device
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -237,7 +258,7 @@ def main():
             env, agent_cfg.to_dict(), log_dir=log_dir, device=device
         )
 
-        # ✅ Resume from checkpoint if specified
+        # Resume from checkpoint if specified
         if args_cli.resume:
             if not os.path.exists(args_cli.resume):
                 raise FileNotFoundError(f"Resume checkpoint not found: {args_cli.resume}")

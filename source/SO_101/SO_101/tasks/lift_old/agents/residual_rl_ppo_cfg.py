@@ -5,9 +5,12 @@
 
 """RSL-RL PPO configuration for Residual RL Policy.
 
-This configuration sets up PPO training for the ResidualRLPolicy,
-which uses a frozen Graph-DiT backbone for scene understanding
-and trains only the residual action head.
+DEPRECATED: This file is kept for backward compatibility but the old
+ResidualRLPolicy and ResidualActorCritic have been replaced by
+GraphDiTResidualRLPolicy (independent training framework).
+
+This configuration is no longer functional and should not be used.
+Please use the new GraphDiTResidualRLPolicy instead.
 """
 
 import os
@@ -15,8 +18,10 @@ import os
 from isaaclab.utils import configclass
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoAlgorithmCfg
 from SO_101.policies import GraphDiTPolicyCfg
-from SO_101.policies.residual_rl_actor_critic import ResidualActorCriticCfg
-from SO_101.policies.residual_rl_policy import ResidualRLPolicyCfg
+
+# DEPRECATED: Old ResidualRLPolicy and ResidualActorCritic have been removed
+# from SO_101.policies.residual_rl_actor_critic import ResidualActorCriticCfg
+# from SO_101.policies.residual_rl_policy import ResidualRLPolicyCfg
 
 
 def _get_pretrained_checkpoint() -> str:
@@ -30,44 +35,12 @@ def _get_pretrained_checkpoint() -> str:
     )
 
 
-def _create_residual_rl_cfg() -> ResidualRLPolicyCfg:
-    """Create ResidualRLPolicyCfg with runtime checkpoint path."""
-    # Graph-DiT backbone configuration (will be overridden by loaded checkpoint)
-    graph_dit_cfg = GraphDiTPolicyCfg(
-        obs_dim=32,
-        action_dim=6,
-        hidden_dim=128,  # Will be overridden by loaded model
-        num_layers=4,
-        num_heads=4,
-        node_dim=7,
-        edge_dim=4,
-        action_history_length=4,
-        diffusion_steps=100,
-        mode="flow_matching",
-    )
-
-    return ResidualRLPolicyCfg(
-        graph_dit_cfg=graph_dit_cfg,
-        pretrained_checkpoint=_get_pretrained_checkpoint(),
-        # PPO residual network
-        residual_hidden_dims=[256, 128, 64],
-        residual_activation="elu",
-        # Value network
-        value_hidden_dims=[256, 128, 64],
-        value_activation="elu",
-        # Input dimensions
-        robot_state_dim=6,  # joint_pos(6) only (no joint_vel)
-        # Residual scaling (start VERY small for Residual RL!)
-        residual_scale=0.05,  # Reduced from 0.1
-        max_residual_scale=0.3,  # Reduced from 0.5
-        # Noise (CRITICAL: keep small for Residual RL!)
-        init_noise_std=0.1,  # Reduced from 0.3
-        # Feature usage
-        use_graph_embedding=True,
-        use_node_features=False,
-        use_edge_features=False,
-        # Freeze backbone
-        freeze_backbone=True,
+def _create_residual_rl_cfg():
+    """DEPRECATED: This function is no longer functional."""
+    raise NotImplementedError(
+        "ResidualRLPolicyCfg has been removed. "
+        "Please use GraphDiTResidualRLPolicy instead. "
+        "See: SO_101.policies.graph_dit_residual_rl_policy"
     )
 
 
@@ -84,22 +57,15 @@ class LiftResidualRLRunnerCfg(RslRlOnPolicyRunnerCfg):
     save_interval = 50
     experiment_name = "lift_residual_rl"
     empirical_normalization = False
+    num_envs: int = 1
 
     def __post_init__(self):
-        """Initialize config after dataclass creation - reads env var at runtime."""
-        super().__post_init__()
-
-        # Create residual_rl_cfg at runtime (reads env var NOW, not at import time)
-        residual_rl_cfg = _create_residual_rl_cfg()
-
-        # Policy configuration using ResidualActorCriticCfg
-        self.policy = ResidualActorCriticCfg(
-            residual_rl_cfg=residual_rl_cfg,
-            class_name="SO_101.policies.residual_rl_actor_critic.ResidualActorCritic",
-            init_noise_std=0.1,  # Reduced from 0.3 for Residual RL
-            actor_hidden_dims=[256, 128, 64],
-            critic_hidden_dims=[256, 128, 64],
-            activation="elu",
+        """DEPRECATED: This configuration is no longer functional."""
+        raise NotImplementedError(
+            "LiftResidualRLRunnerCfg is deprecated. "
+            "The old ResidualRLPolicy and ResidualActorCritic have been removed. "
+            "Please use GraphDiTResidualRLPolicy instead. "
+            "See: SO_101.policies.graph_dit_residual_rl_policy"
         )
 
     # PPO algorithm configuration (tuned for residual learning)

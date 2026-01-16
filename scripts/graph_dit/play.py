@@ -624,31 +624,31 @@ def play_graph_dit_policy(
 
             if needs_replan:
                 # Predict action trajectory for ALL environments (batched inference)
-                # Output: [num_envs, pred_horizon, action_dim]
-            action_trajectory_normalized = policy.predict(
-                obs_tensor_normalized,
-                action_history=action_history_tensor,
-                ee_node_history=ee_node_history_tensor,
-                object_node_history=object_node_history_tensor,
-                joint_states_history=joint_states_history_tensor,
-                subtask_condition=subtask_condition,
-                num_diffusion_steps=num_diffusion_steps,
-                deterministic=True, 
-            )  # [num_envs, pred_horizon, action_dim]
+                # Output: [num_envs, pred_horizon, action_dim] (normalized)
+                action_trajectory_normalized = policy.predict(
+                    obs_tensor_normalized,
+                    action_history=action_history_tensor,
+                    ee_node_history=ee_node_history_tensor,
+                    object_node_history=object_node_history_tensor,
+                    joint_states_history=joint_states_history_tensor,
+                    subtask_condition=subtask_condition,
+                    num_diffusion_steps=num_diffusion_steps,
+                    deterministic=True, 
+                )  # [num_envs, pred_horizon, action_dim]
             
                 # Denormalize trajectory
-            if action_mean is not None and action_std is not None:
+                if action_mean is not None and action_std is not None:
                     # Broadcast mean/std for trajectory: [action_dim] -> [1, 1, action_dim]
-                action_trajectory = (
-                    action_trajectory_normalized * action_std.unsqueeze(0)
-                    + action_mean.unsqueeze(0)
-                )
-            else:
-                action_trajectory = action_trajectory_normalized
-                if step_count == 0:
-                    print(
-                        f"[Play] Warning: No action normalization stats, using normalized actions directly"
+                    action_trajectory = (
+                        action_trajectory_normalized * action_std.unsqueeze(0).unsqueeze(0)
+                        + action_mean.unsqueeze(0).unsqueeze(0)
                     )
+                else:
+                    action_trajectory = action_trajectory_normalized
+                    if step_count == 0:
+                        print(
+                            f"[Play] Warning: No action normalization stats, using normalized actions directly"
+                        )
 
                 # 🟢 VISUAL DEBUG: Store target joint positions for visualization
                 # action_trajectory is [num_envs, pred_horizon, action_dim]

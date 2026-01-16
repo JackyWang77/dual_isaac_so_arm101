@@ -8,20 +8,12 @@
 from .graph_dit_policy import (ActionHistoryBuffer, GraphDiTPolicy,
                                GraphDiTPolicyCfg, JointStateHistoryBuffer,
                                NodeHistoryBuffer)
-from .residual_rl_policy import ResidualRLPolicy, ResidualRLPolicyCfg
-
-# Conditionally import RSL-RL ActorCritic (only needed for RSL-RL training)
-# Don't import if isaaclab_rl is not available (e.g., during simple playback)
-try:
-    from .residual_rl_actor_critic import (ResidualActorCritic,
-                                           ResidualActorCriticCfg)
-
-    _HAS_RSL_RL = True
-except (ImportError, ModuleNotFoundError):
-    # RSL-RL modules not available, skip import (only needed for training)
-    _HAS_RSL_RL = False
-    ResidualActorCritic = None
-    ResidualActorCriticCfg = None
+from .graph_dit_residual_rl_policy import (
+    GraphDiTResidualRLPolicy,
+    GraphDiTResidualRLCfg,
+    GraphDiTBackboneAdapter,
+    compute_gae,
+)
 
 __all__ = [
     "ActionHistoryBuffer",
@@ -29,15 +21,8 @@ __all__ = [
     "NodeHistoryBuffer",
     "GraphDiTPolicy",
     "GraphDiTPolicyCfg",
-    "ResidualRLPolicy",
-    "ResidualRLPolicyCfg",
+    "GraphDiTResidualRLPolicy",
+    "GraphDiTResidualRLCfg",
+    "GraphDiTBackboneAdapter",
+    "compute_gae",
 ]
-
-# Add RSL-RL exports only if available
-if _HAS_RSL_RL:
-    __all__.extend(
-        [
-            "ResidualActorCritic",
-            "ResidualActorCriticCfg",
-        ]
-    )
