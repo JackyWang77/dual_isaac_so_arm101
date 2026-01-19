@@ -104,6 +104,19 @@ def play_graph_dit_rl_policy(
     # Initialize policy buffers
     policy.init_env_buffers(num_envs)
 
+    # History buffers for Graph-DiT (optimized: single tensor per history type)
+    action_history_length = getattr(graph_dit.cfg, 'action_history_length', 4)
+    # NOTE: GraphDiT expects 6 dimensions for joint states (was trained with 6)
+    # The residual RL config's joint_dim=5 is only for EMA smoothing, not for joint state extraction
+    graph_dit_joint_dim = 6  # Always 6 for GraphDiT compatibility
+    action_dim = policy.cfg.action_dim if hasattr(policy, 'cfg') and hasattr(policy.cfg, 'action_dim') else 6
+    
+    # Use single tensor [num_envs, history_len, dim] for efficiency
+    action_history = torch.zeros(num_envs, action_history_length, action_dim, device=device)
+    ee_node_history = torch.zeros(num_envs, action_history_length, 7, device=device)
+    object_node_history = torch.zeros(num_envs, action_history_length, 7, device=device)
+    joint_state_history = torch.zeros(num_envs, action_history_length, graph_dit_joint_dim, device=device)
+
     # Reset environment
     obs, info = env.reset()
     obs = _process_obs(obs, device)
@@ -120,9 +133,34 @@ def play_graph_dit_rl_policy(
     step_count = 0
     try:
         while simulation_app.is_running() and completed_episodes < num_episodes:
+            # Extract current node features and joint states from obs
+            ee_node_current, object_node_current = policy._extract_nodes_from_obs(obs)
+            # NOTE: GraphDiT expects 6 dimensions (was trained with 6), regardless of residual RL config
+            joint_states_current = obs[:, :6]  # [B, 6] - always 6 for GraphDiT compatibility
+            
+            # History tensors are already in batch format [num_envs, history_len, dim]
+            # No need to stack, just use directly
+            
             # Get action from policy
             with torch.no_grad():
-                action, policy_info = policy.act(obs, deterministic=deterministic)
+                action, policy_info = policy.act(
+                    obs_raw=obs,
+                    obs_norm=obs,
+                    action_history=action_history,  # [num_envs, history_len, action_dim]
+                    ee_node_history=ee_node_history,  # [num_envs, history_len, 7]
+                    object_node_history=object_node_history,  # [num_envs, history_len, 7]
+                    joint_states_history=joint_state_history,  # [num_envs, history_len, joint_dim]
+                    deterministic=deterministic
+                )
+
+            # Clip action to action space bounds
+            if hasattr(env, 'action_space'):
+                if hasattr(env.action_space, 'low') and hasattr(env.action_space, 'high'):
+                    action = torch.clamp(
+                        action,
+                        torch.tensor(env.action_space.low, device=action.device, dtype=action.dtype),
+                        torch.tensor(env.action_space.high, device=action.device, dtype=action.dtype)
+                    )
 
             # Step environment
             next_obs, reward, terminated, truncated, env_info = env.step(action)
@@ -133,6 +171,22 @@ def play_graph_dit_rl_policy(
             reward = reward.to(device).float()
             done = done.to(device).float()
 
+            # Update history buffers (optimized: use torch.roll for efficiency)
+            action_normalized = action  # Assuming action is already in normalized space
+            
+            # Roll all histories: shift left by 1, new data goes to last position
+            action_history = torch.roll(action_history, -1, dims=1)
+            action_history[:, -1, :] = action_normalized  # [num_envs, action_dim]
+            
+            ee_node_history = torch.roll(ee_node_history, -1, dims=1)
+            ee_node_history[:, -1, :] = ee_node_current  # [num_envs, 7]
+            
+            object_node_history = torch.roll(object_node_history, -1, dims=1)
+            object_node_history[:, -1, :] = object_node_current  # [num_envs, 7]
+            
+            joint_state_history = torch.roll(joint_state_history, -1, dims=1)
+            joint_state_history[:, -1, :] = joint_states_current  # [num_envs, joint_dim]
+
             # Track stats
             episode_rewards += reward
             episode_lengths += 1
@@ -141,6 +195,7 @@ def play_graph_dit_rl_policy(
             done_envs = done.nonzero(as_tuple=False).squeeze(-1)
             if len(done_envs) > 0:
                 policy.reset_envs(done_envs)
+                # Reset history buffers for done environments
                 for i in done_envs.tolist():
                     completed_episodes += 1
                     # Compute gate entropy from gate_w
@@ -153,6 +208,12 @@ def play_graph_dit_rl_policy(
                         f"Alpha: {policy_info['alpha'].item():.3f} | "
                         f"Gate Entropy: {gate_entropy:.3f}"
                     )
+                
+                # Vectorized reset: zero out all done environments at once
+                action_history[done_envs] = 0
+                ee_node_history[done_envs] = 0
+                object_node_history[done_envs] = 0
+                joint_state_history[done_envs] = 0
                 episode_rewards[done_envs] = 0
                 episode_lengths[done_envs] = 0
 

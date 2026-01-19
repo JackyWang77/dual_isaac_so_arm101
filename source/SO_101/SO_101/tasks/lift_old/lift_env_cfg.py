@@ -175,7 +175,7 @@ class RewardsCfg:
         weight=15.0,
     )
     reaching_object = RewTerm(
-        func=mdp.object_ee_distance, params={"std": 0.05}, weight=1.0
+        func=mdp.object_ee_distance, params={"std": 0.05}, weight=5.0
     )
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-4)
     joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-1e-4)

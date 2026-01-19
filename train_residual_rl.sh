@@ -27,12 +27,12 @@ set -e
 # ============================================================
 PRETRAINED_CHECKPOINT="${1:-}"
 NUM_ENVS="${2:-64}"
-MAX_ITERATIONS="${3:-500}"
-STEPS_PER_ENV="${4:-24}"
+MAX_ITERATIONS="${3:-200}"
+STEPS_PER_ENV="${4:-130}"  # Increased from 24 to 130 to allow episodes to complete
 MINI_BATCH_SIZE="${5:-64}"
 NUM_EPOCHS="${6:-5}"
 SEED="${7:-42}"
-HEADLESS="${8:-true}"
+HEADLESS="${8:-false}"  # Default: false (enable visualization)
 
 # Task (can be overridden)
 TASK="${TASK:-SO-ARM101-Lift-Cube-v0}"
@@ -48,7 +48,7 @@ if [ -z "$PRETRAINED_CHECKPOINT" ]; then
     echo "❌ Error: Missing required argument: pretrained_dit_checkpoint"
     echo ""
     echo "Usage:"
-    echo "  $0 <pretrained_dit_checkpoint> [num_envs] [max_iter] [steps_per_env] [mini_batch] [epochs] [seed]"
+    echo "  $0 <pretrained_dit_checkpoint> [num_envs] [max_iter] [steps_per_env] [mini_batch] [epochs] [seed] [headless]"
     echo ""
     echo "Arguments:"
     echo "  pretrained_dit_checkpoint  Path to pre-trained GraphDiT checkpoint (required)"
@@ -58,6 +58,7 @@ if [ -z "$PRETRAINED_CHECKPOINT" ]; then
     echo "  mini_batch_size            Mini-batch size for updates (default: 64)"
     echo "  num_epochs                 Epochs per iteration (default: 5)"
     echo "  seed                       Random seed (default: 42)"
+    echo "  headless                   Enable headless mode: true/false (default: false, enables visualization)"
     echo ""
     echo "Environment Variables:"
     echo "  TASK                       Task name (default: SO-ARM101-Lift-Cube-v0)"

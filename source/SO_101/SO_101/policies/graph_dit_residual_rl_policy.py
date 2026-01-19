@@ -6,15 +6,14 @@
 """
 GraphDiT + Residual RL Policy (OUR METHOD) - High-Frequency Z Version
 
-核心改进：
-1) base_action: 低频（每 exec_horizon 步从 DiT 获取轨迹）
-2) z_layers: 高频（每步调用 extract_z_fast，只跑 Graph-Attention）
-3) z_adapter: trainable（把 frozen z 转成 RL-friendly z）
-4) GateNet + DeepValueCritic: 保持不变
+Key improvements:
+1) base_action: Low-frequency (obtain trajectory from DiT every exec_horizon steps)
+2) z_layers: High-frequency (call extract_z_fast every step, only run Graph-Attention)
+3) z_adapter: Trainable (transform frozen z to RL-friendly z)
+4) GateNet + DeepValueCritic: Unchanged
 """
 
 from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple, Union, List
 
@@ -29,7 +28,7 @@ TensorOrArray = Union[torch.Tensor, np.ndarray]
 
 
 # =========================================================
-# Utilities (保持不变)
+# Utilities (unchanged)
 # =========================================================
 def to_tensor(x: Any, device: str) -> torch.Tensor:
     if isinstance(x, torch.Tensor):
@@ -90,7 +89,7 @@ def mlp(in_dim: int, hidden: Tuple[int, ...], out_dim: int, act: str = "silu") -
 
 
 # =========================================================
-# GAE (保持不变)
+# GAE (unchanged)
 # =========================================================
 @torch.no_grad()
 def compute_gae(
@@ -117,7 +116,7 @@ def compute_gae(
 
 
 # =========================================================
-# Config (新增 obs_structure 相关配置)
+# Config (added obs_structure related configuration)
 # =========================================================
 @dataclass
 class GraphDiTResidualRLCfg:
@@ -127,12 +126,21 @@ class GraphDiTResidualRLCfg:
     z_dim: int = 128
     num_layers: int = 6  # K
 
-    # observation structure (用于从 obs 提取 ee_node, obj_node)
-    # 如果为 None，使用默认结构
+    # observation structure (used to extract ee_node, obj_node from obs)
+    # If None, use default structure
     obs_structure: Optional[Dict[str, Tuple[int, int]]] = None
     robot_state_dim: int = 6  # joint_pos dimension
 
-    # actor input: [obs, a_base, z_bar]
+    # Actor/Critic obs selection: which parts of obs to use
+    # Default: "robot_state" - only joint position (recommended, since z_bar already contains scene info)
+    # Options:
+    #   - "robot_state": use only joint position (obs[:, :robot_state_dim], default)
+    #   - "full": use all obs (may be redundant with z_bar)
+    #   - Tuple[int, int]: use obs[:, start:end] slice
+    actor_obs_mode: str = "robot_state"  # Only joint position: obs[:, :6]
+    critic_obs_mode: str = "robot_state"  # Only joint position: obs[:, :6]
+
+    # actor input: [obs_selected, a_base, z_bar]
     actor_hidden: Tuple[int, ...] = (256, 256)
     critic_hidden: Tuple[int, ...] = (256, 256)
     gate_hidden: Tuple[int, ...] = (256,)
@@ -177,7 +185,7 @@ class GraphDiTResidualRLCfg:
 
 
 # =========================================================
-# Modules: Gate / Actor / Critic (保持不变)
+# Modules: Gate / Actor / Critic (unchanged)
 # =========================================================
 class LayerWiseGateNet(nn.Module):
     """
@@ -227,13 +235,17 @@ class ResidualGaussianActor(nn.Module):
 
 
 class DeepValueCritic(nn.Module):
-    def __init__(self, K: int, z_dim: int, hidden: Tuple[int, ...], act: str):
+    def __init__(self, K: int, z_dim: int, obs_dim: int, hidden: Tuple[int, ...], act: str):
         super().__init__()
         self.K = K
         self.z_dim = z_dim
 
+        # Layer heads: only use z^k (keep deep supervision simple)
         self.trunk = mlp(z_dim, hidden, hidden[-1], act=act)
         self.layer_heads = nn.ModuleList([nn.Linear(hidden[-1], 1) for _ in range(K)])
+
+        # Bar head: use z_bar + obs (more accurate baseline)
+        self.bar_trunk = mlp(z_dim + obs_dim, hidden, hidden[-1], act=act)
         self.bar_head = nn.Linear(hidden[-1], 1)
 
     def forward_layers(self, z_layers: torch.Tensor) -> torch.Tensor:
@@ -249,27 +261,27 @@ class DeepValueCritic(nn.Module):
         V_layers = torch.cat(Vs, dim=1)
         return V_layers
 
-    def forward_bar(self, z_bar: torch.Tensor) -> torch.Tensor:
-        h = self.trunk(z_bar)
-        v = self.bar_head(h).squeeze(-1)
-        return v
+    def forward_bar(self, z_bar: torch.Tensor, obs: torch.Tensor) -> torch.Tensor:
+        x = torch.cat([z_bar, obs], dim=-1)
+        h = self.bar_trunk(x)
+        return self.bar_head(h).squeeze(-1)
 
 
 # =========================================================
-# NEW: Z Adapter (把 frozen z 转成 RL-friendly z)
+# NEW: Z Adapter (transform frozen z to RL-friendly z)
 # =========================================================
 class ZAdapter(nn.Module):
     """
     Trainable adapter: frozen DiT z → RL-friendly z
     
-    DiT 的 z 是为 denoise 训练的，可能不是 RL 最优表示
-    Adapter 让 RL 梯度可以微调 z 的使用方式
+    DiT's z is trained for denoising, which may not be optimal for RL representation.
+    Adapter allows RL gradients to fine-tune how z is used.
     """
     def __init__(self, z_dim: int, hidden: Tuple[int, ...], act: str = "silu"):
         super().__init__()
         
         if len(hidden) == 0:
-            # 直接线性变换
+            # Direct linear transformation
             self.net = nn.Linear(z_dim, z_dim)
         else:
             layers: List[nn.Module] = []
@@ -285,40 +297,40 @@ class ZAdapter(nn.Module):
             
             self.net = nn.Sequential(*layers)
         
-        # 初始化为近似恒等映射
+        # Initialize to approximate identity mapping
         self._init_near_identity()
     
     def _init_near_identity(self):
-        """初始化为近似恒等映射，训练初期 adapter 几乎不改变 z"""
+        """Initialize to approximate identity mapping, adapter barely changes z at early training"""
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                nn.init.orthogonal_(m.weight, gain=0.1)  # 小 gain
+                nn.init.orthogonal_(m.weight, gain=0.1)  # Small gain
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
     
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         # Residual connection: z_out = z + adapter(z)
-        # 这样初始化后 adapter ≈ 0，z_out ≈ z
+        # With this initialization, adapter ≈ 0, so z_out ≈ z
         return z + self.net(z)
 
 
 # =========================================================
-# Backbone Adapter (修改：加入 extract_z_fast)
+# Backbone Adapter (modified: added extract_z_fast)
 # =========================================================
 class GraphDiTBackboneAdapter:
     """
     Adapter interface for GraphDiT backbone.
     
     Methods:
-    - predict_base_trajectory(): 低频，返回整条轨迹
-    - extract_z_fast(): 高频，只跑 Graph-Attention
+    - predict_base_trajectory(): Low-frequency, returns full trajectory
+    - extract_z_fast(): High-frequency, only runs Graph-Attention
     """
     def __init__(self, graph_dit_policy: nn.Module):
         self.backbone = graph_dit_policy
 
     @torch.no_grad()
     def predict_base_trajectory(self, **kwargs) -> torch.Tensor:
-        """低频：预测完整轨迹 [B, pred_horizon, act_dim]"""
+        """Low-frequency: predict full trajectory [B, pred_horizon, act_dim]"""
         return self.backbone.predict(**kwargs)
 
     @torch.no_grad()
@@ -328,7 +340,7 @@ class GraphDiTBackboneAdapter:
         obj_node: torch.Tensor
     ) -> torch.Tensor:
         """
-        高频：只跑 Graph-Attention，返回 z_layers [B, K, z_dim]
+        High-frequency: only run Graph-Attention, return z_layers [B, K, z_dim]
         
         Args:
             ee_node: [B, 7] - EE position(3) + orientation(4)
@@ -345,31 +357,31 @@ class GraphDiTBackboneAdapter:
     
     @property
     def node_stats(self) -> Dict[str, Optional[torch.Tensor]]:
-        """获取 normalization stats（如果有）"""
+        """Get normalization stats (if available)"""
         stats = {}
         if hasattr(self.backbone, 'cfg'):
-            # 尝试从 checkpoint 加载的 stats
+            # Try to load stats from checkpoint
             pass
         return stats
 
 
 # =========================================================
-# OUR POLICY: GraphDiT + Residual RL Head (高频 z 版本)
+# OUR POLICY: GraphDiT + Residual RL Head (high-frequency z version)
 # =========================================================
 class GraphDiTResidualRLPolicy(nn.Module):
     """
     Online inference:
-        1. base_action_t = 从 RHC buffer pop（低频，每 exec_horizon 步更新）
-        2. z_layers_t = extract_z_fast(ee_node, obj_node)（高频，每步更新！）
-        3. z_adapted = ZAdapter(z_layers)（trainable）
+        1. base_action_t = pop from RHC buffer (low-frequency, updated every exec_horizon steps)
+        2. z_layers_t = extract_z_fast(ee_node, obj_node) (high-frequency, updated every step!)
+        3. z_adapted = ZAdapter(z_layers) (trainable)
         4. z_bar_t = GateNet(z_adapted)
         5. delta_a_t ~ Actor(obs, base_action, z_bar)
         6. a_t = base + alpha * delta
     
-    关键改进：
-    - z 每步更新（高频），反映当前时刻的 EE-Object 关系
-    - base_action 低频更新，利用 DiT 的轨迹规划能力
-    - ZAdapter 让 frozen z 可以被 RL 梯度微调使用方式
+    Key improvements:
+    - z updated every step (high-frequency), reflects current EE-Object relationship
+    - base_action updated at low-frequency, leverages DiT's trajectory planning capability
+    - ZAdapter allows frozen z to be fine-tuned by RL gradients
     """
 
     def __init__(
@@ -398,7 +410,7 @@ class GraphDiTResidualRLPolicy(nn.Module):
             act=cfg.activation,
         )
 
-        # Gate (对 adapted z 做 softmax 融合)
+        # Gate (softmax aggregation of adapted z)
         self.gate = LayerWiseGateNet(
             K=cfg.num_layers,
             z_dim=cfg.z_dim,
@@ -406,8 +418,23 @@ class GraphDiTResidualRLPolicy(nn.Module):
             act=cfg.activation,
         )
 
-        # Actor input dim: obs + base_action + z_bar
-        actor_in_dim = cfg.obs_dim + cfg.action_dim + cfg.z_dim
+        # Compute actual obs dim for Actor/Critic (based on obs_mode)
+        def get_obs_dim_for_mode(mode: str) -> int:
+            if mode == "full":
+                return cfg.obs_dim
+            elif mode == "robot_state" or mode == "robot_state_only":
+                return cfg.robot_state_dim
+            elif isinstance(mode, tuple) and len(mode) == 2:
+                start, end = mode
+                return end - start
+            else:
+                raise ValueError(f"Unknown obs_mode: {mode}")
+        
+        actor_obs_dim = get_obs_dim_for_mode(cfg.actor_obs_mode)
+        critic_obs_dim = get_obs_dim_for_mode(cfg.critic_obs_mode)
+
+        # Actor input dim: obs_selected + base_action + z_bar
+        actor_in_dim = actor_obs_dim + cfg.action_dim + cfg.z_dim
         self.actor = ResidualGaussianActor(
             in_dim=actor_in_dim,
             action_dim=cfg.action_dim,
@@ -418,10 +445,11 @@ class GraphDiTResidualRLPolicy(nn.Module):
             log_std_max=cfg.log_std_max,
         )
 
-        # Critic (对 adapted z 做 deep supervision)
+        # Critic (deep supervision on adapted z)
         self.critic = DeepValueCritic(
             K=cfg.num_layers,
             z_dim=cfg.z_dim,
+            obs_dim=critic_obs_dim,  # Use selected obs dim
             hidden=cfg.critic_hidden,
             act=cfg.activation,
         )
@@ -439,7 +467,7 @@ class GraphDiTResidualRLPolicy(nn.Module):
             self.residual_action_mask = None
 
         # ============================================================
-        # RHC buffers (for base_action, 低频)
+        # RHC buffers (for base_action, low-frequency)
         # ============================================================
         self._base_action_buffers: Optional[List[List[torch.Tensor]]] = None
         self._num_envs: Optional[int] = None
@@ -452,7 +480,7 @@ class GraphDiTResidualRLPolicy(nn.Module):
         self._ema_smoothed_joints: Optional[torch.Tensor] = None  # [num_envs, joint_dim]
 
         # ============================================================
-        # Normalization stats (从 backbone 获取或手动设置)
+        # Normalization stats (obtained from backbone or manually set)
         # ============================================================
         self.register_buffer('norm_ee_node_mean', None, persistent=False)
         self.register_buffer('norm_ee_node_std', None, persistent=False)
@@ -477,7 +505,7 @@ class GraphDiTResidualRLPolicy(nn.Module):
         object_node_mean: Optional[torch.Tensor] = None,
         object_node_std: Optional[torch.Tensor] = None,
     ):
-        """设置 normalization stats（从 checkpoint 加载后调用）"""
+        """Set normalization stats (call after loading from checkpoint)"""
         def _to_tensor(x):
             """Convert numpy array or tensor to torch.Tensor"""
             if x is None:
@@ -499,14 +527,14 @@ class GraphDiTResidualRLPolicy(nn.Module):
     # Buffer management
     # -----------------------------
     def init_env_buffers(self, num_envs: int) -> None:
-        """初始化 RHC buffers 和 EMA 状态"""
+        """Initialize RHC buffers and EMA state"""
         self._base_action_buffers = [[] for _ in range(num_envs)]
         self._num_envs = num_envs
         # EMA state will be initialized lazily in get_base_action()
         self._ema_smoothed_joints = None
 
     def reset_envs(self, env_ids: torch.Tensor) -> None:
-        """重置指定 env 的 buffers 和 EMA 状态"""
+        """Reset buffers and EMA state for specified envs"""
         if self._base_action_buffers is None:
             return
         for i in env_ids.tolist():
@@ -521,7 +549,7 @@ class GraphDiTResidualRLPolicy(nn.Module):
     # -----------------------------
     def _extract_nodes_from_obs(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        从 obs 提取 ee_node 和 obj_node
+        Extract ee_node and obj_node from obs
         
         Args:
             obs: [B, obs_dim]
@@ -551,12 +579,36 @@ class GraphDiTResidualRLPolicy(nn.Module):
         
         return ee_node, obj_node
 
+    def _select_obs_for_rl(self, obs: torch.Tensor, mode: str) -> torch.Tensor:
+        """
+        Select which parts of obs to use for Actor/Critic
+        
+        Args:
+            obs: [B, obs_dim] - full observation
+            mode: "full", "robot_state", or Tuple[int, int] for slice
+        
+        Returns:
+            obs_selected: [B, selected_dim]
+        """
+        if mode == "full":
+            return obs
+        elif mode == "robot_state" or mode == "robot_state_only":
+            # Use only robot_state (joint_pos) part
+            robot_state_dim = self.cfg.robot_state_dim
+            return obs[:, :robot_state_dim]
+        elif isinstance(mode, tuple) and len(mode) == 2:
+            # Custom slice: obs[:, start:end]
+            start, end = mode
+            return obs[:, start:end]
+        else:
+            raise ValueError(f"Unknown obs_mode: {mode}. Use 'full', 'robot_state', or (start, end) tuple.")
+
     def _normalize_nodes(
         self, 
         ee_node: torch.Tensor, 
         obj_node: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Normalize nodes (如果有 stats)"""
+        """Normalize nodes (if stats available)"""
         if self.norm_ee_node_mean is not None:
             ee_node = (ee_node - self.norm_ee_node_mean.to(ee_node.device)) / (self.norm_ee_node_std.to(ee_node.device) + 1e-8)
         if self.norm_object_node_mean is not None:
@@ -568,12 +620,12 @@ class GraphDiTResidualRLPolicy(nn.Module):
     # -----------------------------
     def _get_z_layers_fast(self, obs: torch.Tensor) -> torch.Tensor:
         """
-        高频获取 z_layers：每步调用
+        High-frequency z_layers extraction: called every step
         
-        1. 从 obs 提取当前 ee_node, obj_node
+        1. Extract current ee_node, obj_node from obs
         2. Normalize
-        3. 调用 backbone.extract_z_fast()（frozen）
-        4. 通过 z_adapter（trainable）
+        3. Call backbone.extract_z_fast() (frozen)
+        4. Pass through z_adapter (trainable)
         
         Returns:
             z_layers_adapted: [B, K, z_dim]
@@ -610,7 +662,7 @@ class GraphDiTResidualRLPolicy(nn.Module):
         return z_bar, w
 
     # -----------------------------
-    # Base action (低频, RHC)
+    # Base action (low-frequency, RHC)
     # -----------------------------
     @torch.no_grad()
     def get_base_action(
@@ -625,12 +677,12 @@ class GraphDiTResidualRLPolicy(nn.Module):
     ) -> torch.Tensor:
         """
         Return base action [B, act_dim] using RHC buffer.
-        低频：只在 buffer 空时调用 DiT
+        Low-frequency: only call DiT when buffer is empty
         """
         B = obs_norm.shape[0]
         
         if self._base_action_buffers is None or len(self._base_action_buffers) != B:
-            # Offline mode: 直接预测
+            # Offline mode: direct prediction
             traj = self.backbone.predict_base_trajectory(
                 obs=obs_norm,
                 action_history=action_history,
@@ -643,7 +695,7 @@ class GraphDiTResidualRLPolicy(nn.Module):
             )
             return traj[:, 0, :]
 
-        # Online mode: 使用 buffer
+        # Online mode: use buffer
         need_replan = any(len(self._base_action_buffers[i]) == 0 for i in range(B))
         
         if need_replan:
@@ -721,7 +773,7 @@ class GraphDiTResidualRLPolicy(nn.Module):
             obs_norm = obs
 
         # ============================================================
-        # 1. Base action (低频，从 buffer)
+        # 1. Base action (low-frequency, from buffer)
         # ============================================================
         a_base = self.get_base_action(
             obs_norm=obs_norm,
@@ -734,15 +786,16 @@ class GraphDiTResidualRLPolicy(nn.Module):
         )
 
         # ============================================================
-        # 2. z_layers (高频！每步调用 extract_z_fast)
+        # 2. z_layers (high-frequency! called every step via extract_z_fast)
         # ============================================================
-        z_layers = self._get_z_layers_fast(obs)  # [B, K, z_dim], 已经过 adapter
+        z_layers = self._get_z_layers_fast(obs)  # [B, K, z_dim], already passed through adapter
 
-        # 3. GateNet 融合
+        # 3. GateNet aggregation
         z_bar, w = self.aggregate_latent(z_layers)
 
-        # 4. Actor
-        x = torch.cat([obs_norm, a_base, z_bar], dim=-1)
+        # 4. Actor: select obs based on actor_obs_mode
+        obs_actor = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
+        x = torch.cat([obs_actor, a_base, z_bar], dim=-1)
         dist = self.actor.dist(x)
         
         if deterministic:
@@ -755,21 +808,23 @@ class GraphDiTResidualRLPolicy(nn.Module):
             delta = delta * self.residual_action_mask
 
         # 5. Final action
-        alpha = torch.clamp(self.alpha, 0.0, 1.0)
+        alpha = torch.clamp(self.alpha, 0.0, 0.3)  # Limit alpha to 30%
         a = a_base + alpha * delta
 
         log_prob = dist.log_prob(delta).sum(dim=-1)
         entropy = dist.entropy().sum(dim=-1)
-        v_bar = self.critic.forward_bar(z_bar)
+        # Critic: select obs based on critic_obs_mode
+        obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
+        v_bar = self.critic.forward_bar(z_bar, obs_critic)
 
         info = {
-            "obs": obs,  # 原始 obs（用于训练时重新计算 z_layers 以获得梯度）
+            "obs": obs,  # Raw obs (for recomputing z_layers during training to get gradients)
             "obs_norm": obs_norm,
             "a_base": a_base,
             "delta": delta,
             "log_prob": log_prob,
             "entropy": entropy,
-            "z_layers": z_layers,  # 注意：rollout 时的 z_layers 没有梯度（因为 @torch.no_grad）
+            "z_layers": z_layers,  # Note: z_layers during rollout have no gradients (due to @torch.no_grad)
             "z_bar": z_bar,
             "gate_w": w,
             "v_bar": v_bar,
@@ -778,7 +833,7 @@ class GraphDiTResidualRLPolicy(nn.Module):
         return a, info
 
     # -----------------------------
-    # Loss (保持不变，但 z_layers 现在是高频的)
+    # Loss (unchanged, but z_layers is now high-frequency)
     # -----------------------------
     def compute_loss(
         self,
@@ -789,32 +844,33 @@ class GraphDiTResidualRLPolicy(nn.Module):
             obs_norm:   [B, obs_dim]
             a_base:     [B, act_dim]
             action:     [B, act_dim]
-            obs:        [B, obs_dim]  # 原始 obs（用于重新计算 z_layers 以获得梯度）
+            obs:        [B, obs_dim]  # Raw obs (for recomputing z_layers to get gradients)
             returns:    [B]
             adv:        [B]
         
-        Note: z_layers 需要重新计算（而不是从 batch 中取），
-        因为 rollout 时 act() 有 @torch.no_grad()，无法获得 z_adapter 的梯度。
+        Note: z_layers need to be recomputed (not taken from batch),
+        because act() has @torch.no_grad() during rollout, cannot get z_adapter gradients.
         """
         obs_norm = batch["obs_norm"]
-        obs = batch.get("obs", obs_norm)  # 如果没有提供原始 obs，使用 obs_norm
+        obs = batch.get("obs", obs_norm)  # If raw obs not provided, use obs_norm
         a_base = batch["a_base"]
         action = batch["action"]
         returns = batch["returns"]
         adv = batch["adv"]
 
         # Recompute z_layers with gradients (for training z_adapter)
-        z_layers = self._get_z_layers_fast(obs)  # [B, K, z_dim], 有梯度！
+        z_layers = self._get_z_layers_fast(obs)  # [B, K, z_dim], with gradients!
 
         # Recompute gate + z_bar (for grad)
         z_bar_new, w = self.aggregate_latent(z_layers)
 
-        # Actor distribution
-        x = torch.cat([obs_norm, a_base, z_bar_new], dim=-1)
+        # Actor distribution: select obs based on actor_obs_mode
+        obs_actor = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
+        x = torch.cat([obs_actor, a_base, z_bar_new], dim=-1)
         dist = self.actor.dist(x)
 
         # Recover delta
-        alpha = torch.clamp(self.alpha, 0.0, 1.0)
+        alpha = torch.clamp(self.alpha, 0.0, 0.3)  # Limit alpha to 30%
         delta = (action - a_base) / (alpha + 1e-8)
 
         if self.residual_action_mask is not None:
@@ -822,6 +878,9 @@ class GraphDiTResidualRLPolicy(nn.Module):
 
         log_prob = dist.log_prob(delta).sum(dim=-1)
         entropy = dist.entropy().sum(dim=-1)
+
+        # Delta regularization: encourage small residuals
+        loss_delta_reg = (delta ** 2).mean()
 
         # AWR weights
         w_adv = torch.exp(adv / max(self.cfg.beta, 1e-8))
@@ -841,8 +900,9 @@ class GraphDiTResidualRLPolicy(nn.Module):
         loss_v_layers = ((V_layers - returns_expand) ** 2)
         loss_critic = (loss_v_layers * omega.view(1, -1)).mean()
 
-        # Baseline head
-        V_bar = self.critic.forward_bar(z_bar_new)
+        # Baseline head: select obs based on critic_obs_mode
+        obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
+        V_bar = self.critic.forward_bar(z_bar_new, obs_critic)
         loss_v_bar = F.mse_loss(V_bar, returns)
 
         # Gate entropy
@@ -855,6 +915,7 @@ class GraphDiTResidualRLPolicy(nn.Module):
             + self.cfg.cV * (loss_critic + 0.5 * loss_v_bar)
             + self.cfg.cGate * loss_gate
             - self.cfg.cEnt * entropy.mean()
+            + 0.1 * loss_delta_reg  # Delta regularization: encourage small residuals
         )
 
         return {
@@ -865,6 +926,7 @@ class GraphDiTResidualRLPolicy(nn.Module):
             "loss_gate": loss_gate.detach(),
             "gate_entropy": gate_entropy.detach(),
             "entropy": entropy.mean().detach(),
+            "loss_delta_reg": loss_delta_reg.detach(),
             "alpha": alpha.detach(),
         }
     
