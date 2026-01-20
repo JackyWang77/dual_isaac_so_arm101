@@ -157,7 +157,7 @@ class GraphDiTResidualRLCfg:
     alpha_init: float = 0.10
 
     # EMA smoothing for base_action (joints only, gripper excluded)
-    ema_alpha: float = 0.3  # EMA weight: higher = more responsive, lower = smoother
+    ema_alpha: float = 0.5  # EMA weight: higher = more responsive, lower = smoother
     joint_dim: int = 5  # Number of joint dimensions (gripper is excluded from EMA)
 
     # advantage weighted regression
@@ -228,7 +228,11 @@ class ResidualGaussianActor(nn.Module):
 
     def dist(self, x: torch.Tensor) -> Normal:
         h = self.body(x)
-        mu = self.mu(h)
+        raw_mu = self.mu(h)
+        # CRITICAL: Apply tanh to bound mu (delta mean) to [-1, 1]
+        # This ensures delta is a small, bounded adjustment
+        # Without this, delta can be unbounded (e.g., 4.5 ~ 5.5), causing issues
+        mu = torch.tanh(raw_mu)
         log_std = torch.clamp(self.log_std, self.log_std_min, self.log_std_max)
         std = torch.exp(log_std).expand_as(mu)
         return Normal(mu, std)
@@ -486,13 +490,20 @@ class GraphDiTResidualRLPolicy(nn.Module):
         self.register_buffer('norm_ee_node_std', None, persistent=False)
         self.register_buffer('norm_object_node_mean', None, persistent=False)
         self.register_buffer('norm_object_node_std', None, persistent=False)
+        
+        # Action normalization stats (for denormalizing base_action and delta)
+        self.register_buffer('action_mean', None, persistent=False)
+        self.register_buffer('action_std', None, persistent=False)
 
         # Init
         if cfg.orthogonal_init:
             orthogonal_init(self.gate, gain=np.sqrt(2))
             orthogonal_init(self.actor, gain=np.sqrt(2))
             orthogonal_init(self.critic, gain=np.sqrt(2))
-            nn.init.orthogonal_(self.actor.mu.weight, gain=0.01)
+            # CRITICAL: Zero initialize Actor's mu layer (last layer)
+            # This ensures initial delta ≈ 0, so action ≈ a_base at start of training
+            # Without this, random initialization can cause large deltas that break base policy
+            nn.init.zeros_(self.actor.mu.weight)
             nn.init.zeros_(self.actor.mu.bias)
 
     # -----------------------------
@@ -504,6 +515,8 @@ class GraphDiTResidualRLPolicy(nn.Module):
         ee_node_std: Optional[torch.Tensor] = None,
         object_node_mean: Optional[torch.Tensor] = None,
         object_node_std: Optional[torch.Tensor] = None,
+        action_mean: Optional[torch.Tensor] = None,
+        action_std: Optional[torch.Tensor] = None,
     ):
         """Set normalization stats (call after loading from checkpoint)"""
         def _to_tensor(x):
@@ -522,6 +535,9 @@ class GraphDiTResidualRLPolicy(nn.Module):
         if object_node_mean is not None:
             self.norm_object_node_mean = _to_tensor(object_node_mean)
             self.norm_object_node_std = _to_tensor(object_node_std)
+        if action_mean is not None:
+            self.action_mean = _to_tensor(action_mean)
+            self.action_std = _to_tensor(action_std)
 
     # -----------------------------
     # Buffer management
@@ -775,7 +791,8 @@ class GraphDiTResidualRLPolicy(nn.Module):
         # ============================================================
         # 1. Base action (low-frequency, from buffer)
         # ============================================================
-        a_base = self.get_base_action(
+        # get_base_action returns NORMALIZED actions (from Graph-DiT predict)
+        a_base_norm = self.get_base_action(
             obs_norm=obs_norm,
             action_history=action_history,
             ee_node_history=ee_node_history,
@@ -784,6 +801,12 @@ class GraphDiTResidualRLPolicy(nn.Module):
             subtask_condition=subtask_condition,
             deterministic=True,
         )
+        
+        # Denormalize base_action for execution (but keep normalized version for Actor input)
+        if self.action_mean is not None and self.action_std is not None:
+            a_base = a_base_norm * self.action_std + self.action_mean
+        else:
+            a_base = a_base_norm
 
         # ============================================================
         # 2. z_layers (high-frequency! called every step via extract_z_fast)
@@ -794,24 +817,39 @@ class GraphDiTResidualRLPolicy(nn.Module):
         z_bar, w = self.aggregate_latent(z_layers)
 
         # 4. Actor: select obs based on actor_obs_mode
+        # CRITICAL: Actor input should be NORMALIZED (obs_norm, a_base_norm, z_bar)
         obs_actor = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
-        x = torch.cat([obs_actor, a_base, z_bar], dim=-1)
+        x = torch.cat([obs_actor, a_base_norm, z_bar], dim=-1)  # Use normalized a_base
         dist = self.actor.dist(x)
         
         if deterministic:
-            delta = dist.mean
+            delta_norm = dist.mean  # Actor outputs NORMALIZED delta (mu, already tanh-bounded to [-1, 1])
         else:
-            delta = dist.rsample()
+            delta_norm = dist.rsample()  # Actor outputs NORMALIZED delta (sampled from Normal(mu, std))
+            # CRITICAL: Clamp sampled delta_norm to [-1, 1] to ensure bounded residual
+            # Even though mu is tanh-bounded, sampling can produce values outside [-1, 1] when std > 0
+            delta_norm = torch.clamp(delta_norm, -1.0, 1.0)
 
         # Residual mask
         if self.residual_action_mask is not None:
-            delta = delta * self.residual_action_mask
+            delta_norm = delta_norm * self.residual_action_mask
 
-        # 5. Final action
+        # Denormalize delta for execution
+        if self.action_mean is not None and self.action_std is not None:
+            delta = delta_norm * self.action_std  # Only scale, no shift (delta is residual)
+        else:
+            delta = delta_norm
+
+        # 5. Final action (both a_base and delta are DENORMALIZED)
         alpha = torch.clamp(self.alpha, 0.0, 0.3)  # Limit alpha to 30%
         a = a_base + alpha * delta
 
-        log_prob = dist.log_prob(delta).sum(dim=-1)
+        # ============================================================
+        # FIX: log_prob uses normalized delta (Actor's output space)
+        # Actor distribution is defined in normalized space, so log_prob
+        # must be computed in the same space
+        # ============================================================
+        log_prob = dist.log_prob(delta_norm).sum(dim=-1)  # ✅ Use normalized delta
         entropy = dist.entropy().sum(dim=-1)
         # Critic: select obs based on critic_obs_mode
         obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
@@ -820,8 +858,10 @@ class GraphDiTResidualRLPolicy(nn.Module):
         info = {
             "obs": obs,  # Raw obs (for recomputing z_layers during training to get gradients)
             "obs_norm": obs_norm,
-            "a_base": a_base,
-            "delta": delta,
+            "a_base": a_base,  # Denormalized (for execution)
+            "a_base_norm": a_base_norm,  # Normalized (for history storage)
+            "delta": delta,  # Denormalized (for execution)
+            "delta_norm": delta_norm,  # Normalized (for training)
             "log_prob": log_prob,
             "entropy": entropy,
             "z_layers": z_layers,  # Note: z_layers during rollout have no gradients (due to @torch.no_grad)
@@ -853,10 +893,18 @@ class GraphDiTResidualRLPolicy(nn.Module):
         """
         obs_norm = batch["obs_norm"]
         obs = batch.get("obs", obs_norm)  # If raw obs not provided, use obs_norm
-        a_base = batch["a_base"]
-        action = batch["action"]
+        a_base = batch["a_base"]  # Denormalized (from rollout)
+        action = batch["action"]  # Denormalized (final executed action)
         returns = batch["returns"]
         adv = batch["adv"]
+
+        # ============================================================
+        # FIX 1: Normalize a_base to match act() where Actor sees normalized input
+        # ============================================================
+        if self.action_mean is not None and self.action_std is not None:
+            a_base_norm = (a_base - self.action_mean) / (self.action_std + 1e-8)
+        else:
+            a_base_norm = a_base
 
         # Recompute z_layers with gradients (for training z_adapter)
         z_layers = self._get_z_layers_fast(obs)  # [B, K, z_dim], with gradients!
@@ -864,23 +912,36 @@ class GraphDiTResidualRLPolicy(nn.Module):
         # Recompute gate + z_bar (for grad)
         z_bar_new, w = self.aggregate_latent(z_layers)
 
-        # Actor distribution: select obs based on actor_obs_mode
+        # ============================================================
+        # FIX 2: Actor input uses normalized values (consistent with act())
+        # ============================================================
         obs_actor = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
-        x = torch.cat([obs_actor, a_base, z_bar_new], dim=-1)
+        x = torch.cat([obs_actor, a_base_norm, z_bar_new], dim=-1)  # ✅ Use normalized a_base_norm
         dist = self.actor.dist(x)
 
-        # Recover delta
+        # Recover delta in denormalized space
         alpha = torch.clamp(self.alpha, 0.0, 0.3)  # Limit alpha to 30%
-        delta = (action - a_base) / (alpha + 1e-8)
+        delta = (action - a_base) / (alpha + 1e-8)  # Denormalized delta
 
         if self.residual_action_mask is not None:
             delta = delta * self.residual_action_mask
 
-        log_prob = dist.log_prob(delta).sum(dim=-1)
+        # ============================================================
+        # FIX 3: Normalize delta to match Actor output space (normalized)
+        # ============================================================
+        if self.action_mean is not None and self.action_std is not None:
+            delta_norm = delta / (self.action_std + 1e-8)  # ✅ Actor outputs normalized delta
+        else:
+            delta_norm = delta
+
+        # ============================================================
+        # FIX 4: log_prob uses normalized delta (Actor's output space)
+        # ============================================================
+        log_prob = dist.log_prob(delta_norm).sum(dim=-1)  # ✅ Use normalized delta
         entropy = dist.entropy().sum(dim=-1)
 
-        # Delta regularization: encourage small residuals
-        loss_delta_reg = (delta ** 2).mean()
+        # Delta regularization: encourage small residuals (in normalized space)
+        loss_delta_reg = (delta_norm ** 2).mean()  # ✅ Use normalized delta
 
         # AWR weights
         w_adv = torch.exp(adv / max(self.cfg.beta, 1e-8))

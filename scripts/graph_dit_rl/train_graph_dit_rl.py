@@ -100,7 +100,8 @@ class RolloutBuffer:
         N, T = self.num_envs, self.steps_per_env
         device = self.device
 
-        self.obs = torch.zeros(T, N, obs_dim, device=device)
+        self.obs = torch.zeros(T, N, obs_dim, device=device)  # Raw obs (for recomputing z_layers)
+        self.obs_norm = torch.zeros(T, N, obs_dim, device=device)  # Normalized obs (for Actor/Critic)
         self.actions = torch.zeros(T, N, action_dim, device=device)
         self.rewards = torch.zeros(T, N, device=device)
         self.dones = torch.zeros(T, N, device=device)
@@ -118,6 +119,7 @@ class RolloutBuffer:
     def add(
         self,
         obs: torch.Tensor,
+        obs_norm: torch.Tensor,  # Add normalized obs
         action: torch.Tensor,
         reward: torch.Tensor,
         done: torch.Tensor,
@@ -133,7 +135,8 @@ class RolloutBuffer:
             )
 
         t = self.ptr
-        self.obs[t] = obs
+        self.obs[t] = obs  # Raw obs (for recomputing z_layers)
+        self.obs_norm[t] = obs_norm  # Normalized obs (for Actor/Critic)
         self.actions[t] = action
         self.rewards[t] = reward
         self.dones[t] = done
@@ -158,7 +161,8 @@ class RolloutBuffer:
         total_samples = T * N
 
         # Flatten
-        obs_flat = self.obs.reshape(total_samples, -1)
+        obs_flat = self.obs.reshape(total_samples, -1)  # Raw obs
+        obs_norm_flat = self.obs_norm.reshape(total_samples, -1)  # Normalized obs
         actions_flat = self.actions.reshape(total_samples, -1)
         returns_flat = self.returns.reshape(total_samples)
         adv_flat = self.advantages.reshape(total_samples)
@@ -177,8 +181,8 @@ class RolloutBuffer:
                 idx = indices[start:end]
 
                 yield {
-                    "obs": obs_flat[idx],  # 原始 obs（用于重新计算 z_layers）
-                    "obs_norm": obs_flat[idx],  # 归一化 obs（如果不需要归一化，可以相同）
+                    "obs": obs_flat[idx],  # Raw obs (for recomputing z_layers)
+                    "obs_norm": obs_norm_flat[idx],  # Normalized obs (for Actor/Critic)
                     "action": actions_flat[idx],
                     "returns": returns_flat[idx],
                     "adv": adv_flat[idx],
@@ -245,6 +249,15 @@ class GraphDiTRLTrainer:
 
         # Optimizer (只优化 trainable 参数)
         trainable_params = [p for p in policy.parameters() if p.requires_grad]
+        # CRITICAL: Also include node_to_z parameters if it's trainable
+        # node_to_z is in backbone.backbone.node_to_z, not in policy.parameters()
+        if hasattr(policy, 'backbone') and hasattr(policy.backbone, 'backbone'):
+            graph_dit = policy.backbone.backbone
+            if hasattr(graph_dit, 'node_to_z'):
+                node_to_z_params = [p for p in graph_dit.node_to_z.parameters() if p.requires_grad]
+                trainable_params.extend(node_to_z_params)
+                if len(node_to_z_params) > 0:
+                    print(f"[Trainer] Including {len(node_to_z_params)} node_to_z parameters in optimizer")
         self.optimizer = optim.AdamW(trainable_params, lr=lr)
 
         # Logger
@@ -275,10 +288,42 @@ class GraphDiTRLTrainer:
         self.object_node_history = torch.zeros(self.num_envs, action_history_length, 7, device=device)
         self.joint_state_history = torch.zeros(self.num_envs, action_history_length, graph_dit_joint_dim, device=device)
 
+        # Normalization stats (will be set from main)
+        self.obs_mean = None
+        self.obs_std = None
+        self.ee_node_mean = None
+        self.ee_node_std = None
+        self.object_node_mean = None
+        self.object_node_std = None
+        self.joint_mean = None
+        self.joint_std = None
+        self.action_mean = None
+        self.action_std = None
+
         print(f"[Trainer] num_envs: {self.num_envs}")
         print(f"[Trainer] steps_per_env: {steps_per_env}")
         print(f"[Trainer] batch_size: {self.num_envs * steps_per_env}")
         print(f"[Trainer] trainable params: {sum(p.numel() for p in trainable_params):,}")
+    
+    def set_normalization_stats(
+        self,
+        obs_mean=None, obs_std=None,
+        ee_node_mean=None, ee_node_std=None,
+        object_node_mean=None, object_node_std=None,
+        joint_mean=None, joint_std=None,
+        action_mean=None, action_std=None,
+    ):
+        """Set normalization statistics (same as Graph-DiT play.py)"""
+        self.obs_mean = obs_mean
+        self.obs_std = obs_std
+        self.ee_node_mean = ee_node_mean
+        self.ee_node_std = ee_node_std
+        self.object_node_mean = object_node_mean
+        self.object_node_std = object_node_std
+        self.joint_mean = joint_mean
+        self.joint_std = joint_std
+        self.action_mean = action_mean
+        self.action_std = action_std
 
     def collect_rollout(self) -> Dict[str, float]:
         """收集一个 rollout"""
@@ -292,7 +337,13 @@ class GraphDiTRLTrainer:
         ep_lengths = torch.zeros(self.num_envs, device=self.device)
 
         for step in range(self.steps_per_env):
-            # Extract current node features and joint states from obs
+            # CRITICAL: Normalize observations (same as Graph-DiT play.py)
+            if self.obs_mean is not None and self.obs_std is not None:
+                obs_norm = (obs - self.obs_mean) / self.obs_std
+            else:
+                obs_norm = obs
+            
+            # Extract current node features and joint states from RAW obs (before normalization for history)
             ee_node_current, object_node_current = self.policy._extract_nodes_from_obs(obs)
             
             # Extract joint states (joint position only, from first 6 dims of obs)
@@ -300,16 +351,27 @@ class GraphDiTRLTrainer:
             # The residual RL config's joint_dim=5 is only for EMA smoothing, not for joint state extraction
             joint_states_current = obs[:, :6]  # [B, 6] - always 6 for GraphDiT compatibility
             
+            # CRITICAL: Normalize node and joint histories (same as Graph-DiT play.py)
             # History tensors are already in batch format [num_envs, history_len, dim]
-            action_history = self.action_history  # [B, H, action_dim]
-            ee_node_history = self.ee_node_history  # [B, H, 7]
-            object_node_history = self.object_node_history  # [B, H, 7]
-            joint_states_history = self.joint_state_history  # [B, H, joint_dim]
+            action_history = self.action_history  # [B, H, action_dim] - already normalized
+            
+            # Normalize node histories
+            ee_node_history = self.ee_node_history.clone()  # [B, H, 7]
+            object_node_history = self.object_node_history.clone()  # [B, H, 7]
+            if self.ee_node_mean is not None and self.ee_node_std is not None:
+                ee_node_history = (ee_node_history - self.ee_node_mean) / self.ee_node_std
+            if self.object_node_mean is not None and self.object_node_std is not None:
+                object_node_history = (object_node_history - self.object_node_mean) / self.object_node_std
+            
+            # Normalize joint history
+            joint_states_history = self.joint_state_history.clone()  # [B, H, 6]
+            if self.joint_mean is not None and self.joint_std is not None:
+                joint_states_history = (joint_states_history - self.joint_mean) / self.joint_std
             
             with torch.no_grad():
                 action, info = self.policy.act(
                     obs_raw=obs,
-                    obs_norm=obs,
+                    obs_norm=obs_norm,  # Use normalized obs
                     action_history=action_history,
                     ee_node_history=ee_node_history,
                     object_node_history=object_node_history,
@@ -325,6 +387,88 @@ class GraphDiTRLTrainer:
                             torch.tensor(self.env.action_space.low, device=action.device, dtype=action.dtype),
                             torch.tensor(self.env.action_space.high, device=action.device, dtype=action.dtype)
                         )
+                
+                # DEBUG: Print all joints and gripper base action, residual, and final action
+                action_dim = action.shape[-1]
+                if action_dim >= 6:
+                    a_base = info.get("a_base", None)  # [B, action_dim] - denormalized base action
+                    delta = info.get("delta", None)  # [B, action_dim] - denormalized delta
+                    delta_norm = info.get("delta_norm", None)  # [B, action_dim] - normalized delta (Actor output)
+                    alpha_val = info.get("alpha", None)
+                    if alpha_val is not None:
+                        if isinstance(alpha_val, torch.Tensor):
+                            alpha = alpha_val.item()
+                        else:
+                            alpha = float(alpha_val)
+                    else:
+                        alpha = self.policy.alpha.item() if hasattr(self.policy, 'alpha') else 0.1
+                    
+                    if a_base is not None and delta is not None:
+                        # Print for first env only, every 10 steps
+                        if step % 10 == 0:
+                            print(f"\n[Step {step:3d}] Action Debug (env 0):")
+                            print(f"  alpha: {alpha:.4f}")
+                            print(f"\n  Joints (0-4):")
+                            for i in range(min(5, action_dim)):
+                                a_base_i = a_base[0, i].item()
+                                delta_i = delta[0, i].item()
+                                final_i = action[0, i].item()
+                                print(f"    Joint {i}: base={a_base_i:7.4f}, delta={delta_i:7.4f}, final={final_i:7.4f} (base + {alpha:.2f}*delta = {a_base_i + alpha * delta_i:.4f})")
+                            
+                            # Gripper (index 5)
+                            if action_dim >= 6:
+                                a_base_gripper = a_base[0, 5].item()
+                                delta_gripper = delta[0, 5].item()
+                                gripper_continuous = action[0, 5].item()
+                                gripper_binary = 1.0 if gripper_continuous > 0 else -1.0
+                                print(f"\n  Gripper (5):")
+                                print(f"    base: {a_base_gripper:7.4f}")
+                                print(f"    delta: {delta_gripper:7.4f}")
+                                print(f"    continuous (base + {alpha:.2f}*delta): {gripper_continuous:7.4f}")
+                                print(f"    threshold: -0.2")
+                                print(f"    binary (final): {gripper_binary:7.4f} ({'open' if gripper_binary > 0 else 'close'})")
+                            
+                            # Statistics across all envs
+                            print(f"\n  Delta Statistics (all envs):")
+                            delta_mean = delta.mean(dim=0)  # [action_dim]
+                            delta_std = delta.std(dim=0)  # [action_dim]
+                            delta_min = delta.min(dim=0)[0]  # [action_dim]
+                            delta_max = delta.max(dim=0)[0]  # [action_dim]
+                            delta_positive_ratio = (delta > 0).float().mean(dim=0)  # [action_dim]
+                            
+                            print(f"    Joints (0-4):")
+                            for i in range(min(5, action_dim)):
+                                print(f"      Joint {i}: mean={delta_mean[i].item():7.4f}, std={delta_std[i].item():7.4f}, "
+                                      f"min={delta_min[i].item():7.4f}, max={delta_max[i].item():7.4f}, "
+                                      f"positive={delta_positive_ratio[i].item():.1%}")
+                            
+                            if action_dim >= 6:
+                                print(f"    Gripper (5): mean={delta_mean[5].item():7.4f}, std={delta_std[5].item():7.4f}, "
+                                      f"min={delta_min[5].item():7.4f}, max={delta_max[5].item():7.4f}, "
+                                      f"positive={delta_positive_ratio[5].item():.1%}")
+                            
+                            if delta_norm is not None:
+                                delta_norm_mean = delta_norm.mean(dim=0)  # [action_dim]
+                                delta_norm_std = delta_norm.std(dim=0)  # [action_dim]
+                                print(f"\n  Delta_norm Statistics (normalized, all envs):")
+                                print(f"    Joints (0-4):")
+                                for i in range(min(5, action_dim)):
+                                    print(f"      Joint {i}: mean={delta_norm_mean[i].item():7.4f}, std={delta_norm_std[i].item():7.4f}")
+                                if action_dim >= 6:
+                                    print(f"    Gripper (5): mean={delta_norm_mean[5].item():7.4f}, std={delta_norm_std[5].item():7.4f}")
+                
+                # CRITICAL: Binarize gripper action (same as play.py)
+                # Action is already: a_base + alpha * delta (continuous value for all dimensions including gripper)
+                # Isaac Sim expects gripper: > -0.2 -> 1.0 (open), <= -0.2 -> -1.0 (close)
+                # This allows RL to learn fine-tuning of gripper timing, especially when base policy
+                # outputs values near -0.2 threshold
+                if action_dim >= 6:
+                    gripper_continuous = action[:, 5]  # [num_envs] - continuous value: a_base_gripper + alpha * delta_gripper
+                    action[:, 5] = torch.where(
+                        gripper_continuous > -0.2,
+                        torch.tensor(1.0, device=action.device, dtype=action.dtype),
+                        torch.tensor(-1.0, device=action.device, dtype=action.dtype)
+                    )
 
             # Step env
             next_obs, reward, terminated, truncated, env_info = self.env.step(action)
@@ -335,19 +479,28 @@ class GraphDiTRLTrainer:
             reward = reward.to(self.device).float()
             done = done.to(self.device).float()
 
-            # Store
-            self.buffer.add(obs, action, reward, done, info)
+            # Store (obs is raw, obs_norm is normalized)
+            self.buffer.add(obs, obs_norm, action, reward, done, info)
 
             # Track episode stats
             ep_rewards += reward
             ep_lengths += 1
 
             # Update history buffers (optimized: use torch.roll for efficiency)
-            action_normalized = action  # Assuming action is already in normalized space
+            # ============================================================
+            # FIX: Store normalized final executed action (not a_base_norm)
+            # This matches play.py and Graph-DiT training where action_history
+            # contains the actual executed actions (normalized)
+            # ============================================================
+            if self.action_mean is not None and self.action_std is not None:
+                # action is final executed (denormalized), normalize for history
+                action_for_history = (action - self.action_mean) / (self.action_std + 1e-8)
+            else:
+                action_for_history = action
             
             # Roll all histories: shift left by 1, new data goes to last position
             self.action_history = torch.roll(self.action_history, -1, dims=1)
-            self.action_history[:, -1, :] = action_normalized  # [num_envs, action_dim]
+            self.action_history[:, -1, :] = action_for_history  # [num_envs, action_dim] - normalized final action
             
             self.ee_node_history = torch.roll(self.ee_node_history, -1, dims=1)
             self.ee_node_history[:, -1, :] = ee_node_current  # [num_envs, 7]
@@ -391,16 +544,32 @@ class GraphDiTRLTrainer:
                 self.episode_lengths.append(incomplete_ep_lengths[i].item())
 
         # Compute last value for GAE (history tensors are already in batch format)
-        action_history = self.action_history  # [B, H, action_dim]
-        ee_node_history = self.ee_node_history  # [B, H, 7]
-        object_node_history = self.object_node_history  # [B, H, 7]
-        joint_states_history = self.joint_state_history  # [B, H, joint_dim]
+        # CRITICAL: Normalize obs and histories (same as Graph-DiT play.py)
+        if self.obs_mean is not None and self.obs_std is not None:
+            obs_norm = (obs - self.obs_mean) / self.obs_std
+        else:
+            obs_norm = obs
+        
+        action_history = self.action_history  # [B, H, action_dim] - already normalized
+        
+        # Normalize node histories
+        ee_node_history = self.ee_node_history.clone()  # [B, H, 7]
+        object_node_history = self.object_node_history.clone()  # [B, H, 7]
+        if self.ee_node_mean is not None and self.ee_node_std is not None:
+            ee_node_history = (ee_node_history - self.ee_node_mean) / self.ee_node_std
+        if self.object_node_mean is not None and self.object_node_std is not None:
+            object_node_history = (object_node_history - self.object_node_mean) / self.object_node_std
+        
+        # Normalize joint history
+        joint_states_history = self.joint_state_history.clone()  # [B, H, 6]
+        if self.joint_mean is not None and self.joint_std is not None:
+            joint_states_history = (joint_states_history - self.joint_mean) / self.joint_std
         
         # Compute last value for GAE
         with torch.no_grad():
             _, last_info = self.policy.act(
                 obs_raw=obs,
-                obs_norm=obs,
+                obs_norm=obs_norm,  # Use normalized obs
                 action_history=action_history,
                 ee_node_history=ee_node_history,
                 object_node_history=object_node_history,
@@ -456,7 +625,13 @@ class GraphDiTRLTrainer:
 
             self.optimizer.zero_grad()
             losses["loss_total"].backward()
-            torch.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+            # Clip gradients for all trainable parameters (including node_to_z)
+            trainable_params = [p for p in self.policy.parameters() if p.requires_grad]
+            if hasattr(self.policy, 'backbone') and hasattr(self.policy.backbone, 'backbone'):
+                graph_dit = self.policy.backbone.backbone
+                if hasattr(graph_dit, 'node_to_z'):
+                    trainable_params.extend([p for p in graph_dit.node_to_z.parameters() if p.requires_grad])
+            torch.nn.utils.clip_grad_norm_(trainable_params, self.max_grad_norm)
             self.optimizer.step()
 
             total_loss += losses["loss_total"].item()
@@ -736,7 +911,13 @@ def main():
     graph_dit.eval()
     for p in graph_dit.parameters():
         p.requires_grad = False
-    print(f"[Main] GraphDiT loaded and frozen")
+    # CRITICAL: Make node_to_z trainable (it was never trained in Graph-DiT training)
+    # because it's not in the gradient path of noise_pred loss
+    if hasattr(graph_dit, 'node_to_z'):
+        for p in graph_dit.node_to_z.parameters():
+            p.requires_grad = True
+        print(f"[Main] node_to_z made trainable (was not trained in Graph-DiT)")
+    print(f"[Main] GraphDiT loaded and frozen (except node_to_z)")
 
     # Create backbone adapter
     backbone = GraphDiTBackboneAdapter(graph_dit)
@@ -811,16 +992,11 @@ def main():
 
     print(f"[Main] obs_dim: {obs_dim}, action_dim: {action_dim}")
 
-    # Create residual action mask: exclude gripper from residual (only joints get residual)
-    # joint_dim = 5 (from config), so mask = [1, 1, 1, 1, 1, 0] for action_dim=6
-    joint_dim = 5  # Number of joint dimensions (gripper excluded)
-    if action_dim > joint_dim:
-        residual_action_mask = torch.ones(action_dim)
-        residual_action_mask[joint_dim:] = 0.0  # Set gripper dimensions to 0
-        print(f"[Main] residual_action_mask: {residual_action_mask.tolist()} (gripper excluded from residual)")
-    else:
-        residual_action_mask = None
-        print(f"[Main] No residual_action_mask (action_dim <= joint_dim)")
+    # Allow gripper to have residual delta (RL can learn to fine-tune gripper timing)
+    # final_gripper = a_base_gripper + alpha * delta_gripper (continuous value)
+    # Then binarize the continuous value (compare with -0.2)
+    residual_action_mask = None  # No mask: allow all dimensions (including gripper) to have residual
+    print(f"[Main] residual_action_mask: None (all dimensions including gripper can have residual)")
 
     # Create policy config
     policy_cfg = GraphDiTResidualRLCfg(
@@ -844,17 +1020,84 @@ def main():
     )
     policy.to(device)
 
-    # Load normalization stats from checkpoint
+    # Load normalization stats from checkpoint (same as Graph-DiT play.py)
     checkpoint = torch.load(args.pretrained_checkpoint, map_location=device, weights_only=False)
-    if "node_stats" in checkpoint:
-        node_stats = checkpoint["node_stats"]
-        policy.set_normalization_stats(
-            ee_node_mean=node_stats.get("ee_mean"),
-            ee_node_std=node_stats.get("ee_std"),
-            object_node_mean=node_stats.get("object_mean"),
-            object_node_std=node_stats.get("object_std"),
-        )
-        print(f"[Main] Loaded normalization stats from checkpoint")
+    
+    # Load obs stats
+    obs_stats = checkpoint.get("obs_stats", None)
+    obs_mean, obs_std = None, None
+    if obs_stats is not None:
+        if isinstance(obs_stats["mean"], np.ndarray):
+            obs_mean = torch.from_numpy(obs_stats["mean"]).squeeze().to(device)
+            obs_std = torch.from_numpy(obs_stats["std"]).squeeze().to(device)
+        else:
+            obs_mean = obs_stats["mean"].squeeze().to(device)
+            obs_std = obs_stats["std"].squeeze().to(device)
+        print(f"[Main] Loaded obs normalization stats")
+    
+    # Load node stats
+    node_stats = checkpoint.get("node_stats", None)
+    ee_node_mean, ee_node_std = None, None
+    object_node_mean, object_node_std = None, None
+    if node_stats is not None:
+        if isinstance(node_stats["ee_mean"], np.ndarray):
+            ee_node_mean = torch.from_numpy(node_stats["ee_mean"]).squeeze().to(device)
+            ee_node_std = torch.from_numpy(node_stats["ee_std"]).squeeze().to(device)
+            object_node_mean = torch.from_numpy(node_stats["object_mean"]).squeeze().to(device)
+            object_node_std = torch.from_numpy(node_stats["object_std"]).squeeze().to(device)
+        else:
+            ee_node_mean = node_stats["ee_mean"].squeeze().to(device)
+            ee_node_std = node_stats["ee_std"].squeeze().to(device)
+            object_node_mean = node_stats["object_mean"].squeeze().to(device)
+            object_node_std = node_stats["object_std"].squeeze().to(device)
+    
+    # Load action stats
+    action_stats = checkpoint.get("action_stats", None)
+    action_mean, action_std = None, None
+    if action_stats is not None:
+        if isinstance(action_stats["mean"], np.ndarray):
+            action_mean = torch.from_numpy(action_stats["mean"]).squeeze().to(device)
+            action_std = torch.from_numpy(action_stats["std"]).squeeze().to(device)
+        else:
+            action_mean = action_stats["mean"].squeeze().to(device)
+            action_std = action_stats["std"].squeeze().to(device)
+        print(f"[Main] Loaded action normalization stats")
+    
+    # Set normalization stats in policy (including action stats)
+    policy.set_normalization_stats(
+        ee_node_mean=ee_node_mean,
+        ee_node_std=ee_node_std,
+        object_node_mean=object_node_mean,
+        object_node_std=object_node_std,
+        action_mean=action_mean,
+        action_std=action_std,
+    )
+    if node_stats is not None:
+        print(f"[Main] Loaded node normalization stats")
+    
+    # Load joint stats
+    joint_stats = checkpoint.get("joint_stats", None)
+    joint_mean, joint_std = None, None
+    if joint_stats is not None:
+        if isinstance(joint_stats["mean"], np.ndarray):
+            joint_mean = torch.from_numpy(joint_stats["mean"]).squeeze().to(device)
+            joint_std = torch.from_numpy(joint_stats["std"]).squeeze().to(device)
+        else:
+            joint_mean = joint_stats["mean"].squeeze().to(device)
+            joint_std = joint_stats["std"].squeeze().to(device)
+        print(f"[Main] Loaded joint normalization stats")
+    
+    # Load action stats
+    action_stats = checkpoint.get("action_stats", None)
+    action_mean, action_std = None, None
+    if action_stats is not None:
+        if isinstance(action_stats["mean"], np.ndarray):
+            action_mean = torch.from_numpy(action_stats["mean"]).squeeze().to(device)
+            action_std = torch.from_numpy(action_stats["std"]).squeeze().to(device)
+        else:
+            action_mean = action_stats["mean"].squeeze().to(device)
+            action_std = action_stats["std"].squeeze().to(device)
+        print(f"[Main] Loaded action normalization stats")
 
     # Create log dir
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -881,6 +1124,16 @@ def main():
         max_grad_norm=args.max_grad_norm,
         action_history_length=action_history_length,
     )
+    
+    # Set normalization stats in trainer (same as Graph-DiT play.py)
+    trainer.set_normalization_stats(
+        obs_mean=obs_mean, obs_std=obs_std,
+        ee_node_mean=ee_node_mean, ee_node_std=ee_node_std,
+        object_node_mean=object_node_mean, object_node_std=object_node_std,
+        joint_mean=joint_mean, joint_std=joint_std,
+        action_mean=action_mean, action_std=action_std,
+    )
+    print(f"[Main] Set normalization stats in trainer")
 
     # Train
     trainer.train(

@@ -53,7 +53,7 @@ python scripts/graph_dit/train.py \
     --skip_first_steps 0 \
     --mode "$MODE" \
     --lr_schedule "$LR_SCHEDULE" \
-    --epochs 500 \
+    --epochs 1000 \
     --batch_size 32 \
     --lr 3e-4 \
     --hidden_dim 64 \

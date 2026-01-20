@@ -342,7 +342,7 @@ def play_graph_dit_policy(
     # ==========================================================================
     # EMA SMOOTHING for action smoothing (joints only, gripper excluded)
     # ==========================================================================
-    ema_alpha = 0.3  # EMA weight: higher = more responsive, lower = smoother
+    ema_alpha = 0.5  # EMA weight: higher = more responsive, lower = smoother
     ema_smoothed_joints = None  # Will be initialized on first action [num_envs, joint_dim]
     print(f"[Play] EMA smoothing enabled: alpha={ema_alpha} (joints only, gripper excluded)")
 
@@ -732,7 +732,7 @@ def play_graph_dit_policy(
                 # Shift action history (use normalized actions, not denormalized!)
                 action_history_buffers[env_id] = torch.cat(
                     [
-                    action_history_buffers[env_id][1:],
+                        action_history_buffers[env_id][1:],
                         actions_normalized[
                             env_id : env_id + 1
                         ],  # [1, action_dim] - Use normalized actions!
@@ -743,7 +743,7 @@ def play_graph_dit_policy(
                 # Shift node histories
                 ee_node_history_buffers[env_id] = torch.cat(
                     [
-                    ee_node_history_buffers[env_id][1:],
+                        ee_node_history_buffers[env_id][1:],
                         ee_node_current[env_id : env_id + 1],
                     ],
                     dim=0,
@@ -751,7 +751,7 @@ def play_graph_dit_policy(
 
                 object_node_history_buffers[env_id] = torch.cat(
                     [
-                    object_node_history_buffers[env_id][1:],
+                        object_node_history_buffers[env_id][1:],
                         object_node_current[env_id : env_id + 1],
                     ],
                     dim=0,

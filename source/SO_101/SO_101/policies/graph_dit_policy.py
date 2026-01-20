@@ -2720,7 +2720,24 @@ class GraphDiTPolicy(nn.Module):
         
         # Create policy
         policy = cls(cfg)
-        policy.load_state_dict(checkpoint["policy_state_dict"])
+        
+        # Load state dict with strict=False to handle missing keys (e.g., node_to_z in old checkpoints)
+        state_dict = checkpoint["policy_state_dict"]
+        missing_keys, unexpected_keys = policy.load_state_dict(state_dict, strict=False)
+        
+        # Handle missing keys (backward compatibility)
+        if missing_keys:
+            print(f"[GraphDiTPolicy] Warning: Missing keys in checkpoint (will use default initialization):")
+            for key in missing_keys:
+                print(f"  - {key}")
+            # If node_to_z is missing, it will use the default initialization from __init__
+            # This is fine for backward compatibility with old checkpoints
+        
+        if unexpected_keys:
+            print(f"[GraphDiTPolicy] Warning: Unexpected keys in checkpoint (ignored):")
+            for key in unexpected_keys:
+                print(f"  - {key}")
+        
         policy.to(device)
         policy.eval()
         

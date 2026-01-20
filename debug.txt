@@ -1,23 +1,3807 @@
-[Play] Loading policy from: ./logs/graph_dit/lift_joint_flow_matching/2026-01-16_14-39-05/best_model.pt
-[GraphDiTPolicy] Loaded model from: ./logs/graph_dit/lift_joint_flow_matching/2026-01-16_14-39-05/best_model.pt
-[Play] Policy mode: FLOW_MATCHING
-[Play] Using default diffusion steps: 2
-[Play] Loaded observation normalization stats
-[Play] Loaded action normalization stats
-[Play] Loaded node feature normalization stats
-[Play] Loaded joint state normalization stats
+[Step   0] Action Debug (env 0):
+  alpha: 0.1971
 
-[Play] Running 20 episodes...
-[Play] Action history length: 10
-[Play] ACTION CHUNKING: pred_horizon=20, exec_horizon=10
-[Play] Inference frequency: every 10 steps (vs every step without chunking)
-[Play] EMA smoothing enabled: alpha=0.3 (joints only, gripper excluded)
-Traceback (most recent call last):
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit/play.py", line 878, in <module>
-    main()
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit/play.py", line 867, in main
-    play_graph_dit_policy(
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit/play.py", line 643, in play_graph_dit_policy
-    action_trajectory_normalized * action_std.unsqueeze(0)
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-NameError: name 'action_trajectory_normalized' is not defined. Did you mean: 'action_buffers_normalized'?
+  Joints (0-4):
+    Joint 0: base=-0.5244, delta= 0.3414, final=-0.4571 (base + 0.20*delta = -0.4571)
+    Joint 1: base=-0.2731, delta= 0.1208, final=-0.2493 (base + 0.20*delta = -0.2493)
+    Joint 2: base= 0.5955, delta=-0.0425, final= 0.5871 (base + 0.20*delta = 0.5871)
+    Joint 3: base= 1.3136, delta= 0.0284, final= 1.3192 (base + 0.20*delta = 1.3192)
+    Joint 4: base= 1.0219, delta= 0.3155, final= 1.0841 (base + 0.20*delta = 1.0841)
+
+  Gripper (5):
+    base:  0.0219
+    delta:  0.1640
+    continuous (base + 0.20*delta):  0.0543
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0381, std= 0.4289, min=-0.2652, max= 0.3414, positive=50.0%
+      Joint 1: mean= 0.3061, std= 0.2622, min= 0.1208, max= 0.4915, positive=100.0%
+      Joint 2: mean=-0.0389, std= 0.0051, min=-0.0425, max=-0.0353, positive=0.0%
+      Joint 3: mean= 0.0145, std= 0.0197, min= 0.0006, max= 0.0284, positive=100.0%
+      Joint 4: mean= 0.0177, std= 0.4212, min=-0.2802, max= 0.3155, positive=50.0%
+    Gripper (5): mean= 0.1906, std= 0.0376, min= 0.1640, max= 0.2172, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0684, std= 0.7690
+      Joint 1: mean= 0.9069, std= 0.7766
+      Joint 2: mean=-0.0823, std= 0.0108
+      Joint 3: mean= 0.0568, std= 0.0769
+      Joint 4: mean= 0.0279, std= 0.6658
+    Gripper (5): mean= 1.0597, std= 0.2090
+
+[Step  10] Action Debug (env 0):
+  alpha: 0.1971
+
+  Joints (0-4):
+    Joint 0: base=-0.3488, delta=-0.2954, final=-0.4070 (base + 0.20*delta = -0.4070)
+    Joint 1: base=-0.3229, delta=-0.0743, final=-0.3375 (base + 0.20*delta = -0.3375)
+    Joint 2: base= 0.4946, delta= 0.2768, final= 0.5491 (base + 0.20*delta = 0.5491)
+    Joint 3: base= 1.3878, delta=-0.0367, final= 1.3806 (base + 0.20*delta = 1.3806)
+    Joint 4: base= 1.1968, delta= 0.2844, final= 1.2529 (base + 0.20*delta = 1.2529)
+
+  Gripper (5):
+    base: -0.0071
+    delta:  0.3152
+    continuous (base + 0.20*delta):  0.0550
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2214, std= 0.7308, min=-0.2954, max= 0.7382, positive=50.0%
+      Joint 1: mean= 0.0447, std= 0.1683, min=-0.0743, max= 0.1637, positive=50.0%
+      Joint 2: mean= 0.2169, std= 0.0847, min= 0.1570, max= 0.2768, positive=100.0%
+      Joint 3: mean=-0.1416, std= 0.1484, min=-0.2466, max=-0.0367, positive=0.0%
+      Joint 4: mean=-0.1460, std= 0.6087, min=-0.5763, max= 0.2844, positive=50.0%
+    Gripper (5): mean= 0.2391, std= 0.1076, min= 0.1630, max= 0.3152, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3969, std= 1.3102
+      Joint 1: mean= 0.1324, std= 0.4986
+      Joint 2: mean= 0.4588, std= 0.1792
+      Joint 3: mean=-0.5537, std= 0.5803
+      Joint 4: mean=-0.2307, std= 0.9621
+    Gripper (5): mean= 1.3296, std= 0.5983
+
+[Step  20] Action Debug (env 0):
+  alpha: 0.1971
+
+  Joints (0-4):
+    Joint 0: base=-0.2963, delta= 0.4450, final=-0.2086 (base + 0.20*delta = -0.2086)
+    Joint 1: base=-0.3268, delta=-0.1546, final=-0.3573 (base + 0.20*delta = -0.3573)
+    Joint 2: base= 0.5417, delta=-0.4226, final= 0.4584 (base + 0.20*delta = 0.4584)
+    Joint 3: base= 1.4132, delta=-0.0988, final= 1.3938 (base + 0.20*delta = 1.3938)
+    Joint 4: base= 1.2150, delta= 0.0451, final= 1.2239 (base + 0.20*delta = 1.2239)
+
+  Gripper (5):
+    base:  0.0064
+    delta:  0.0532
+    continuous (base + 0.20*delta):  0.0169
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3802, std= 0.0916, min= 0.3155, max= 0.4450, positive=100.0%
+      Joint 1: mean=-0.0063, std= 0.2097, min=-0.1546, max= 0.1420, positive=50.0%
+      Joint 2: mean=-0.2337, std= 0.2671, min=-0.4226, max=-0.0448, positive=0.0%
+      Joint 3: mean= 0.0101, std= 0.1540, min=-0.0988, max= 0.1190, positive=50.0%
+      Joint 4: mean= 0.2811, std= 0.3337, min= 0.0451, max= 0.5170, positive=100.0%
+    Gripper (5): mean= 0.2092, std= 0.2207, min= 0.0532, max= 0.3653, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.6817, std= 0.1642
+      Joint 1: mean=-0.0187, std= 0.6212
+      Joint 2: mean=-0.4943, std= 0.5649
+      Joint 3: mean= 0.0396, std= 0.6020
+      Joint 4: mean= 0.4443, std= 0.5274
+    Gripper (5): mean= 1.1633, std= 1.2272
+
+[Step  30] Action Debug (env 0):
+  alpha: 0.1971
+
+  Joints (0-4):
+    Joint 0: base=-0.3114, delta=-0.4382, final=-0.3978 (base + 0.20*delta = -0.3978)
+    Joint 1: base=-0.2997, delta=-0.0692, final=-0.3133 (base + 0.20*delta = -0.3133)
+    Joint 2: base= 0.6173, delta= 0.1776, final= 0.6523 (base + 0.20*delta = 0.6523)
+    Joint 3: base= 1.4206, delta= 0.0883, final= 1.4380 (base + 0.20*delta = 1.4380)
+    Joint 4: base= 1.0847, delta=-0.5088, final= 0.9844 (base + 0.20*delta = 0.9844)
+
+  Gripper (5):
+    base:  0.0013
+    delta:  0.0694
+    continuous (base + 0.20*delta):  0.0150
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.2392, std= 0.2814, min=-0.4382, max=-0.0402, positive=0.0%
+      Joint 1: mean= 0.0801, std= 0.2111, min=-0.0692, max= 0.2294, positive=50.0%
+      Joint 2: mean= 0.1645, std= 0.0186, min= 0.1514, max= 0.1776, positive=100.0%
+      Joint 3: mean= 0.0861, std= 0.0031, min= 0.0839, max= 0.0883, positive=100.0%
+      Joint 4: mean=-0.4775, std= 0.0443, min=-0.5088, max=-0.4461, positive=0.0%
+    Gripper (5): mean=-0.0008, std= 0.0993, min=-0.0711, max= 0.0694, positive=50.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.4289, std= 0.5045
+      Joint 1: mean= 0.2373, std= 0.6254
+      Joint 2: mean= 0.3479, std= 0.0393
+      Joint 3: mean= 0.3365, std= 0.0121
+      Joint 4: mean=-0.7548, std= 0.0701
+    Gripper (5): mean=-0.0046, std= 0.5524
+
+[Step  40] Action Debug (env 0):
+  alpha: 0.1971
+
+  Joints (0-4):
+    Joint 0: base=-0.2767, delta=-0.1499, final=-0.3063 (base + 0.20*delta = -0.3063)
+    Joint 1: base=-0.2649, delta=-0.2495, final=-0.3140 (base + 0.20*delta = -0.3140)
+    Joint 2: base= 0.6180, delta=-0.2916, final= 0.5605 (base + 0.20*delta = 0.5605)
+    Joint 3: base= 1.3506, delta= 0.0162, final= 1.3538 (base + 0.20*delta = 1.3538)
+    Joint 4: base= 1.1635, delta=-0.0723, final= 1.1493 (base + 0.20*delta = 1.1493)
+
+  Gripper (5):
+    base:  0.0031
+    delta:  0.1932
+    continuous (base + 0.20*delta):  0.0412
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.0874, std= 0.0884, min=-0.1499, max=-0.0248, positive=0.0%
+      Joint 1: mean=-0.0904, std= 0.2249, min=-0.2495, max= 0.0686, positive=50.0%
+      Joint 2: mean=-0.0731, std= 0.3090, min=-0.2916, max= 0.1454, positive=50.0%
+      Joint 3: mean=-0.1066, std= 0.1737, min=-0.2294, max= 0.0162, positive=50.0%
+      Joint 4: mean=-0.0817, std= 0.0132, min=-0.0910, max=-0.0723, positive=0.0%
+    Gripper (5): mean= 0.2271, std= 0.0479, min= 0.1932, max= 0.2610, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.1566, std= 0.1586
+      Joint 1: mean=-0.2679, std= 0.6662
+      Joint 2: mean=-0.1546, std= 0.6535
+      Joint 3: mean=-0.4167, std= 0.6789
+      Joint 4: mean=-0.1291, std= 0.0208
+    Gripper (5): mean= 1.2626, std= 0.2665
+
+[Step  50] Action Debug (env 0):
+  alpha: 0.1971
+
+  Joints (0-4):
+    Joint 0: base=-0.3059, delta= 0.0226, final=-0.3015 (base + 0.20*delta = -0.3015)
+    Joint 1: base=-0.3110, delta= 0.0473, final=-0.3016 (base + 0.20*delta = -0.3016)
+    Joint 2: base= 0.6434, delta=-0.0214, final= 0.6392 (base + 0.20*delta = 0.6392)
+    Joint 3: base= 1.3653, delta= 0.1719, final= 1.3992 (base + 0.20*delta = 1.3992)
+    Joint 4: base= 1.1187, delta=-0.5897, final= 1.0025 (base + 0.20*delta = 1.0025)
+
+  Gripper (5):
+    base: -0.0068
+    delta:  0.1058
+    continuous (base + 0.20*delta):  0.0141
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2178, std= 0.2760, min= 0.0226, max= 0.4130, positive=100.0%
+      Joint 1: mean= 0.1484, std= 0.1429, min= 0.0473, max= 0.2494, positive=100.0%
+      Joint 2: mean= 0.1287, std= 0.2123, min=-0.0214, max= 0.2788, positive=50.0%
+      Joint 3: mean= 0.0436, std= 0.1816, min=-0.0848, max= 0.1719, positive=50.0%
+      Joint 4: mean=-0.1717, std= 0.5911, min=-0.5897, max= 0.2462, positive=50.0%
+    Gripper (5): mean= 0.1274, std= 0.0305, min= 0.1058, max= 0.1489, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3904, std= 0.4949
+      Joint 1: mean= 0.4395, std= 0.4232
+      Joint 2: mean= 0.2722, std= 0.4490
+      Joint 3: mean= 0.1702, std= 0.7098
+      Joint 4: mean=-0.2715, std= 0.9344
+    Gripper (5): mean= 0.7083, std= 0.1696
+
+[Step  60] Action Debug (env 0):
+  alpha: 0.1971
+
+  Joints (0-4):
+    Joint 0: base=-0.2972, delta= 0.2761, final=-0.2428 (base + 0.20*delta = -0.2428)
+    Joint 1: base=-0.3437, delta= 0.2016, final=-0.3040 (base + 0.20*delta = -0.3040)
+    Joint 2: base= 0.6477, delta= 0.2043, final= 0.6880 (base + 0.20*delta = 0.6880)
+    Joint 3: base= 1.3760, delta= 0.0907, final= 1.3939 (base + 0.20*delta = 1.3939)
+    Joint 4: base= 1.1308, delta=-0.1618, final= 1.0989 (base + 0.20*delta = 1.0989)
+
+  Gripper (5):
+    base: -0.0376
+    delta:  0.2298
+    continuous (base + 0.20*delta):  0.0077
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3084, std= 0.0456, min= 0.2761, max= 0.3407, positive=100.0%
+      Joint 1: mean= 0.1120, std= 0.1268, min= 0.0223, max= 0.2016, positive=100.0%
+      Joint 2: mean= 0.0262, std= 0.2520, min=-0.1520, max= 0.2043, positive=50.0%
+      Joint 3: mean= 0.1168, std= 0.0369, min= 0.0907, max= 0.1429, positive=100.0%
+      Joint 4: mean= 0.0085, std= 0.2409, min=-0.1618, max= 0.1788, positive=50.0%
+    Gripper (5): mean= 0.2689, std= 0.0553, min= 0.2298, max= 0.3079, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.5529, std= 0.0818
+      Joint 1: mean= 0.3317, std= 0.3755
+      Joint 2: mean= 0.0553, std= 0.5329
+      Joint 3: mean= 0.4567, std= 0.1442
+      Joint 4: mean= 0.0134, std= 0.3808
+    Gripper (5): mean= 1.4950, std= 0.3073
+
+[Step  70] Action Debug (env 0):
+  alpha: 0.1971
+
+  Joints (0-4):
+    Joint 0: base=-0.2870, delta= 0.6044, final=-0.1678 (base + 0.20*delta = -0.1678)
+    Joint 1: base=-0.3195, delta= 0.0807, final=-0.3036 (base + 0.20*delta = -0.3036)
+    Joint 2: base= 0.6343, delta=-0.1050, final= 0.6136 (base + 0.20*delta = 0.6136)
+    Joint 3: base= 1.3895, delta=-0.1679, final= 1.3564 (base + 0.20*delta = 1.3564)
+    Joint 4: base= 1.1312, delta=-0.4694, final= 1.0386 (base + 0.20*delta = 1.0386)
+
+  Gripper (5):
+    base: -0.0149
+    delta:  0.1660
+    continuous (base + 0.20*delta):  0.0178
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2936, std= 0.4395, min=-0.0172, max= 0.6044, positive=50.0%
+      Joint 1: mean= 0.0292, std= 0.0729, min=-0.0223, max= 0.0807, positive=50.0%
+      Joint 2: mean=-0.0441, std= 0.0862, min=-0.1050, max= 0.0169, positive=50.0%
+      Joint 3: mean=-0.0368, std= 0.1854, min=-0.1679, max= 0.0942, positive=50.0%
+      Joint 4: mean= 0.1016, std= 0.8075, min=-0.4694, max= 0.6726, positive=50.0%
+    Gripper (5): mean= 0.1647, std= 0.0018, min= 0.1635, max= 0.1660, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.5264, std= 0.7880
+      Joint 1: mean= 0.0865, std= 0.2158
+      Joint 2: mean=-0.0932, std= 0.1823
+      Joint 3: mean=-0.1440, std= 0.7246
+      Joint 4: mean= 0.1607, std= 1.2765
+    Gripper (5): mean= 0.9160, std= 0.0101
+
+[Step  80] Action Debug (env 0):
+  alpha: 0.1971
+
+  Joints (0-4):
+    Joint 0: base=-0.2503, delta= 0.1740, final=-0.2160 (base + 0.20*delta = -0.2160)
+    Joint 1: base=-0.2990, delta= 0.1786, final=-0.2638 (base + 0.20*delta = -0.2638)
+    Joint 2: base= 0.6169, delta= 0.1792, final= 0.6522 (base + 0.20*delta = 0.6522)
+    Joint 3: base= 1.3167, delta=-0.1136, final= 1.2943 (base + 0.20*delta = 1.2943)
+    Joint 4: base= 1.2418, delta=-0.0782, final= 1.2264 (base + 0.20*delta = 1.2264)
+
+  Gripper (5):
+    base:  0.0196
+    delta:  0.1817
+    continuous (base + 0.20*delta):  0.0554
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0076, std= 0.2353, min=-0.1589, max= 0.1740, positive=50.0%
+      Joint 1: mean= 0.0827, std= 0.1356, min=-0.0132, max= 0.1786, positive=50.0%
+      Joint 2: mean= 0.1147, std= 0.0912, min= 0.0502, max= 0.1792, positive=100.0%
+      Joint 3: mean=-0.0854, std= 0.0398, min=-0.1136, max=-0.0573, positive=0.0%
+      Joint 4: mean=-0.0067, std= 0.1011, min=-0.0782, max= 0.0648, positive=50.0%
+    Gripper (5): mean= 0.1005, std= 0.1149, min= 0.0193, max= 0.1817, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0136, std= 0.4219
+      Joint 1: mean= 0.2450, std= 0.4016
+      Joint 2: mean= 0.2426, std= 0.1929
+      Joint 3: mean=-0.3340, std= 0.1556
+      Joint 4: mean=-0.0106, std= 0.1598
+    Gripper (5): mean= 0.5588, std= 0.6386
+
+[Step  90] Action Debug (env 0):
+  alpha: 0.1971
+
+  Joints (0-4):
+    Joint 0: base=-0.2558, delta= 0.2269, final=-0.2110 (base + 0.20*delta = -0.2110)
+    Joint 1: base=-0.2913, delta= 0.1895, final=-0.2539 (base + 0.20*delta = -0.2539)
+    Joint 2: base= 0.6094, delta= 0.0165, final= 0.6126 (base + 0.20*delta = 0.6126)
+    Joint 3: base= 1.3798, delta=-0.2201, final= 1.3364 (base + 0.20*delta = 1.3364)
+    Joint 4: base= 1.1330, delta= 0.1769, final= 1.1679 (base + 0.20*delta = 1.1679)
+
+  Gripper (5):
+    base:  0.0096
+    delta:  0.2102
+    continuous (base + 0.20*delta):  0.0511
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.0106, std= 0.3358, min=-0.2480, max= 0.2269, positive=50.0%
+      Joint 1: mean= 0.1908, std= 0.0019, min= 0.1895, max= 0.1922, positive=100.0%
+      Joint 2: mean=-0.0443, std= 0.0860, min=-0.1051, max= 0.0165, positive=50.0%
+      Joint 3: mean=-0.0168, std= 0.2875, min=-0.2201, max= 0.1866, positive=50.0%
+      Joint 4: mean= 0.1436, std= 0.0471, min= 0.1103, max= 0.1769, positive=100.0%
+    Gripper (5): mean= 0.0984, std= 0.1581, min=-0.0134, max= 0.2102, positive=50.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.0189, std= 0.6021
+      Joint 1: mean= 0.5653, std= 0.0056
+      Joint 2: mean=-0.0937, std= 0.1818
+      Joint 3: mean=-0.0655, std= 1.1241
+      Joint 4: mean= 0.2270, std= 0.0745
+    Gripper (5): mean= 0.5470, std= 0.8791
+
+[Step 100] Action Debug (env 0):
+  alpha: 0.1971
+
+  Joints (0-4):
+    Joint 0: base=-0.3169, delta= 0.4424, final=-0.2297 (base + 0.20*delta = -0.2297)
+    Joint 1: base=-0.3148, delta= 0.1954, final=-0.2763 (base + 0.20*delta = -0.2763)
+    Joint 2: base= 0.5998, delta=-0.0366, final= 0.5925 (base + 0.20*delta = 0.5925)
+    Joint 3: base= 1.3979, delta= 0.1412, final= 1.4257 (base + 0.20*delta = 1.4257)
+    Joint 4: base= 1.1573, delta= 0.7278, final= 1.3007 (base + 0.20*delta = 1.3007)
+
+  Gripper (5):
+    base: -0.0601
+    delta:  0.2639
+    continuous (base + 0.20*delta): -0.0081
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2291, std= 0.3016, min= 0.0159, max= 0.4424, positive=100.0%
+      Joint 1: mean= 0.0346, std= 0.2274, min=-0.1263, max= 0.1954, positive=50.0%
+      Joint 2: mean= 0.0220, std= 0.0829, min=-0.0366, max= 0.0806, positive=50.0%
+      Joint 3: mean= 0.0836, std= 0.0814, min= 0.0261, max= 0.1412, positive=100.0%
+      Joint 4: mean= 0.5100, std= 0.3079, min= 0.2923, max= 0.7278, positive=100.0%
+    Gripper (5): mean= 0.2000, std= 0.0904, min= 0.1360, max= 0.2639, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4108, std= 0.5407
+      Joint 1: mean= 0.1024, std= 0.6737
+      Joint 2: mean= 0.0465, std= 0.1753
+      Joint 3: mean= 0.3269, std= 0.3182
+      Joint 4: mean= 0.8063, std= 0.4867
+    Gripper (5): mean= 1.1119, std= 0.5027
+
+[Step 110] Action Debug (env 0):
+  alpha: 0.1971
+
+  Joints (0-4):
+    Joint 0: base=-0.2725, delta= 0.2726, final=-0.2187 (base + 0.20*delta = -0.2187)
+    Joint 1: base=-0.3173, delta=-0.1368, final=-0.3443 (base + 0.20*delta = -0.3443)
+    Joint 2: base= 0.6064, delta= 0.0069, final= 0.6078 (base + 0.20*delta = 0.6078)
+    Joint 3: base= 1.3789, delta=-0.3881, final= 1.3024 (base + 0.20*delta = 1.3024)
+    Joint 4: base= 1.1855, delta=-0.0914, final= 1.1674 (base + 0.20*delta = 1.1674)
+
+  Gripper (5):
+    base:  0.0172
+    delta:  0.3065
+    continuous (base + 0.20*delta):  0.0776
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0265, std= 0.3480, min=-0.2197, max= 0.2726, positive=50.0%
+      Joint 1: mean=-0.0628, std= 0.1047, min=-0.1368, max= 0.0113, positive=50.0%
+      Joint 2: mean=-0.1082, std= 0.1628, min=-0.2233, max= 0.0069, positive=50.0%
+      Joint 3: mean=-0.2005, std= 0.2653, min=-0.3881, max=-0.0129, positive=0.0%
+      Joint 4: mean=-0.0499, std= 0.0587, min=-0.0914, max=-0.0083, positive=0.0%
+    Gripper (5): mean= 0.2872, std= 0.0274, min= 0.2678, max= 0.3065, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0474, std= 0.6240
+      Joint 1: mean=-0.1859, std= 0.3103
+      Joint 2: mean=-0.2289, std= 0.3443
+      Joint 3: mean=-0.7839, std= 1.0371
+      Joint 4: mean=-0.0788, std= 0.0928
+    Gripper (5): mean= 1.5967, std= 0.1522
+
+[Step 120] Action Debug (env 0):
+  alpha: 0.1971
+
+  Joints (0-4):
+    Joint 0: base=-0.2775, delta= 0.3747, final=-0.2036 (base + 0.20*delta = -0.2036)
+    Joint 1: base=-0.2865, delta= 0.3217, final=-0.2231 (base + 0.20*delta = -0.2231)
+    Joint 2: base= 0.5943, delta= 0.5258, final= 0.6980 (base + 0.20*delta = 0.6980)
+    Joint 3: base= 1.4061, delta= 0.1375, final= 1.4332 (base + 0.20*delta = 1.4332)
+    Joint 4: base= 1.1331, delta= 0.1284, final= 1.1584 (base + 0.20*delta = 1.1584)
+
+  Gripper (5):
+    base:  0.0114
+    delta:  0.0594
+    continuous (base + 0.20*delta):  0.0231
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2516, std= 0.1741, min= 0.1285, max= 0.3747, positive=100.0%
+      Joint 1: mean= 0.1927, std= 0.1824, min= 0.0637, max= 0.3217, positive=100.0%
+      Joint 2: mean= 0.2784, std= 0.3499, min= 0.0310, max= 0.5258, positive=100.0%
+      Joint 3: mean= 0.2749, std= 0.1944, min= 0.1375, max= 0.4124, positive=100.0%
+      Joint 4: mean= 0.2014, std= 0.1033, min= 0.1284, max= 0.2745, positive=100.0%
+    Gripper (5): mean= 0.1398, std= 0.1137, min= 0.0594, max= 0.2202, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4511, std= 0.3121
+      Joint 1: mean= 0.5708, std= 0.5404
+      Joint 2: mean= 0.5889, std= 0.7401
+      Joint 3: mean= 1.0747, std= 0.7600
+      Joint 4: mean= 0.3184, std= 0.1633
+    Gripper (5): mean= 0.7775, std= 0.6322
+[Iter   14] steps=   3640 | ep_reward=   2.85 | rollout_reward= 0.0298 | episodes= 28 | done_pct=  0.0% | early_done=  0.0% | loss=1173.5018 | alpha=0.205
+
+[Step   0] Action Debug (env 0):
+  alpha: 0.2045
+
+  Joints (0-4):
+    Joint 0: base=-0.3284, delta= 0.3057, final=-0.2659 (base + 0.20*delta = -0.2659)
+    Joint 1: base=-0.2813, delta= 0.0491, final=-0.2713 (base + 0.20*delta = -0.2713)
+    Joint 2: base= 0.6223, delta=-0.3553, final= 0.5496 (base + 0.20*delta = 0.5496)
+    Joint 3: base= 1.3677, delta=-0.3770, final= 1.2906 (base + 0.20*delta = 1.2906)
+    Joint 4: base= 1.1377, delta=-0.1877, final= 1.0993 (base + 0.20*delta = 1.0993)
+
+  Gripper (5):
+    base:  0.0130
+    delta:  0.0425
+    continuous (base + 0.20*delta):  0.0216
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4225, std= 0.1651, min= 0.3057, max= 0.5393, positive=100.0%
+      Joint 1: mean= 0.0715, std= 0.0317, min= 0.0491, max= 0.0939, positive=100.0%
+      Joint 2: mean=-0.1807, std= 0.2469, min=-0.3553, max=-0.0062, positive=0.0%
+      Joint 3: mean=-0.2756, std= 0.1434, min=-0.3770, max=-0.1742, positive=0.0%
+      Joint 4: mean=-0.1181, std= 0.0984, min=-0.1877, max=-0.0485, positive=0.0%
+    Gripper (5): mean= 0.2114, std= 0.2389, min= 0.0425, max= 0.3804, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.7575, std= 0.2960
+      Joint 1: mean= 0.2118, std= 0.0939
+      Joint 2: mean=-0.3822, std= 0.5221
+      Joint 3: mean=-1.0775, std= 0.5605
+      Joint 4: mean=-0.1867, std= 0.1556
+    Gripper (5): mean= 1.1757, std= 1.3286
+
+[Step  10] Action Debug (env 0):
+  alpha: 0.2045
+
+  Joints (0-4):
+    Joint 0: base=-0.3394, delta= 0.4780, final=-0.2417 (base + 0.20*delta = -0.2417)
+    Joint 1: base=-0.0848, delta= 0.0327, final=-0.0781 (base + 0.20*delta = -0.0781)
+    Joint 2: base= 0.2652, delta=-0.1917, final= 0.2260 (base + 0.20*delta = 0.2260)
+    Joint 3: base= 1.2385, delta= 0.1438, final= 1.2679 (base + 0.20*delta = 1.2679)
+    Joint 4: base= 0.9139, delta=-0.0878, final= 0.8959 (base + 0.20*delta = 0.8959)
+
+  Gripper (5):
+    base: -0.0591
+    delta:  0.1930
+    continuous (base + 0.20*delta): -0.0197
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.5832, std= 0.1487, min= 0.4780, max= 0.6883, positive=100.0%
+      Joint 1: mean=-0.0546, std= 0.1235, min=-0.1420, max= 0.0327, positive=50.0%
+      Joint 2: mean= 0.0913, std= 0.4002, min=-0.1917, max= 0.3743, positive=50.0%
+      Joint 3: mean= 0.1702, std= 0.0373, min= 0.1438, max= 0.1965, positive=100.0%
+      Joint 4: mean=-0.1122, std= 0.0346, min=-0.1367, max=-0.0878, positive=0.0%
+    Gripper (5): mean= 0.2133, std= 0.0288, min= 0.1930, max= 0.2337, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 1.0456, std= 0.2666
+      Joint 1: mean=-0.1618, std= 0.3660
+      Joint 2: mean= 0.1931, std= 0.8464
+      Joint 3: mean= 0.6653, std= 0.1457
+      Joint 4: mean=-0.1774, std= 0.0547
+    Gripper (5): mean= 1.1861, std= 0.1601
+
+[Step  20] Action Debug (env 0):
+  alpha: 0.2045
+
+  Joints (0-4):
+    Joint 0: base=-0.1480, delta= 0.0273, final=-0.1424 (base + 0.20*delta = -0.1424)
+    Joint 1: base= 0.1110, delta= 0.2026, final= 0.1524 (base + 0.20*delta = 0.1524)
+    Joint 2: base= 0.0430, delta= 0.0933, final= 0.0621 (base + 0.20*delta = 0.0621)
+    Joint 3: base= 1.1281, delta= 0.0867, final= 1.1458 (base + 0.20*delta = 1.1458)
+    Joint 4: base= 1.1520, delta= 0.2815, final= 1.2096 (base + 0.20*delta = 1.2096)
+
+  Gripper (5):
+    base: -0.0569
+    delta:  0.1691
+    continuous (base + 0.20*delta): -0.0223
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0942, std= 0.0946, min= 0.0273, max= 0.1610, positive=100.0%
+      Joint 1: mean= 0.1551, std= 0.0670, min= 0.1077, max= 0.2026, positive=100.0%
+      Joint 2: mean= 0.3000, std= 0.2924, min= 0.0933, max= 0.5068, positive=100.0%
+      Joint 3: mean= 0.1256, std= 0.0550, min= 0.0867, max= 0.1645, positive=100.0%
+      Joint 4: mean=-0.0397, std= 0.4543, min=-0.3609, max= 0.2815, positive=50.0%
+    Gripper (5): mean= 0.1178, std= 0.0726, min= 0.0665, max= 0.1691, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1688, std= 0.1696
+      Joint 1: mean= 0.4596, std= 0.1986
+      Joint 2: mean= 0.6345, std= 0.6184
+      Joint 3: mean= 0.4909, std= 0.2150
+      Joint 4: mean=-0.0627, std= 0.7181
+    Gripper (5): mean= 0.6548, std= 0.4035
+
+[Step  30] Action Debug (env 0):
+  alpha: 0.2045
+
+  Joints (0-4):
+    Joint 0: base=-0.1665, delta= 0.1971, final=-0.1262 (base + 0.20*delta = -0.1262)
+    Joint 1: base= 0.1260, delta=-0.1040, final= 0.1048 (base + 0.20*delta = 0.1048)
+    Joint 2: base= 0.1061, delta= 0.1804, final= 0.1430 (base + 0.20*delta = 0.1430)
+    Joint 3: base= 1.0670, delta= 0.0235, final= 1.0718 (base + 0.20*delta = 1.0718)
+    Joint 4: base= 1.1668, delta= 0.2108, final= 1.2099 (base + 0.20*delta = 1.2099)
+
+  Gripper (5):
+    base:  0.0037
+    delta:  0.2378
+    continuous (base + 0.20*delta):  0.0523
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3086, std= 0.1577, min= 0.1971, max= 0.4201, positive=100.0%
+      Joint 1: mean=-0.0242, std= 0.1129, min=-0.1040, max= 0.0556, positive=50.0%
+      Joint 2: mean= 0.2675, std= 0.1232, min= 0.1804, max= 0.3546, positive=100.0%
+      Joint 3: mean=-0.0262, std= 0.0704, min=-0.0760, max= 0.0235, positive=50.0%
+      Joint 4: mean=-0.1808, std= 0.5537, min=-0.5723, max= 0.2108, positive=50.0%
+    Gripper (5): mean= 0.2188, std= 0.0268, min= 0.1999, max= 0.2378, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.5533, std= 0.2826
+      Joint 1: mean=-0.0716, std= 0.3343
+      Joint 2: mean= 0.5657, std= 0.2605
+      Joint 3: mean=-0.1026, std= 0.2751
+      Joint 4: mean=-0.2857, std= 0.8753
+    Gripper (5): mean= 1.2166, std= 0.1490
+
+[Step  40] Action Debug (env 0):
+  alpha: 0.2045
+
+  Joints (0-4):
+    Joint 0: base=-0.1236, delta=-0.1570, final=-0.1557 (base + 0.20*delta = -0.1557)
+    Joint 1: base= 0.2150, delta= 0.1685, final= 0.2495 (base + 0.20*delta = 0.2495)
+    Joint 2: base= 0.0149, delta=-0.0959, final=-0.0047 (base + 0.20*delta = -0.0047)
+    Joint 3: base= 1.1119, delta= 0.0024, final= 1.1124 (base + 0.20*delta = 1.1124)
+    Joint 4: base= 1.1971, delta=-0.1152, final= 1.1736 (base + 0.20*delta = 1.1736)
+
+  Gripper (5):
+    base:  0.0350
+    delta:  0.2489
+    continuous (base + 0.20*delta):  0.0859
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0607, std= 0.3078, min=-0.1570, max= 0.2783, positive=50.0%
+      Joint 1: mean= 0.1610, std= 0.0107, min= 0.1535, max= 0.1685, positive=100.0%
+      Joint 2: mean=-0.0882, std= 0.0108, min=-0.0959, max=-0.0806, positive=0.0%
+      Joint 3: mean= 0.0607, std= 0.0824, min= 0.0024, max= 0.1189, positive=100.0%
+      Joint 4: mean=-0.0664, std= 0.0690, min=-0.1152, max=-0.0177, positive=0.0%
+    Gripper (5): mean= 0.2580, std= 0.0130, min= 0.2489, max= 0.2672, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1088, std= 0.5519
+      Joint 1: mean= 0.4769, std= 0.0316
+      Joint 2: mean=-0.1866, std= 0.0229
+      Joint 3: mean= 0.2372, std= 0.3220
+      Joint 4: mean=-0.1050, std= 0.1091
+    Gripper (5): mean= 1.4348, std= 0.0722
+
+[Step  50] Action Debug (env 0):
+  alpha: 0.2045
+
+  Joints (0-4):
+    Joint 0: base=-0.1718, delta= 0.0760, final=-0.1563 (base + 0.20*delta = -0.1563)
+    Joint 1: base= 0.0935, delta=-0.0316, final= 0.0870 (base + 0.20*delta = 0.0870)
+    Joint 2: base= 0.1279, delta= 0.3656, final= 0.2027 (base + 0.20*delta = 0.2027)
+    Joint 3: base= 1.0801, delta=-0.1564, final= 1.0481 (base + 0.20*delta = 1.0481)
+    Joint 4: base= 1.1069, delta= 0.1648, final= 1.1406 (base + 0.20*delta = 1.1406)
+
+  Gripper (5):
+    base:  0.0297
+    delta:  0.2754
+    continuous (base + 0.20*delta):  0.0860
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.0055, std= 0.1152, min=-0.0870, max= 0.0760, positive=50.0%
+      Joint 1: mean= 0.0534, std= 0.1203, min=-0.0316, max= 0.1385, positive=50.0%
+      Joint 2: mean= 0.1857, std= 0.2545, min= 0.0057, max= 0.3656, positive=100.0%
+      Joint 3: mean=-0.1673, std= 0.0154, min=-0.1783, max=-0.1564, positive=0.0%
+      Joint 4: mean=-0.0908, std= 0.3615, min=-0.3464, max= 0.1648, positive=50.0%
+    Gripper (5): mean= 0.3173, std= 0.0593, min= 0.2754, max= 0.3592, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.0099, std= 0.2066
+      Joint 1: mean= 0.1582, std= 0.3563
+      Joint 2: mean= 0.3927, std= 0.5382
+      Joint 3: mean=-0.6542, std= 0.0604
+      Joint 4: mean=-0.1435, std= 0.5714
+    Gripper (5): mean= 1.7642, std= 0.3295
+
+[Step  60] Action Debug (env 0):
+  alpha: 0.2045
+
+  Joints (0-4):
+    Joint 0: base=-0.1726, delta=-0.2606, final=-0.2259 (base + 0.20*delta = -0.2259)
+    Joint 1: base= 0.0355, delta=-0.0921, final= 0.0167 (base + 0.20*delta = 0.0167)
+    Joint 2: base= 0.1615, delta= 0.0746, final= 0.1767 (base + 0.20*delta = 0.1767)
+    Joint 3: base= 1.0887, delta= 0.0338, final= 1.0956 (base + 0.20*delta = 1.0956)
+    Joint 4: base= 1.1389, delta= 0.4410, final= 1.2291 (base + 0.20*delta = 1.2291)
+
+  Gripper (5):
+    base:  0.0288
+    delta: -0.0196
+    continuous (base + 0.20*delta):  0.0248
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.0547, std= 0.2911, min=-0.2606, max= 0.1511, positive=50.0%
+      Joint 1: mean=-0.0508, std= 0.0584, min=-0.0921, max=-0.0095, positive=0.0%
+      Joint 2: mean=-0.0003, std= 0.1059, min=-0.0752, max= 0.0746, positive=50.0%
+      Joint 3: mean= 0.0154, std= 0.0261, min=-0.0031, max= 0.0338, positive=50.0%
+      Joint 4: mean= 0.0778, std= 0.5137, min=-0.2854, max= 0.4410, positive=50.0%
+    Gripper (5): mean= 0.0321, std= 0.0731, min=-0.0196, max= 0.0837, positive=50.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.0981, std= 0.5220
+      Joint 1: mean=-0.1505, std= 0.1729
+      Joint 2: mean=-0.0006, std= 0.2240
+      Joint 3: mean= 0.0602, std= 0.1020
+      Joint 4: mean= 0.1230, std= 0.8120
+    Gripper (5): mean= 0.1783, std= 0.4062
+
+[Step  70] Action Debug (env 0):
+  alpha: 0.2045
+
+  Joints (0-4):
+    Joint 0: base=-0.1444, delta= 0.5612, final=-0.0296 (base + 0.20*delta = -0.0296)
+    Joint 1: base= 0.1116, delta= 0.0463, final= 0.1211 (base + 0.20*delta = 0.1211)
+    Joint 2: base= 0.1109, delta= 0.1796, final= 0.1476 (base + 0.20*delta = 0.1476)
+    Joint 3: base= 1.0874, delta= 0.1884, final= 1.1260 (base + 0.20*delta = 1.1260)
+    Joint 4: base= 1.1698, delta= 0.4159, final= 1.2548 (base + 0.20*delta = 1.2548)
+
+  Gripper (5):
+    base:  0.0135
+    delta:  0.1803
+    continuous (base + 0.20*delta):  0.0503
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3428, std= 0.3089, min= 0.1243, max= 0.5612, positive=100.0%
+      Joint 1: mean= 0.0544, std= 0.0115, min= 0.0463, max= 0.0625, positive=100.0%
+      Joint 2: mean= 0.0903, std= 0.1264, min= 0.0009, max= 0.1796, positive=100.0%
+      Joint 3: mean= 0.1310, std= 0.0813, min= 0.0735, max= 0.1884, positive=100.0%
+      Joint 4: mean=-0.0519, std= 0.6616, min=-0.5198, max= 0.4159, positive=50.0%
+    Gripper (5): mean= 0.1637, std= 0.0235, min= 0.1471, max= 0.1803, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.6145, std= 0.5539
+      Joint 1: mean= 0.1612, std= 0.0339
+      Joint 2: mean= 0.1909, std= 0.2672
+      Joint 3: mean= 0.5119, std= 0.3178
+      Joint 4: mean=-0.0821, std= 1.0458
+    Gripper (5): mean= 0.9100, std= 0.1304
+
+[Step  80] Action Debug (env 0):
+  alpha: 0.2045
+
+  Joints (0-4):
+    Joint 0: base=-0.1107, delta= 0.3427, final=-0.0406 (base + 0.20*delta = -0.0406)
+    Joint 1: base= 0.1410, delta=-0.0103, final= 0.1389 (base + 0.20*delta = 0.1389)
+    Joint 2: base= 0.0641, delta=-0.2109, final= 0.0210 (base + 0.20*delta = 0.0210)
+    Joint 3: base= 1.0969, delta=-0.0187, final= 1.0931 (base + 0.20*delta = 1.0931)
+    Joint 4: base= 1.2112, delta=-0.2074, final= 1.1688 (base + 0.20*delta = 1.1688)
+
+  Gripper (5):
+    base:  0.0091
+    delta:  0.3169
+    continuous (base + 0.20*delta):  0.0739
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4274, std= 0.1198, min= 0.3427, max= 0.5121, positive=100.0%
+      Joint 1: mean= 0.2046, std= 0.3039, min=-0.0103, max= 0.4195, positive=50.0%
+      Joint 2: mean=-0.1736, std= 0.0528, min=-0.2109, max=-0.1363, positive=0.0%
+      Joint 3: mean= 0.1344, std= 0.2166, min=-0.0187, max= 0.2876, positive=50.0%
+      Joint 4: mean=-0.2050, std= 0.0035, min=-0.2074, max=-0.2025, positive=0.0%
+    Gripper (5): mean= 0.2971, std= 0.0280, min= 0.2774, max= 0.3169, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.7663, std= 0.2147
+      Joint 1: mean= 0.6061, std= 0.9004
+      Joint 2: mean=-0.3671, std= 0.1116
+      Joint 3: mean= 0.5255, std= 0.8467
+      Joint 4: mean=-0.3240, std= 0.0055
+    Gripper (5): mean= 1.6521, std= 0.1554
+
+[Step  90] Action Debug (env 0):
+  alpha: 0.2045
+
+  Joints (0-4):
+    Joint 0: base=-0.1373, delta= 0.5242, final=-0.0300 (base + 0.20*delta = -0.0300)
+    Joint 1: base= 0.0343, delta= 0.1678, final= 0.0686 (base + 0.20*delta = 0.0686)
+    Joint 2: base= 0.1701, delta=-0.2141, final= 0.1263 (base + 0.20*delta = 0.1263)
+    Joint 3: base= 1.0506, delta=-0.0202, final= 1.0465 (base + 0.20*delta = 1.0465)
+    Joint 4: base= 1.2357, delta=-0.2127, final= 1.1922 (base + 0.20*delta = 1.1922)
+
+  Gripper (5):
+    base:  0.0261
+    delta:  0.0262
+    continuous (base + 0.20*delta):  0.0315
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2994, std= 0.3178, min= 0.0747, max= 0.5242, positive=100.0%
+      Joint 1: mean= 0.0388, std= 0.1825, min=-0.0903, max= 0.1678, positive=50.0%
+      Joint 2: mean=-0.0502, std= 0.2318, min=-0.2141, max= 0.1137, positive=50.0%
+      Joint 3: mean= 0.0913, std= 0.1577, min=-0.0202, max= 0.2028, positive=50.0%
+      Joint 4: mean=-0.2168, std= 0.0058, min=-0.2209, max=-0.2127, positive=0.0%
+    Gripper (5): mean= 0.1718, std= 0.2059, min= 0.0262, max= 0.3174, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.5368, std= 0.5698
+      Joint 1: mean= 0.1148, std= 0.5407
+      Joint 2: mean=-0.1063, std= 0.4903
+      Joint 3: mean= 0.3568, std= 0.6164
+      Joint 4: mean=-0.3427, std= 0.0092
+    Gripper (5): mean= 0.9553, std= 1.1449
+
+[Step 100] Action Debug (env 0):
+  alpha: 0.2045
+
+  Joints (0-4):
+    Joint 0: base=-0.1156, delta= 0.1386, final=-0.0873 (base + 0.20*delta = -0.0873)
+    Joint 1: base= 0.1562, delta=-0.0038, final= 0.1554 (base + 0.20*delta = 0.1554)
+    Joint 2: base= 0.0712, delta=-0.1640, final= 0.0377 (base + 0.20*delta = 0.0377)
+    Joint 3: base= 1.1019, delta= 0.0419, final= 1.1104 (base + 0.20*delta = 1.1104)
+    Joint 4: base= 1.1854, delta= 0.1804, final= 1.2223 (base + 0.20*delta = 1.2223)
+
+  Gripper (5):
+    base:  0.0125
+    delta:  0.0214
+    continuous (base + 0.20*delta):  0.0169
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2045, std= 0.0932, min= 0.1386, max= 0.2703, positive=100.0%
+      Joint 1: mean=-0.0376, std= 0.0479, min=-0.0714, max=-0.0038, positive=0.0%
+      Joint 2: mean=-0.1436, std= 0.0288, min=-0.1640, max=-0.1233, positive=0.0%
+      Joint 3: mean= 0.0238, std= 0.0255, min= 0.0058, max= 0.0419, positive=100.0%
+      Joint 4: mean= 0.0991, std= 0.1150, min= 0.0178, max= 0.1804, positive=100.0%
+    Gripper (5): mean= 0.0614, std= 0.0565, min= 0.0214, max= 0.1013, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3666, std= 0.1670
+      Joint 1: mean=-0.1114, std= 0.1417
+      Joint 2: mean=-0.3038, std= 0.0609
+      Joint 3: mean= 0.0932, std= 0.0996
+      Joint 4: mean= 0.1567, std= 0.1818
+    Gripper (5): mean= 0.3412, std= 0.3142
+
+[Step 110] Action Debug (env 0):
+  alpha: 0.2045
+
+  Joints (0-4):
+    Joint 0: base=-0.1081, delta=-0.3231, final=-0.1742 (base + 0.20*delta = -0.1742)
+    Joint 1: base= 0.1814, delta= 0.0090, final= 0.1832 (base + 0.20*delta = 0.1832)
+    Joint 2: base= 0.0461, delta= 0.0596, final= 0.0583 (base + 0.20*delta = 0.0583)
+    Joint 3: base= 1.1367, delta=-0.2035, final= 1.0951 (base + 0.20*delta = 1.0951)
+    Joint 4: base= 1.2352, delta=-0.1257, final= 1.2095 (base + 0.20*delta = 1.2095)
+
+  Gripper (5):
+    base:  0.0203
+    delta:  0.0829
+    continuous (base + 0.20*delta):  0.0372
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.1620, std= 0.2278, min=-0.3231, max=-0.0009, positive=0.0%
+      Joint 1: mean=-0.0710, std= 0.1131, min=-0.1510, max= 0.0090, positive=50.0%
+      Joint 2: mean= 0.2806, std= 0.3125, min= 0.0596, max= 0.5016, positive=100.0%
+      Joint 3: mean=-0.2093, std= 0.0081, min=-0.2150, max=-0.2035, positive=0.0%
+      Joint 4: mean=-0.0994, std= 0.0371, min=-0.1257, max=-0.0732, positive=0.0%
+    Gripper (5): mean= 0.2040, std= 0.1712, min= 0.0829, max= 0.3251, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.2904, std= 0.4084
+      Joint 1: mean=-0.2103, std= 0.3351
+      Joint 2: mean= 0.5934, std= 0.6611
+      Joint 3: mean=-0.8181, std= 0.0318
+      Joint 4: mean=-0.1571, std= 0.0587
+    Gripper (5): mean= 1.1343, std= 0.9521
+
+[Step 120] Action Debug (env 0):
+  alpha: 0.2045
+
+  Joints (0-4):
+    Joint 0: base=-0.1532, delta=-0.1437, final=-0.1826 (base + 0.20*delta = -0.1826)
+    Joint 1: base= 0.0538, delta= 0.2816, final= 0.1114 (base + 0.20*delta = 0.1114)
+    Joint 2: base= 0.1752, delta= 0.3926, final= 0.2555 (base + 0.20*delta = 0.2555)
+    Joint 3: base= 1.0487, delta= 0.2206, final= 1.0939 (base + 0.20*delta = 1.0939)
+    Joint 4: base= 1.1507, delta=-0.1992, final= 1.1100 (base + 0.20*delta = 1.1100)
+
+  Gripper (5):
+    base:  0.0241
+    delta:  0.2052
+    continuous (base + 0.20*delta):  0.0661
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.1149, std= 0.0407, min=-0.1437, max=-0.0861, positive=0.0%
+      Joint 1: mean= 0.2069, std= 0.1056, min= 0.1323, max= 0.2816, positive=100.0%
+      Joint 2: mean= 0.2497, std= 0.2022, min= 0.1067, max= 0.3926, positive=100.0%
+      Joint 3: mean= 0.1767, std= 0.0621, min= 0.1328, max= 0.2206, positive=100.0%
+      Joint 4: mean=-0.0985, std= 0.1425, min=-0.1992, max= 0.0023, positive=50.0%
+    Gripper (5): mean= 0.2004, std= 0.0068, min= 0.1955, max= 0.2052, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.2059, std= 0.0730
+      Joint 1: mean= 0.6130, std= 0.3128
+      Joint 2: mean= 0.5280, std= 0.4277
+      Joint 3: mean= 0.6909, std= 0.2426
+      Joint 4: mean=-0.1557, std= 0.2253
+    Gripper (5): mean= 1.1141, std= 0.0380
+[Iter   15] steps=   3900 | ep_reward=   2.77 | rollout_reward= 0.0127 | episodes= 30 | done_pct=  0.0% | early_done=  0.0% | loss=1023.8071 | alpha=0.212
+
+[Step   0] Action Debug (env 0):
+  alpha: 0.2120
+
+  Joints (0-4):
+    Joint 0: base=-0.1574, delta=-0.1330, final=-0.1856 (base + 0.21*delta = -0.1856)
+    Joint 1: base= 0.2116, delta=-0.1072, final= 0.1889 (base + 0.21*delta = 0.1889)
+    Joint 2: base= 0.0631, delta= 0.2139, final= 0.1084 (base + 0.21*delta = 0.1084)
+    Joint 3: base= 1.0655, delta= 0.0271, final= 1.0712 (base + 0.21*delta = 1.0712)
+    Joint 4: base= 1.1477, delta= 0.2526, final= 1.2013 (base + 0.21*delta = 1.2013)
+
+  Gripper (5):
+    base:  0.0259
+    delta: -0.0110
+    continuous (base + 0.21*delta):  0.0236
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0079, std= 0.1992, min=-0.1330, max= 0.1487, positive=50.0%
+      Joint 1: mean=-0.0571, std= 0.0708, min=-0.1072, max=-0.0071, positive=0.0%
+      Joint 2: mean= 0.2607, std= 0.0662, min= 0.2139, max= 0.3075, positive=100.0%
+      Joint 3: mean= 0.0033, std= 0.0336, min=-0.0205, max= 0.0271, positive=50.0%
+      Joint 4: mean=-0.0289, std= 0.3981, min=-0.3104, max= 0.2526, positive=50.0%
+    Gripper (5): mean= 0.0095, std= 0.0291, min=-0.0110, max= 0.0301, positive=50.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0142, std= 0.3571
+      Joint 1: mean=-0.1692, std= 0.2098
+      Joint 2: mean= 0.5515, std= 0.1400
+      Joint 3: mean= 0.0130, std= 0.1314
+      Joint 4: mean=-0.0457, std= 0.6293
+    Gripper (5): mean= 0.0530, std= 0.1618
+
+[Step  10] Action Debug (env 0):
+  alpha: 0.2120
+
+  Joints (0-4):
+    Joint 0: base=-0.3873, delta= 0.9027, final=-0.1959 (base + 0.21*delta = -0.1959)
+    Joint 1: base=-0.0157, delta=-0.1864, final=-0.0552 (base + 0.21*delta = -0.0552)
+    Joint 2: base= 0.1943, delta= 0.2302, final= 0.2431 (base + 0.21*delta = 0.2431)
+    Joint 3: base= 1.2205, delta= 0.0528, final= 1.2317 (base + 0.21*delta = 1.2317)
+    Joint 4: base= 0.9081, delta= 0.3480, final= 0.9819 (base + 0.21*delta = 0.9819)
+
+  Gripper (5):
+    base: -0.0353
+    delta:  0.0189
+    continuous (base + 0.21*delta): -0.0313
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.7279, std= 0.2471, min= 0.5532, max= 0.9027, positive=100.0%
+      Joint 1: mean=-0.0613, std= 0.1770, min=-0.1864, max= 0.0638, positive=50.0%
+      Joint 2: mean= 0.2965, std= 0.0938, min= 0.2302, max= 0.3628, positive=100.0%
+      Joint 3: mean= 0.0309, std= 0.0310, min= 0.0090, max= 0.0528, positive=100.0%
+      Joint 4: mean= 0.4143, std= 0.0939, min= 0.3480, max= 0.4807, positive=100.0%
+    Gripper (5): mean= 0.0819, std= 0.0892, min= 0.0189, max= 0.1450, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 1.3051, std= 0.4430
+      Joint 1: mean=-0.1816, std= 0.5242
+      Joint 2: mean= 0.6271, std= 0.1984
+      Joint 3: mean= 0.1208, std= 0.1213
+      Joint 4: mean= 0.6549, std= 0.1484
+    Gripper (5): mean= 0.4555, std= 0.4959
+
+[Step  20] Action Debug (env 0):
+  alpha: 0.2120
+
+  Joints (0-4):
+    Joint 0: base=-0.6693, delta= 0.3690, final=-0.5911 (base + 0.21*delta = -0.5911)
+    Joint 1: base=-0.0494, delta= 0.1615, final=-0.0151 (base + 0.21*delta = -0.0151)
+    Joint 2: base= 0.2501, delta= 0.0443, final= 0.2594 (base + 0.21*delta = 0.2594)
+    Joint 3: base= 1.3400, delta= 0.1164, final= 1.3647 (base + 0.21*delta = 1.3647)
+    Joint 4: base= 0.6972, delta=-0.1774, final= 0.6596 (base + 0.21*delta = 0.6596)
+
+  Gripper (5):
+    base: -0.0938
+    delta:  0.2638
+    continuous (base + 0.21*delta): -0.0379
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4303, std= 0.0868, min= 0.3690, max= 0.4917, positive=100.0%
+      Joint 1: mean= 0.0172, std= 0.2041, min=-0.1272, max= 0.1615, positive=50.0%
+      Joint 2: mean= 0.1802, std= 0.1922, min= 0.0443, max= 0.3161, positive=100.0%
+      Joint 3: mean=-0.0189, std= 0.1914, min=-0.1542, max= 0.1164, positive=50.0%
+      Joint 4: mean=-0.0999, std= 0.1097, min=-0.1774, max=-0.0223, positive=0.0%
+    Gripper (5): mean= 0.2797, std= 0.0225, min= 0.2638, max= 0.2956, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.7715, std= 0.1555
+      Joint 1: mean= 0.0509, std= 0.6047
+      Joint 2: mean= 0.3811, std= 0.4066
+      Joint 3: mean=-0.0738, std= 0.7481
+      Joint 4: mean=-0.1579, std= 0.1734
+    Gripper (5): mean= 1.5552, std= 0.1249
+
+[Step  30] Action Debug (env 0):
+  alpha: 0.2120
+
+  Joints (0-4):
+    Joint 0: base=-0.7737, delta= 0.4073, final=-0.6874 (base + 0.21*delta = -0.6874)
+    Joint 1: base= 0.0807, delta= 0.0478, final= 0.0908 (base + 0.21*delta = 0.0908)
+    Joint 2: base= 0.1170, delta=-0.0166, final= 0.1135 (base + 0.21*delta = 0.1135)
+    Joint 3: base= 1.3683, delta=-0.0010, final= 1.3681 (base + 0.21*delta = 1.3681)
+    Joint 4: base= 0.6216, delta= 0.1684, final= 0.6573 (base + 0.21*delta = 0.6573)
+
+  Gripper (5):
+    base:  0.0334
+    delta:  0.1391
+    continuous (base + 0.21*delta):  0.0629
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4479, std= 0.0573, min= 0.4073, max= 0.4884, positive=100.0%
+      Joint 1: mean=-0.0833, std= 0.1854, min=-0.2144, max= 0.0478, positive=50.0%
+      Joint 2: mean=-0.0079, std= 0.0123, min=-0.0166, max= 0.0008, positive=50.0%
+      Joint 3: mean=-0.0206, std= 0.0276, min=-0.0401, max=-0.0010, positive=0.0%
+      Joint 4: mean= 0.0692, std= 0.1403, min=-0.0300, max= 0.1684, positive=50.0%
+    Gripper (5): mean= 0.1704, std= 0.0442, min= 0.1391, max= 0.2016, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.8030, std= 0.1028
+      Joint 1: mean=-0.2468, std= 0.5493
+      Joint 2: mean=-0.0167, std= 0.0260
+      Joint 3: mean=-0.0804, std= 0.1080
+      Joint 4: mean= 0.1094, std= 0.2218
+    Gripper (5): mean= 0.9473, std= 0.2457
+
+[Step  40] Action Debug (env 0):
+  alpha: 0.2120
+
+  Joints (0-4):
+    Joint 0: base=-0.7821, delta= 0.1794, final=-0.7441 (base + 0.21*delta = -0.7441)
+    Joint 1: base= 0.1134, delta=-0.0671, final= 0.0992 (base + 0.21*delta = 0.0992)
+    Joint 2: base= 0.1078, delta= 0.2472, final= 0.1602 (base + 0.21*delta = 0.1602)
+    Joint 3: base= 1.3321, delta= 0.1581, final= 1.3656 (base + 0.21*delta = 1.3656)
+    Joint 4: base= 0.6518, delta= 0.3570, final= 0.7274 (base + 0.21*delta = 0.7274)
+
+  Gripper (5):
+    base:  0.0245
+    delta:  0.2376
+    continuous (base + 0.21*delta):  0.0749
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3916, std= 0.3001, min= 0.1794, max= 0.6038, positive=100.0%
+      Joint 1: mean=-0.0033, std= 0.0903, min=-0.0671, max= 0.0605, positive=50.0%
+      Joint 2: mean= 0.1731, std= 0.1047, min= 0.0991, max= 0.2472, positive=100.0%
+      Joint 3: mean= 0.0851, std= 0.1031, min= 0.0122, max= 0.1581, positive=100.0%
+      Joint 4: mean=-0.0888, std= 0.6304, min=-0.5345, max= 0.3570, positive=50.0%
+    Gripper (5): mean= 0.2795, std= 0.0593, min= 0.2376, max= 0.3215, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.7020, std= 0.5380
+      Joint 1: mean=-0.0098, std= 0.2674
+      Joint 2: mean= 0.3662, std= 0.2215
+      Joint 3: mean= 0.3329, std= 0.4032
+      Joint 4: mean=-0.1403, std= 0.9965
+    Gripper (5): mean= 1.5543, std= 0.3298
+
+[Step  50] Action Debug (env 0):
+  alpha: 0.2120
+
+  Joints (0-4):
+    Joint 0: base=-0.7732, delta=-0.0812, final=-0.7905 (base + 0.21*delta = -0.7905)
+    Joint 1: base= 0.1600, delta=-0.2021, final= 0.1171 (base + 0.21*delta = 0.1171)
+    Joint 2: base= 0.0970, delta= 0.1279, final= 0.1242 (base + 0.21*delta = 0.1242)
+    Joint 3: base= 1.3157, delta= 0.1698, final= 1.3517 (base + 0.21*delta = 1.3517)
+    Joint 4: base= 0.6619, delta=-0.0236, final= 0.6569 (base + 0.21*delta = 0.6569)
+
+  Gripper (5):
+    base: -0.0036
+    delta:  0.0224
+    continuous (base + 0.21*delta):  0.0012
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1381, std= 0.3101, min=-0.0812, max= 0.3574, positive=50.0%
+      Joint 1: mean=-0.0331, std= 0.2390, min=-0.2021, max= 0.1359, positive=50.0%
+      Joint 2: mean= 0.0310, std= 0.1370, min=-0.0659, max= 0.1279, positive=50.0%
+      Joint 3: mean= 0.1731, std= 0.0048, min= 0.1698, max= 0.1765, positive=100.0%
+      Joint 4: mean= 0.1882, std= 0.2996, min=-0.0236, max= 0.4001, positive=50.0%
+    Gripper (5): mean= 0.0009, std= 0.0303, min=-0.0205, max= 0.0224, positive=50.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2475, std= 0.5560
+      Joint 1: mean=-0.0981, std= 0.7080
+      Joint 2: mean= 0.0656, std= 0.2899
+      Joint 3: mean= 0.6768, std= 0.0187
+      Joint 4: mean= 0.2975, std= 0.4736
+    Gripper (5): mean= 0.0053, std= 0.1686
+
+[Step  60] Action Debug (env 0):
+  alpha: 0.2120
+
+  Joints (0-4):
+    Joint 0: base=-0.6490, delta= 0.1250, final=-0.6225 (base + 0.21*delta = -0.6225)
+    Joint 1: base= 0.1138, delta= 0.0132, final= 0.1166 (base + 0.21*delta = 0.1166)
+    Joint 2: base= 0.1481, delta= 0.2059, final= 0.1918 (base + 0.21*delta = 0.1918)
+    Joint 3: base= 1.2469, delta=-0.0506, final= 1.2362 (base + 0.21*delta = 1.2362)
+    Joint 4: base= 0.7869, delta=-0.0296, final= 0.7806 (base + 0.21*delta = 0.7806)
+
+  Gripper (5):
+    base: -0.0373
+    delta:  0.2643
+    continuous (base + 0.21*delta):  0.0188
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1261, std= 0.0015, min= 0.1250, max= 0.1272, positive=100.0%
+      Joint 1: mean= 0.1049, std= 0.1298, min= 0.0132, max= 0.1967, positive=100.0%
+      Joint 2: mean= 0.2170, std= 0.0156, min= 0.2059, max= 0.2280, positive=100.0%
+      Joint 3: mean=-0.0747, std= 0.0341, min=-0.0988, max=-0.0506, positive=0.0%
+      Joint 4: mean=-0.1322, std= 0.1451, min=-0.2349, max=-0.0296, positive=0.0%
+    Gripper (5): mean= 0.2348, std= 0.0417, min= 0.2053, max= 0.2643, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2260, std= 0.0028
+      Joint 1: mean= 0.3109, std= 0.3845
+      Joint 2: mean= 0.4589, std= 0.0331
+      Joint 3: mean=-0.2920, std= 0.1334
+      Joint 4: mean=-0.2090, std= 0.2294
+    Gripper (5): mean= 1.3055, std= 0.2317
+
+[Step  70] Action Debug (env 0):
+  alpha: 0.2120
+
+  Joints (0-4):
+    Joint 0: base=-0.7188, delta=-0.2232, final=-0.7661 (base + 0.21*delta = -0.7661)
+    Joint 1: base= 0.0448, delta=-0.0086, final= 0.0430 (base + 0.21*delta = 0.0430)
+    Joint 2: base= 0.1716, delta= 0.3578, final= 0.2474 (base + 0.21*delta = 0.2474)
+    Joint 3: base= 1.2960, delta= 0.0857, final= 1.3141 (base + 0.21*delta = 1.3141)
+    Joint 4: base= 0.6467, delta=-0.1961, final= 0.6052 (base + 0.21*delta = 0.6052)
+
+  Gripper (5):
+    base:  0.0213
+    delta:  0.3573
+    continuous (base + 0.21*delta):  0.0971
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.1723, std= 0.0720, min=-0.2232, max=-0.1214, positive=0.0%
+      Joint 1: mean=-0.0472, std= 0.0546, min=-0.0858, max=-0.0086, positive=0.0%
+      Joint 2: mean= 0.3184, std= 0.0557, min= 0.2791, max= 0.3578, positive=100.0%
+      Joint 3: mean= 0.0356, std= 0.0708, min=-0.0144, max= 0.0857, positive=50.0%
+      Joint 4: mean= 0.2339, std= 0.6081, min=-0.1961, max= 0.6639, positive=50.0%
+    Gripper (5): mean= 0.1694, std= 0.2657, min=-0.0185, max= 0.3573, positive=50.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.3089, std= 0.1291
+      Joint 1: mean=-0.1398, std= 0.1616
+      Joint 2: mean= 0.6735, std= 0.1178
+      Joint 3: mean= 0.1393, std= 0.2767
+      Joint 4: mean= 0.3697, std= 0.9613
+    Gripper (5): mean= 0.9421, std= 1.4775
+
+[Step  80] Action Debug (env 0):
+  alpha: 0.2120
+
+  Joints (0-4):
+    Joint 0: base=-0.7433, delta= 0.0844, final=-0.7254 (base + 0.21*delta = -0.7254)
+    Joint 1: base= 0.0880, delta= 0.0475, final= 0.0980 (base + 0.21*delta = 0.0980)
+    Joint 2: base= 0.1537, delta= 0.0555, final= 0.1654 (base + 0.21*delta = 0.1654)
+    Joint 3: base= 1.3069, delta=-0.1459, final= 1.2760 (base + 0.21*delta = 1.2760)
+    Joint 4: base= 0.6616, delta=-0.3775, final= 0.5815 (base + 0.21*delta = 0.5815)
+
+  Gripper (5):
+    base:  0.0309
+    delta:  0.2321
+    continuous (base + 0.21*delta):  0.0802
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1972, std= 0.1595, min= 0.0844, max= 0.3099, positive=100.0%
+      Joint 1: mean= 0.1110, std= 0.0899, min= 0.0475, max= 0.1746, positive=100.0%
+      Joint 2: mean= 0.2513, std= 0.2769, min= 0.0555, max= 0.4471, positive=100.0%
+      Joint 3: mean= 0.0165, std= 0.2296, min=-0.1459, max= 0.1789, positive=50.0%
+      Joint 4: mean=-0.0765, std= 0.4257, min=-0.3775, max= 0.2245, positive=50.0%
+    Gripper (5): mean= 0.2494, std= 0.0244, min= 0.2321, max= 0.2667, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3535, std= 0.2859
+      Joint 1: mean= 0.3289, std= 0.2662
+      Joint 2: mean= 0.5315, std= 0.5857
+      Joint 3: mean= 0.0645, std= 0.8976
+      Joint 4: mean=-0.1210, std= 0.6729
+    Gripper (5): mean= 1.3867, std= 0.1357
+
+[Step  90] Action Debug (env 0):
+  alpha: 0.2120
+
+  Joints (0-4):
+    Joint 0: base=-0.6905, delta= 0.6029, final=-0.5627 (base + 0.21*delta = -0.5627)
+    Joint 1: base= 0.1169, delta= 0.1520, final= 0.1491 (base + 0.21*delta = 0.1491)
+    Joint 2: base= 0.1594, delta= 0.5379, final= 0.2734 (base + 0.21*delta = 0.2734)
+    Joint 3: base= 1.2369, delta=-0.0903, final= 1.2177 (base + 0.21*delta = 1.2177)
+    Joint 4: base= 0.8013, delta= 0.1184, final= 0.8264 (base + 0.21*delta = 0.8264)
+
+  Gripper (5):
+    base:  0.0130
+    delta:  0.1960
+    continuous (base + 0.21*delta):  0.0546
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.5035, std= 0.1406, min= 0.4041, max= 0.6029, positive=100.0%
+      Joint 1: mean= 0.1183, std= 0.0476, min= 0.0847, max= 0.1520, positive=100.0%
+      Joint 2: mean= 0.5944, std= 0.0799, min= 0.5379, max= 0.6509, positive=100.0%
+      Joint 3: mean=-0.0577, std= 0.0461, min=-0.0903, max=-0.0251, positive=0.0%
+      Joint 4: mean= 0.0657, std= 0.0746, min= 0.0129, max= 0.1184, positive=100.0%
+    Gripper (5): mean= 0.1772, std= 0.0266, min= 0.1584, max= 0.1960, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.9027, std= 0.2521
+      Joint 1: mean= 0.3505, std= 0.1410
+      Joint 2: mean= 1.2572, std= 0.1690
+      Joint 3: mean=-0.2256, std= 0.1804
+      Joint 4: mean= 0.1038, std= 0.1180
+    Gripper (5): mean= 0.9854, std= 0.1478
+
+[Step 100] Action Debug (env 0):
+  alpha: 0.2120
+
+  Joints (0-4):
+    Joint 0: base=-0.7228, delta=-0.0897, final=-0.7418 (base + 0.21*delta = -0.7418)
+    Joint 1: base= 0.0862, delta=-0.0881, final= 0.0676 (base + 0.21*delta = 0.0676)
+    Joint 2: base= 0.1294, delta= 0.0706, final= 0.1444 (base + 0.21*delta = 0.1444)
+    Joint 3: base= 1.2215, delta= 0.0405, final= 1.2301 (base + 0.21*delta = 1.2301)
+    Joint 4: base= 0.6865, delta= 0.2346, final= 0.7362 (base + 0.21*delta = 0.7362)
+
+  Gripper (5):
+    base: -0.0136
+    delta:  0.2266
+    continuous (base + 0.21*delta):  0.0344
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.1351, std= 0.0642, min=-0.1805, max=-0.0897, positive=0.0%
+      Joint 1: mean=-0.0199, std= 0.0964, min=-0.0881, max= 0.0483, positive=50.0%
+      Joint 2: mean=-0.0229, std= 0.1321, min=-0.1163, max= 0.0706, positive=50.0%
+      Joint 3: mean= 0.1562, std= 0.1636, min= 0.0405, max= 0.2719, positive=100.0%
+      Joint 4: mean= 0.0194, std= 0.3043, min=-0.1957, max= 0.2346, positive=50.0%
+    Gripper (5): mean= 0.1544, std= 0.1022, min= 0.0821, max= 0.2266, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.2422, std= 0.1151
+      Joint 1: mean=-0.0589, std= 0.2857
+      Joint 2: mean=-0.0484, std= 0.2795
+      Joint 3: mean= 0.6106, std= 0.6396
+      Joint 4: mean= 0.0307, std= 0.4810
+    Gripper (5): mean= 0.8583, std= 0.5681
+
+[Step 110] Action Debug (env 0):
+  alpha: 0.2120
+
+  Joints (0-4):
+    Joint 0: base=-0.7537, delta=-0.1892, final=-0.7938 (base + 0.21*delta = -0.7938)
+    Joint 1: base= 0.0599, delta=-0.0711, final= 0.0448 (base + 0.21*delta = 0.0448)
+    Joint 2: base= 0.1407, delta= 0.3419, final= 0.2131 (base + 0.21*delta = 0.2131)
+    Joint 3: base= 1.3172, delta= 0.0317, final= 1.3239 (base + 0.21*delta = 1.3239)
+    Joint 4: base= 0.6679, delta= 0.1060, final= 0.6904 (base + 0.21*delta = 0.6904)
+
+  Gripper (5):
+    base:  0.0225
+    delta:  0.1476
+    continuous (base + 0.21*delta):  0.0538
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.0589, std= 0.1842, min=-0.1892, max= 0.0713, positive=50.0%
+      Joint 1: mean= 0.1171, std= 0.2661, min=-0.0711, max= 0.3053, positive=50.0%
+      Joint 2: mean= 0.1580, std= 0.2601, min=-0.0259, max= 0.3419, positive=50.0%
+      Joint 3: mean=-0.0024, std= 0.0482, min=-0.0365, max= 0.0317, positive=50.0%
+      Joint 4: mean=-0.0192, std= 0.1771, min=-0.1444, max= 0.1060, positive=50.0%
+    Gripper (5): mean= 0.1266, std= 0.0297, min= 0.1056, max= 0.1476, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.1057, std= 0.3302
+      Joint 1: mean= 0.3469, std= 0.7884
+      Joint 2: mean= 0.3341, std= 0.5501
+      Joint 3: mean=-0.0095, std= 0.1884
+      Joint 4: mean=-0.0304, std= 0.2799
+    Gripper (5): mean= 0.7038, std= 0.1654
+
+[Step 120] Action Debug (env 0):
+  alpha: 0.2120
+
+  Joints (0-4):
+    Joint 0: base=-0.7063, delta= 0.4852, final=-0.6035 (base + 0.21*delta = -0.6035)
+    Joint 1: base= 0.0702, delta=-0.1760, final= 0.0329 (base + 0.21*delta = 0.0329)
+    Joint 2: base= 0.1895, delta= 0.3905, final= 0.2723 (base + 0.21*delta = 0.2723)
+    Joint 3: base= 1.2458, delta= 0.1615, final= 1.2801 (base + 0.21*delta = 1.2801)
+    Joint 4: base= 0.7056, delta=-0.0590, final= 0.6931 (base + 0.21*delta = 0.6931)
+
+  Gripper (5):
+    base:  0.0214
+    delta:  0.3537
+    continuous (base + 0.21*delta):  0.0963
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3628, std= 0.1732, min= 0.2403, max= 0.4852, positive=100.0%
+      Joint 1: mean=-0.1091, std= 0.0946, min=-0.1760, max=-0.0422, positive=0.0%
+      Joint 2: mean= 0.5348, std= 0.2042, min= 0.3905, max= 0.6792, positive=100.0%
+      Joint 3: mean= 0.1031, std= 0.0826, min= 0.0447, max= 0.1615, positive=100.0%
+      Joint 4: mean=-0.0605, std= 0.0020, min=-0.0619, max=-0.0590, positive=0.0%
+    Gripper (5): mean= 0.3406, std= 0.0185, min= 0.3275, max= 0.3537, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.6504, std= 0.3106
+      Joint 1: mean=-0.3232, std= 0.2802
+      Joint 2: mean= 1.1312, std= 0.4318
+      Joint 3: mean= 0.4030, std= 0.3227
+      Joint 4: mean=-0.0956, std= 0.0032
+    Gripper (5): mean= 1.8937, std= 0.1028
+[Iter   16] steps=   4160 | ep_reward=   2.78 | rollout_reward= 0.0225 | episodes= 32 | done_pct=  0.0% | early_done=  0.0% | loss=978.8137 | alpha=0.219
+
+[Step   0] Action Debug (env 0):
+  alpha: 0.2194
+
+  Joints (0-4):
+    Joint 0: base=-0.7474, delta= 0.0575, final=-0.7348 (base + 0.22*delta = -0.7348)
+    Joint 1: base= 0.1460, delta= 0.0651, final= 0.1603 (base + 0.22*delta = 0.1603)
+    Joint 2: base= 0.1251, delta=-0.0401, final= 0.1163 (base + 0.22*delta = 0.1163)
+    Joint 3: base= 1.2461, delta=-0.0728, final= 1.2301 (base + 0.22*delta = 1.2301)
+    Joint 4: base= 0.6739, delta= 0.2028, final= 0.7184 (base + 0.22*delta = 0.7184)
+
+  Gripper (5):
+    base:  0.0059
+    delta:  0.3831
+    continuous (base + 0.22*delta):  0.0900
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2045, std= 0.2080, min= 0.0575, max= 0.3516, positive=100.0%
+      Joint 1: mean= 0.0812, std= 0.0228, min= 0.0651, max= 0.0973, positive=100.0%
+      Joint 2: mean= 0.1489, std= 0.2673, min=-0.0401, max= 0.3379, positive=50.0%
+      Joint 3: mean=-0.0453, std= 0.0388, min=-0.0728, max=-0.0179, positive=0.0%
+      Joint 4: mean=-0.1490, std= 0.4975, min=-0.5008, max= 0.2028, positive=50.0%
+    Gripper (5): mean= 0.2330, std= 0.2123, min= 0.0829, max= 0.3831, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3667, std= 0.3728
+      Joint 1: mean= 0.2407, std= 0.0675
+      Joint 2: mean= 0.3149, std= 0.5653
+      Joint 3: mean=-0.1773, std= 0.1515
+      Joint 4: mean=-0.2356, std= 0.7864
+    Gripper (5): mean= 1.2956, std= 1.1803
+
+[Step  10] Action Debug (env 0):
+  alpha: 0.2194
+
+  Joints (0-4):
+    Joint 0: base=-0.1959, delta= 0.1650, final=-0.1597 (base + 0.22*delta = -0.1597)
+    Joint 1: base=-0.1182, delta= 0.0475, final=-0.1078 (base + 0.22*delta = -0.1078)
+    Joint 2: base= 0.3250, delta=-0.0024, final= 0.3244 (base + 0.22*delta = 0.3244)
+    Joint 3: base= 1.2680, delta=-0.0046, final= 1.2670 (base + 0.22*delta = 1.2670)
+    Joint 4: base= 1.2256, delta= 0.2128, final= 1.2723 (base + 0.22*delta = 1.2723)
+
+  Gripper (5):
+    base:  0.0232
+    delta:  0.0397
+    continuous (base + 0.22*delta):  0.0320
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1991, std= 0.0483, min= 0.1650, max= 0.2333, positive=100.0%
+      Joint 1: mean= 0.0588, std= 0.0160, min= 0.0475, max= 0.0701, positive=100.0%
+      Joint 2: mean= 0.1000, std= 0.1447, min=-0.0024, max= 0.2023, positive=50.0%
+      Joint 3: mean=-0.0034, std= 0.0016, min=-0.0046, max=-0.0023, positive=0.0%
+      Joint 4: mean=-0.0186, std= 0.3273, min=-0.2501, max= 0.2128, positive=50.0%
+    Gripper (5): mean= 0.0749, std= 0.0498, min= 0.0397, max= 0.1102, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3570, std= 0.0867
+      Joint 1: mean= 0.1742, std= 0.0474
+      Joint 2: mean= 0.2114, std= 0.3061
+      Joint 3: mean=-0.0135, std= 0.0064
+      Joint 4: mean=-0.0295, std= 0.5174
+    Gripper (5): mean= 0.4167, std= 0.2770
+
+[Step  20] Action Debug (env 0):
+  alpha: 0.2194
+
+  Joints (0-4):
+    Joint 0: base= 0.4752, delta=-0.0501, final= 0.4642 (base + 0.22*delta = 0.4642)
+    Joint 1: base=-0.1290, delta=-0.0150, final=-0.1323 (base + 0.22*delta = -0.1323)
+    Joint 2: base= 0.4076, delta=-0.1162, final= 0.3821 (base + 0.22*delta = 0.3821)
+    Joint 3: base= 1.3412, delta=-0.0975, final= 1.3199 (base + 0.22*delta = 1.3199)
+    Joint 4: base= 1.6885, delta=-0.3025, final= 1.6222 (base + 0.22*delta = 1.6222)
+
+  Gripper (5):
+    base:  0.0257
+    delta:  0.2545
+    continuous (base + 0.22*delta):  0.0815
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.0065, std= 0.0616, min=-0.0501, max= 0.0371, positive=50.0%
+      Joint 1: mean= 0.0941, std= 0.1543, min=-0.0150, max= 0.2033, positive=50.0%
+      Joint 2: mean= 0.1271, std= 0.3441, min=-0.1162, max= 0.3704, positive=50.0%
+      Joint 3: mean=-0.1205, std= 0.0325, min=-0.1434, max=-0.0975, positive=0.0%
+      Joint 4: mean=-0.2797, std= 0.0324, min=-0.3025, max=-0.2568, positive=0.0%
+    Gripper (5): mean= 0.1131, std= 0.2000, min=-0.0284, max= 0.2545, positive=50.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.0117, std= 0.1105
+      Joint 1: mean= 0.2788, std= 0.4572
+      Joint 2: mean= 0.2689, std= 0.7277
+      Joint 3: mean=-0.4710, std= 0.1270
+      Joint 4: mean=-0.4421, std= 0.0511
+    Gripper (5): mean= 0.6287, std= 1.1122
+
+[Step  30] Action Debug (env 0):
+  alpha: 0.2194
+
+  Joints (0-4):
+    Joint 0: base= 0.5945, delta= 0.2909, final= 0.6583 (base + 0.22*delta = 0.6583)
+    Joint 1: base=-0.1226, delta=-0.0892, final=-0.1421 (base + 0.22*delta = -0.1421)
+    Joint 2: base= 0.4290, delta= 0.0203, final= 0.4335 (base + 0.22*delta = 0.4335)
+    Joint 3: base= 1.3448, delta=-0.1172, final= 1.3191 (base + 0.22*delta = 1.3191)
+    Joint 4: base= 1.7067, delta=-0.1814, final= 1.6669 (base + 0.22*delta = 1.6669)
+
+  Gripper (5):
+    base:  0.0172
+    delta:  0.1221
+    continuous (base + 0.22*delta):  0.0439
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2199, std= 0.1004, min= 0.1489, max= 0.2909, positive=100.0%
+      Joint 1: mean=-0.0391, std= 0.0708, min=-0.0892, max= 0.0109, positive=50.0%
+      Joint 2: mean= 0.0346, std= 0.0203, min= 0.0203, max= 0.0490, positive=100.0%
+      Joint 3: mean=-0.1265, std= 0.0131, min=-0.1358, max=-0.1172, positive=0.0%
+      Joint 4: mean=-0.1637, std= 0.0250, min=-0.1814, max=-0.1460, positive=0.0%
+    Gripper (5): mean= 0.1514, std= 0.0414, min= 0.1221, max= 0.1807, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3943, std= 0.1801
+      Joint 1: mean=-0.1159, std= 0.2096
+      Joint 2: mean= 0.0732, std= 0.0429
+      Joint 3: mean=-0.4946, std= 0.0513
+      Joint 4: mean=-0.2588, std= 0.0395
+    Gripper (5): mean= 0.8417, std= 0.2301
+
+[Step  40] Action Debug (env 0):
+  alpha: 0.2194
+
+  Joints (0-4):
+    Joint 0: base= 0.5687, delta= 0.1554, final= 0.6028 (base + 0.22*delta = 0.6028)
+    Joint 1: base=-0.1176, delta= 0.1315, final=-0.0888 (base + 0.22*delta = -0.0888)
+    Joint 2: base= 0.4643, delta= 0.2419, final= 0.5174 (base + 0.22*delta = 0.5174)
+    Joint 3: base= 1.3460, delta= 0.1544, final= 1.3799 (base + 0.22*delta = 1.3799)
+    Joint 4: base= 1.3831, delta=-0.2118, final= 1.3367 (base + 0.22*delta = 1.3367)
+
+  Gripper (5):
+    base:  0.0161
+    delta:  0.2137
+    continuous (base + 0.22*delta):  0.0630
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2402, std= 0.1199, min= 0.1554, max= 0.3250, positive=100.0%
+      Joint 1: mean= 0.1741, std= 0.0603, min= 0.1315, max= 0.2167, positive=100.0%
+      Joint 2: mean= 0.3127, std= 0.1001, min= 0.2419, max= 0.3835, positive=100.0%
+      Joint 3: mean= 0.0605, std= 0.1328, min=-0.0334, max= 0.1544, positive=50.0%
+      Joint 4: mean=-0.2495, std= 0.0533, min=-0.2872, max=-0.2118, positive=0.0%
+    Gripper (5): mean= 0.2894, std= 0.1071, min= 0.2137, max= 0.3652, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4306, std= 0.2150
+      Joint 1: mean= 0.5158, std= 0.1786
+      Joint 2: mean= 0.6614, std= 0.2117
+      Joint 3: mean= 0.2365, std= 0.5193
+      Joint 4: mean=-0.3944, std= 0.0843
+    Gripper (5): mean= 1.6093, std= 0.5956
+
+[Step  50] Action Debug (env 0):
+  alpha: 0.2194
+
+  Joints (0-4):
+    Joint 0: base= 0.5978, delta=-0.2034, final= 0.5532 (base + 0.22*delta = 0.5532)
+    Joint 1: base=-0.1710, delta=-0.0123, final=-0.1737 (base + 0.22*delta = -0.1737)
+    Joint 2: base= 0.4853, delta= 0.4569, final= 0.5856 (base + 0.22*delta = 0.5856)
+    Joint 3: base= 1.3117, delta=-0.0179, final= 1.3078 (base + 0.22*delta = 1.3078)
+    Joint 4: base= 1.4408, delta= 0.0137, final= 1.4438 (base + 0.22*delta = 1.4438)
+
+  Gripper (5):
+    base:  0.0099
+    delta:  0.1330
+    continuous (base + 0.22*delta):  0.0391
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.1135, std= 0.1271, min=-0.2034, max=-0.0236, positive=0.0%
+      Joint 1: mean= 0.0138, std= 0.0369, min=-0.0123, max= 0.0399, positive=50.0%
+      Joint 2: mean= 0.6015, std= 0.2044, min= 0.4569, max= 0.7461, positive=100.0%
+      Joint 3: mean= 0.0224, std= 0.0570, min=-0.0179, max= 0.0627, positive=50.0%
+      Joint 4: mean=-0.4478, std= 0.6527, min=-0.9094, max= 0.0137, positive=50.0%
+    Gripper (5): mean= 0.1929, std= 0.0846, min= 0.1330, max= 0.2527, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.2036, std= 0.2279
+      Joint 1: mean= 0.0408, std= 0.1093
+      Joint 2: mean= 1.2722, std= 0.4324
+      Joint 3: mean= 0.0876, std= 0.2229
+      Joint 4: mean=-0.7079, std= 1.0318
+    Gripper (5): mean= 1.0724, std= 0.4704
+
+[Step  60] Action Debug (env 0):
+  alpha: 0.2194
+
+  Joints (0-4):
+    Joint 0: base= 0.5617, delta= 0.1733, final= 0.5998 (base + 0.22*delta = 0.5998)
+    Joint 1: base=-0.0354, delta= 0.2159, final= 0.0119 (base + 0.22*delta = 0.0119)
+    Joint 2: base= 0.4383, delta= 0.6026, final= 0.5706 (base + 0.22*delta = 0.5706)
+    Joint 3: base= 1.3699, delta=-0.0056, final= 1.3687 (base + 0.22*delta = 1.3687)
+    Joint 4: base= 1.2967, delta= 0.2486, final= 1.3512 (base + 0.22*delta = 1.3512)
+
+  Gripper (5):
+    base:  0.0383
+    delta:  0.0079
+    continuous (base + 0.22*delta):  0.0401
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1307, std= 0.0603, min= 0.0881, max= 0.1733, positive=100.0%
+      Joint 1: mean= 0.0929, std= 0.1740, min=-0.0301, max= 0.2159, positive=50.0%
+      Joint 2: mean= 0.4571, std= 0.2057, min= 0.3117, max= 0.6026, positive=100.0%
+      Joint 3: mean= 0.0167, std= 0.0316, min=-0.0056, max= 0.0390, positive=50.0%
+      Joint 4: mean=-0.1364, std= 0.5445, min=-0.5214, max= 0.2486, positive=50.0%
+    Gripper (5): mean= 0.0463, std= 0.0542, min= 0.0079, max= 0.0846, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2344, std= 0.1081
+      Joint 1: mean= 0.2752, std= 0.5154
+      Joint 2: mean= 0.9669, std= 0.4351
+      Joint 3: mean= 0.0652, std= 0.1234
+      Joint 4: mean=-0.2156, std= 0.8607
+    Gripper (5): mean= 0.2573, std= 0.3015
+
+[Step  70] Action Debug (env 0):
+  alpha: 0.2194
+
+  Joints (0-4):
+    Joint 0: base= 0.5143, delta= 0.5020, final= 0.6244 (base + 0.22*delta = 0.6244)
+    Joint 1: base=-0.0767, delta= 0.1105, final=-0.0524 (base + 0.22*delta = -0.0524)
+    Joint 2: base= 0.4070, delta=-0.0116, final= 0.4045 (base + 0.22*delta = 0.4045)
+    Joint 3: base= 1.4065, delta=-0.1450, final= 1.3747 (base + 0.22*delta = 1.3747)
+    Joint 4: base= 1.2572, delta= 0.2236, final= 1.3062 (base + 0.22*delta = 1.3062)
+
+  Gripper (5):
+    base:  0.0045
+    delta:  0.1695
+    continuous (base + 0.22*delta):  0.0417
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3658, std= 0.1926, min= 0.2296, max= 0.5020, positive=100.0%
+      Joint 1: mean= 0.0746, std= 0.0507, min= 0.0388, max= 0.1105, positive=100.0%
+      Joint 2: mean= 0.0349, std= 0.0658, min=-0.0116, max= 0.0815, positive=50.0%
+      Joint 3: mean= 0.0077, std= 0.2160, min=-0.1450, max= 0.1604, positive=50.0%
+      Joint 4: mean=-0.1838, std= 0.5763, min=-0.5913, max= 0.2236, positive=50.0%
+    Gripper (5): mean= 0.2594, std= 0.1272, min= 0.1695, max= 0.3494, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.6558, std= 0.3452
+      Joint 1: mean= 0.2211, std= 0.1501
+      Joint 2: mean= 0.0739, std= 0.1392
+      Joint 3: mean= 0.0301, std= 0.8443
+      Joint 4: mean=-0.2906, std= 0.9109
+    Gripper (5): mean= 1.4426, std= 0.7074
+
+[Step  80] Action Debug (env 0):
+  alpha: 0.2194
+
+  Joints (0-4):
+    Joint 0: base= 0.5800, delta= 0.5247, final= 0.6951 (base + 0.22*delta = 0.6951)
+    Joint 1: base=-0.1098, delta=-0.0981, final=-0.1313 (base + 0.22*delta = -0.1313)
+    Joint 2: base= 0.5079, delta= 0.0693, final= 0.5231 (base + 0.22*delta = 0.5231)
+    Joint 3: base= 1.3305, delta=-0.0189, final= 1.3264 (base + 0.22*delta = 1.3264)
+    Joint 4: base= 1.4009, delta=-0.5934, final= 1.2707 (base + 0.22*delta = 1.2707)
+
+  Gripper (5):
+    base:  0.0359
+    delta:  0.1719
+    continuous (base + 0.22*delta):  0.0736
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3659, std= 0.2246, min= 0.2071, max= 0.5247, positive=100.0%
+      Joint 1: mean=-0.0544, std= 0.0619, min=-0.0981, max=-0.0106, positive=0.0%
+      Joint 2: mean= 0.2136, std= 0.2041, min= 0.0693, max= 0.3579, positive=100.0%
+      Joint 3: mean=-0.1436, std= 0.1764, min=-0.2683, max=-0.0189, positive=0.0%
+      Joint 4: mean=-0.5296, std= 0.0903, min=-0.5934, max=-0.4657, positive=0.0%
+    Gripper (5): mean= 0.0760, std= 0.1356, min=-0.0199, max= 0.1719, positive=50.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.6560, std= 0.4027
+      Joint 1: mean=-0.1610, std= 0.1834
+      Joint 2: mean= 0.4517, std= 0.4317
+      Joint 3: mean=-0.5614, std= 0.6895
+      Joint 4: mean=-0.8372, std= 0.1427
+    Gripper (5): mean= 0.4226, std= 0.7539
+
+[Step  90] Action Debug (env 0):
+  alpha: 0.2194
+
+  Joints (0-4):
+    Joint 0: base= 0.5851, delta=-0.0273, final= 0.5791 (base + 0.22*delta = 0.5791)
+    Joint 1: base=-0.1120, delta= 0.3388, final=-0.0376 (base + 0.22*delta = -0.0376)
+    Joint 2: base= 0.4835, delta= 0.4157, final= 0.5747 (base + 0.22*delta = 0.5747)
+    Joint 3: base= 1.2930, delta=-0.0691, final= 1.2779 (base + 0.22*delta = 1.2779)
+    Joint 4: base= 1.4137, delta=-0.5382, final= 1.2956 (base + 0.22*delta = 1.2956)
+
+  Gripper (5):
+    base:  0.0131
+    delta:  0.1686
+    continuous (base + 0.22*delta):  0.0501
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1216, std= 0.2105, min=-0.0273, max= 0.2704, positive=50.0%
+      Joint 1: mean= 0.2642, std= 0.1055, min= 0.1897, max= 0.3388, positive=100.0%
+      Joint 2: mean= 0.1727, std= 0.3438, min=-0.0704, max= 0.4157, positive=50.0%
+      Joint 3: mean=-0.0586, std= 0.0148, min=-0.0691, max=-0.0481, positive=0.0%
+      Joint 4: mean=-0.4634, std= 0.1057, min=-0.5382, max=-0.3887, positive=0.0%
+    Gripper (5): mean= 0.1871, std= 0.0262, min= 0.1686, max= 0.2056, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2179, std= 0.3774
+      Joint 1: mean= 0.7828, std= 0.3124
+      Joint 2: mean= 0.3652, std= 0.7271
+      Joint 3: mean=-0.2290, std= 0.0580
+      Joint 4: mean=-0.7325, std= 0.1671
+    Gripper (5): mean= 1.0404, std= 0.1457
+
+[Step 100] Action Debug (env 0):
+  alpha: 0.2194
+
+  Joints (0-4):
+    Joint 0: base= 0.5536, delta= 0.2870, final= 0.6166 (base + 0.22*delta = 0.6166)
+    Joint 1: base=-0.0649, delta= 0.1131, final=-0.0401 (base + 0.22*delta = -0.0401)
+    Joint 2: base= 0.4208, delta= 0.1779, final= 0.4599 (base + 0.22*delta = 0.4599)
+    Joint 3: base= 1.3976, delta=-0.0938, final= 1.3770 (base + 0.22*delta = 1.3770)
+    Joint 4: base= 1.2140, delta= 0.1431, final= 1.2454 (base + 0.22*delta = 1.2454)
+
+  Gripper (5):
+    base:  0.0063
+    delta:  0.0997
+    continuous (base + 0.22*delta):  0.0282
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2172, std= 0.0988, min= 0.1473, max= 0.2870, positive=100.0%
+      Joint 1: mean= 0.0697, std= 0.0613, min= 0.0264, max= 0.1131, positive=100.0%
+      Joint 2: mean= 0.2575, std= 0.1126, min= 0.1779, max= 0.3372, positive=100.0%
+      Joint 3: mean=-0.1277, std= 0.0479, min=-0.1615, max=-0.0938, positive=0.0%
+      Joint 4: mean=-0.0697, std= 0.3009, min=-0.2825, max= 0.1431, positive=50.0%
+    Gripper (5): mean= 0.1718, std= 0.1020, min= 0.0997, max= 0.2439, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3894, std= 0.1772
+      Joint 1: mean= 0.2066, std= 0.1816
+      Joint 2: mean= 0.5447, std= 0.2382
+      Joint 3: mean=-0.4992, std= 0.1872
+      Joint 4: mean=-0.1102, std= 0.4756
+    Gripper (5): mean= 0.9551, std= 0.5671
+
+[Step 110] Action Debug (env 0):
+  alpha: 0.2194
+
+  Joints (0-4):
+    Joint 0: base= 0.5425, delta= 0.0995, final= 0.5643 (base + 0.22*delta = 0.5643)
+    Joint 1: base=-0.1391, delta=-0.2694, final=-0.1982 (base + 0.22*delta = -0.1982)
+    Joint 2: base= 0.5298, delta=-0.1421, final= 0.4987 (base + 0.22*delta = 0.4987)
+    Joint 3: base= 1.2513, delta= 0.1140, final= 1.2763 (base + 0.22*delta = 1.2763)
+    Joint 4: base= 1.3981, delta= 0.5614, final= 1.5213 (base + 0.22*delta = 1.5213)
+
+  Gripper (5):
+    base:  0.0195
+    delta:  0.0727
+    continuous (base + 0.22*delta):  0.0354
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1986, std= 0.1401, min= 0.0995, max= 0.2977, positive=100.0%
+      Joint 1: mean=-0.0817, std= 0.2655, min=-0.2694, max= 0.1060, positive=50.0%
+      Joint 2: mean=-0.1007, std= 0.0586, min=-0.1421, max=-0.0592, positive=0.0%
+      Joint 3: mean= 0.2199, std= 0.1497, min= 0.1140, max= 0.3257, positive=100.0%
+      Joint 4: mean= 0.1639, std= 0.5622, min=-0.2336, max= 0.5614, positive=50.0%
+    Gripper (5): mean= 0.1689, std= 0.1361, min= 0.0727, max= 0.2652, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3561, std= 0.2512
+      Joint 1: mean=-0.2420, std= 0.7864
+      Joint 2: mean=-0.2129, std= 0.1239
+      Joint 3: mean= 0.8595, std= 0.5852
+      Joint 4: mean= 0.2591, std= 0.8887
+    Gripper (5): mean= 0.9392, std= 0.7569
+
+[Step 120] Action Debug (env 0):
+  alpha: 0.2194
+
+  Joints (0-4):
+    Joint 0: base= 0.5624, delta= 0.4933, final= 0.6706 (base + 0.22*delta = 0.6706)
+    Joint 1: base=-0.1370, delta= 0.1398, final=-0.1063 (base + 0.22*delta = -0.1063)
+    Joint 2: base= 0.4990, delta= 0.5632, final= 0.6226 (base + 0.22*delta = 0.6226)
+    Joint 3: base= 1.3090, delta=-0.0190, final= 1.3048 (base + 0.22*delta = 1.3048)
+    Joint 4: base= 1.3305, delta=-0.1226, final= 1.3036 (base + 0.22*delta = 1.3036)
+
+  Gripper (5):
+    base:  0.0389
+    delta:  0.1368
+    continuous (base + 0.22*delta):  0.0689
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3141, std= 0.2534, min= 0.1349, max= 0.4933, positive=100.0%
+      Joint 1: mean= 0.0978, std= 0.0595, min= 0.0557, max= 0.1398, positive=100.0%
+      Joint 2: mean= 0.3010, std= 0.3707, min= 0.0388, max= 0.5632, positive=100.0%
+      Joint 3: mean= 0.0299, std= 0.0691, min=-0.0190, max= 0.0787, positive=50.0%
+      Joint 4: mean=-0.2389, std= 0.1645, min=-0.3552, max=-0.1226, positive=0.0%
+    Gripper (5): mean= 0.1758, std= 0.0552, min= 0.1368, max= 0.2149, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.5631, std= 0.4544
+      Joint 1: mean= 0.2896, std= 0.1762
+      Joint 2: mean= 0.6366, std= 0.7841
+      Joint 3: mean= 0.1167, std= 0.2700
+      Joint 4: mean=-0.3776, std= 0.2600
+    Gripper (5): mean= 0.9777, std= 0.3071
+[Iter   17] steps=   4420 | ep_reward=   2.73 | rollout_reward= 0.0148 | episodes= 34 | done_pct=  0.0% | early_done=  0.0% | loss=839.3083 | alpha=0.227
+
+[Step   0] Action Debug (env 0):
+  alpha: 0.2268
+
+  Joints (0-4):
+    Joint 0: base= 0.5891, delta= 0.1398, final= 0.6208 (base + 0.23*delta = 0.6208)
+    Joint 1: base=-0.1383, delta= 0.3205, final=-0.0656 (base + 0.23*delta = -0.0656)
+    Joint 2: base= 0.5285, delta= 0.4315, final= 0.6264 (base + 0.23*delta = 0.6264)
+    Joint 3: base= 1.3165, delta=-0.0706, final= 1.3005 (base + 0.23*delta = 1.3005)
+    Joint 4: base= 1.4309, delta= 0.2815, final= 1.4947 (base + 0.23*delta = 1.4947)
+
+  Gripper (5):
+    base:  0.0251
+    delta:  0.0651
+    continuous (base + 0.23*delta):  0.0399
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1076, std= 0.0457, min= 0.0753, max= 0.1398, positive=100.0%
+      Joint 1: mean= 0.2827, std= 0.0535, min= 0.2448, max= 0.3205, positive=100.0%
+      Joint 2: mean= 0.3035, std= 0.1811, min= 0.1754, max= 0.4315, positive=100.0%
+      Joint 3: mean=-0.0825, std= 0.0169, min=-0.0945, max=-0.0706, positive=0.0%
+      Joint 4: mean=-0.1078, std= 0.5505, min=-0.4970, max= 0.2815, positive=50.0%
+    Gripper (5): mean= 0.1367, std= 0.1013, min= 0.0651, max= 0.2083, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1928, std= 0.0819
+      Joint 1: mean= 0.8374, std= 0.1586
+      Joint 2: mean= 0.6419, std= 0.3830
+      Joint 3: mean=-0.3226, std= 0.0662
+      Joint 4: mean=-0.1703, std= 0.8702
+    Gripper (5): mean= 0.7601, std= 0.5630
+
+[Step  10] Action Debug (env 0):
+  alpha: 0.2268
+
+  Joints (0-4):
+    Joint 0: base= 0.5105, delta= 0.2487, final= 0.5669 (base + 0.23*delta = 0.5669)
+    Joint 1: base=-0.1532, delta= 0.0827, final=-0.1344 (base + 0.23*delta = -0.1344)
+    Joint 2: base= 0.5334, delta= 0.6882, final= 0.6895 (base + 0.23*delta = 0.6895)
+    Joint 3: base= 1.2590, delta= 0.2450, final= 1.3146 (base + 0.23*delta = 1.3146)
+    Joint 4: base= 1.6103, delta=-0.6270, final= 1.4681 (base + 0.23*delta = 1.4681)
+
+  Gripper (5):
+    base: -0.0315
+    delta:  0.1634
+    continuous (base + 0.23*delta):  0.0056
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0832, std= 0.2341, min=-0.0823, max= 0.2487, positive=50.0%
+      Joint 1: mean= 0.0318, std= 0.0720, min=-0.0190, max= 0.0827, positive=50.0%
+      Joint 2: mean= 0.3710, std= 0.4486, min= 0.0538, max= 0.6882, positive=100.0%
+      Joint 3: mean= 0.0834, std= 0.2284, min=-0.0781, max= 0.2450, positive=50.0%
+      Joint 4: mean=-0.2826, std= 0.4871, min=-0.6270, max= 0.0619, positive=50.0%
+    Gripper (5): mean= 0.1791, std= 0.0223, min= 0.1634, max= 0.1949, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1491, std= 0.4196
+      Joint 1: mean= 0.0943, std= 0.2131
+      Joint 2: mean= 0.7847, std= 0.9488
+      Joint 3: mean= 0.3262, std= 0.8929
+      Joint 4: mean=-0.4467, std= 0.7700
+    Gripper (5): mean= 0.9961, std= 0.1238
+
+[Step  20] Action Debug (env 0):
+  alpha: 0.2268
+
+  Joints (0-4):
+    Joint 0: base= 0.2526, delta= 0.0781, final= 0.2703 (base + 0.23*delta = 0.2703)
+    Joint 1: base=-0.1721, delta= 0.3320, final=-0.0967 (base + 0.23*delta = -0.0967)
+    Joint 2: base= 0.5542, delta= 0.4747, final= 0.6619 (base + 0.23*delta = 0.6619)
+    Joint 3: base= 1.2852, delta=-0.0434, final= 1.2753 (base + 0.23*delta = 1.2753)
+    Joint 4: base= 1.4634, delta=-0.4123, final= 1.3698 (base + 0.23*delta = 1.3698)
+
+  Gripper (5):
+    base: -0.1154
+    delta:  0.0797
+    continuous (base + 0.23*delta): -0.0973
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0921, std= 0.0198, min= 0.0781, max= 0.1061, positive=100.0%
+      Joint 1: mean= 0.1437, std= 0.2662, min=-0.0445, max= 0.3320, positive=50.0%
+      Joint 2: mean= 0.2349, std= 0.3391, min=-0.0049, max= 0.4747, positive=50.0%
+      Joint 3: mean=-0.0282, std= 0.0214, min=-0.0434, max=-0.0131, positive=0.0%
+      Joint 4: mean=-0.3073, std= 0.1485, min=-0.4123, max=-0.2023, positive=0.0%
+    Gripper (5): mean= 0.0908, std= 0.0157, min= 0.0797, max= 0.1019, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1652, std= 0.0356
+      Joint 1: mean= 0.4258, std= 0.7887
+      Joint 2: mean= 0.4968, std= 0.7171
+      Joint 3: mean=-0.1103, std= 0.0838
+      Joint 4: mean=-0.4857, std= 0.2347
+    Gripper (5): mean= 0.5049, std= 0.0872
+
+[Step  30] Action Debug (env 0):
+  alpha: 0.2268
+
+  Joints (0-4):
+    Joint 0: base= 0.2399, delta= 0.6652, final= 0.3908 (base + 0.23*delta = 0.3908)
+    Joint 1: base=-0.1437, delta= 0.3257, final=-0.0698 (base + 0.23*delta = -0.0698)
+    Joint 2: base= 0.5063, delta= 0.0587, final= 0.5196 (base + 0.23*delta = 0.5196)
+    Joint 3: base= 1.3189, delta= 0.1213, final= 1.3464 (base + 0.23*delta = 1.3464)
+    Joint 4: base= 1.5448, delta= 0.0700, final= 1.5607 (base + 0.23*delta = 1.5607)
+
+  Gripper (5):
+    base: -0.0167
+    delta:  0.2411
+    continuous (base + 0.23*delta):  0.0379
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4008, std= 0.3738, min= 0.1365, max= 0.6652, positive=100.0%
+      Joint 1: mean= 0.2399, std= 0.1214, min= 0.1540, max= 0.3257, positive=100.0%
+      Joint 2: mean= 0.1037, std= 0.0636, min= 0.0587, max= 0.1486, positive=100.0%
+      Joint 3: mean= 0.1124, std= 0.0126, min= 0.1035, max= 0.1213, positive=100.0%
+      Joint 4: mean=-0.2185, std= 0.4080, min=-0.5070, max= 0.0700, positive=50.0%
+    Gripper (5): mean= 0.2176, std= 0.0333, min= 0.1940, max= 0.2411, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.7187, std= 0.6702
+      Joint 1: mean= 0.7106, std= 0.3596
+      Joint 2: mean= 0.2193, std= 0.1344
+      Joint 3: mean= 0.4394, std= 0.0492
+      Joint 4: mean=-0.3454, std= 0.6449
+    Gripper (5): mean= 1.2097, std= 0.1851
+
+[Step  40] Action Debug (env 0):
+  alpha: 0.2268
+
+  Joints (0-4):
+    Joint 0: base= 0.2195, delta= 0.6499, final= 0.3669 (base + 0.23*delta = 0.3669)
+    Joint 1: base=-0.1979, delta= 0.1165, final=-0.1714 (base + 0.23*delta = -0.1714)
+    Joint 2: base= 0.5476, delta= 0.0739, final= 0.5644 (base + 0.23*delta = 0.5644)
+    Joint 3: base= 1.3201, delta= 0.1002, final= 1.3428 (base + 0.23*delta = 1.3428)
+    Joint 4: base= 1.4930, delta=-0.2287, final= 1.4411 (base + 0.23*delta = 1.4411)
+
+  Gripper (5):
+    base:  0.0015
+    delta:  0.1036
+    continuous (base + 0.23*delta):  0.0249
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2693, std= 0.5383, min=-0.1114, max= 0.6499, positive=50.0%
+      Joint 1: mean= 0.0610, std= 0.0785, min= 0.0055, max= 0.1165, positive=100.0%
+      Joint 2: mean= 0.2229, std= 0.2107, min= 0.0739, max= 0.3718, positive=100.0%
+      Joint 3: mean=-0.0470, std= 0.2081, min=-0.1941, max= 0.1002, positive=50.0%
+      Joint 4: mean=-0.2432, std= 0.0205, min=-0.2578, max=-0.2287, positive=0.0%
+    Gripper (5): mean= 0.2185, std= 0.1625, min= 0.1036, max= 0.3334, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4827, std= 0.9652
+      Joint 1: mean= 0.1808, std= 0.2325
+      Joint 2: mean= 0.4713, std= 0.4457
+      Joint 3: mean=-0.1836, std= 0.8134
+      Joint 4: mean=-0.3845, std= 0.0325
+    Gripper (5): mean= 1.2149, std= 0.9037
+
+[Step  50] Action Debug (env 0):
+  alpha: 0.2268
+
+  Joints (0-4):
+    Joint 0: base= 0.2913, delta= 0.1744, final= 0.3309 (base + 0.23*delta = 0.3309)
+    Joint 1: base=-0.1814, delta= 0.0511, final=-0.1698 (base + 0.23*delta = -0.1698)
+    Joint 2: base= 0.5235, delta=-0.0308, final= 0.5165 (base + 0.23*delta = 0.5165)
+    Joint 3: base= 1.3026, delta= 0.0181, final= 1.3067 (base + 0.23*delta = 1.3067)
+    Joint 4: base= 1.5201, delta=-0.0441, final= 1.5101 (base + 0.23*delta = 1.5101)
+
+  Gripper (5):
+    base: -0.0984
+    delta:  0.3387
+    continuous (base + 0.23*delta): -0.0215
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3260, std= 0.2144, min= 0.1744, max= 0.4776, positive=100.0%
+      Joint 1: mean= 0.2480, std= 0.2785, min= 0.0511, max= 0.4450, positive=100.0%
+      Joint 2: mean= 0.2056, std= 0.3342, min=-0.0308, max= 0.4419, positive=50.0%
+      Joint 3: mean= 0.0473, std= 0.0414, min= 0.0181, max= 0.0766, positive=100.0%
+      Joint 4: mean=-0.0787, std= 0.0489, min=-0.1133, max=-0.0441, positive=0.0%
+    Gripper (5): mean= 0.2886, std= 0.0709, min= 0.2384, max= 0.3387, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.5845, std= 0.3844
+      Joint 1: mean= 0.7347, std= 0.8250
+      Joint 2: mean= 0.4348, std= 0.7069
+      Joint 3: mean= 0.1850, std= 0.1617
+      Joint 4: mean=-0.1244, std= 0.0773
+    Gripper (5): mean= 1.6045, std= 0.3943
+
+[Step  60] Action Debug (env 0):
+  alpha: 0.2268
+
+  Joints (0-4):
+    Joint 0: base= 0.1798, delta=-0.1292, final= 0.1505 (base + 0.23*delta = 0.1505)
+    Joint 1: base=-0.1746, delta= 0.1364, final=-0.1436 (base + 0.23*delta = -0.1436)
+    Joint 2: base= 0.4781, delta= 0.2467, final= 0.5341 (base + 0.23*delta = 0.5341)
+    Joint 3: base= 1.3158, delta= 0.1588, final= 1.3519 (base + 0.23*delta = 1.3519)
+    Joint 4: base= 1.4574, delta= 0.2691, final= 1.5185 (base + 0.23*delta = 1.5185)
+
+  Gripper (5):
+    base: -0.0259
+    delta:  0.1081
+    continuous (base + 0.23*delta): -0.0014
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1327, std= 0.3703, min=-0.1292, max= 0.3945, positive=50.0%
+      Joint 1: mean= 0.0792, std= 0.0809, min= 0.0220, max= 0.1364, positive=100.0%
+      Joint 2: mean= 0.2055, std= 0.0583, min= 0.1642, max= 0.2467, positive=100.0%
+      Joint 3: mean= 0.0797, std= 0.1118, min= 0.0007, max= 0.1588, positive=100.0%
+      Joint 4: mean=-0.1826, std= 0.6389, min=-0.6344, max= 0.2691, positive=50.0%
+    Gripper (5): mean= 0.1953, std= 0.1234, min= 0.1081, max= 0.2826, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2378, std= 0.6640
+      Joint 1: mean= 0.2347, std= 0.2396
+      Joint 2: mean= 0.4346, std= 0.1234
+      Joint 3: mean= 0.3117, std= 0.4372
+      Joint 4: mean=-0.2887, std= 1.0099
+    Gripper (5): mean= 1.0862, std= 0.6863
+
+[Step  70] Action Debug (env 0):
+  alpha: 0.2268
+
+  Joints (0-4):
+    Joint 0: base= 0.1643, delta= 0.2294, final= 0.2164 (base + 0.23*delta = 0.2164)
+    Joint 1: base=-0.1373, delta=-0.1387, final=-0.1687 (base + 0.23*delta = -0.1687)
+    Joint 2: base= 0.4601, delta= 0.2812, final= 0.5239 (base + 0.23*delta = 0.5239)
+    Joint 3: base= 1.3614, delta= 0.0875, final= 1.3813 (base + 0.23*delta = 1.3813)
+    Joint 4: base= 1.5367, delta=-0.0348, final= 1.5288 (base + 0.23*delta = 1.5288)
+
+  Gripper (5):
+    base: -0.0379
+    delta:  0.0191
+    continuous (base + 0.23*delta): -0.0336
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1673, std= 0.0879, min= 0.1051, max= 0.2294, positive=100.0%
+      Joint 1: mean=-0.1366, std= 0.0030, min=-0.1387, max=-0.1344, positive=0.0%
+      Joint 2: mean= 0.0996, std= 0.2567, min=-0.0819, max= 0.2812, positive=50.0%
+      Joint 3: mean= 0.1103, std= 0.0322, min= 0.0875, max= 0.1331, positive=100.0%
+      Joint 4: mean= 0.1301, std= 0.2331, min=-0.0348, max= 0.2949, positive=50.0%
+    Gripper (5): mean= 0.0860, std= 0.0947, min= 0.0191, max= 0.1529, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2999, std= 0.1575
+      Joint 1: mean=-0.4046, std= 0.0090
+      Joint 2: mean= 0.2108, std= 0.5429
+      Joint 3: mean= 0.4311, std= 0.1260
+      Joint 4: mean= 0.2056, std= 0.3685
+    Gripper (5): mean= 0.4782, std= 0.5263
+
+[Step  80] Action Debug (env 0):
+  alpha: 0.2268
+
+  Joints (0-4):
+    Joint 0: base= 0.2613, delta=-0.3306, final= 0.1863 (base + 0.23*delta = 0.1863)
+    Joint 1: base=-0.1718, delta= 0.0880, final=-0.1519 (base + 0.23*delta = -0.1519)
+    Joint 2: base= 0.5406, delta= 0.2463, final= 0.5965 (base + 0.23*delta = 0.5965)
+    Joint 3: base= 1.2955, delta= 0.0575, final= 1.3085 (base + 0.23*delta = 1.3085)
+    Joint 4: base= 1.5466, delta=-0.1309, final= 1.5169 (base + 0.23*delta = 1.5169)
+
+  Gripper (5):
+    base: -0.0089
+    delta:  0.1517
+    continuous (base + 0.23*delta):  0.0255
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.2407, std= 0.1272, min=-0.3306, max=-0.1508, positive=0.0%
+      Joint 1: mean= 0.2246, std= 0.1932, min= 0.0880, max= 0.3613, positive=100.0%
+      Joint 2: mean= 0.2494, std= 0.0044, min= 0.2463, max= 0.2525, positive=100.0%
+      Joint 3: mean=-0.1227, std= 0.2549, min=-0.3029, max= 0.0575, positive=50.0%
+      Joint 4: mean=-0.2812, std= 0.2126, min=-0.4316, max=-0.1309, positive=0.0%
+    Gripper (5): mean= 0.2278, std= 0.1077, min= 0.1517, max= 0.3040, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.4315, std= 0.2280
+      Joint 1: mean= 0.6654, std= 0.5724
+      Joint 2: mean= 0.5275, std= 0.0093
+      Joint 3: mean=-0.4796, std= 0.9964
+      Joint 4: mean=-0.4446, std= 0.3361
+    Gripper (5): mean= 1.2668, std= 0.5989
+
+[Step  90] Action Debug (env 0):
+  alpha: 0.2268
+
+  Joints (0-4):
+    Joint 0: base= 0.1484, delta= 0.2466, final= 0.2043 (base + 0.23*delta = 0.2043)
+    Joint 1: base=-0.2220, delta=-0.0321, final=-0.2292 (base + 0.23*delta = -0.2292)
+    Joint 2: base= 0.5669, delta= 0.7572, final= 0.7386 (base + 0.23*delta = 0.7386)
+    Joint 3: base= 1.2505, delta= 0.0363, final= 1.2588 (base + 0.23*delta = 1.2588)
+    Joint 4: base= 1.4042, delta=-0.7398, final= 1.2364 (base + 0.23*delta = 1.2364)
+
+  Gripper (5):
+    base: -0.1808
+    delta:  0.2739
+    continuous (base + 0.23*delta): -0.1187
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2112, std= 0.0501, min= 0.1758, max= 0.2466, positive=100.0%
+      Joint 1: mean= 0.2245, std= 0.3630, min=-0.0321, max= 0.4812, positive=50.0%
+      Joint 2: mean= 0.6200, std= 0.1940, min= 0.4828, max= 0.7572, positive=100.0%
+      Joint 3: mean=-0.0150, std= 0.0725, min=-0.0663, max= 0.0363, positive=50.0%
+      Joint 4: mean=-0.6190, std= 0.1710, min=-0.7398, max=-0.4981, positive=0.0%
+    Gripper (5): mean= 0.1982, std= 0.1070, min= 0.1226, max= 0.2739, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3786, std= 0.0898
+      Joint 1: mean= 0.6651, std= 1.0752
+      Joint 2: mean= 1.3114, std= 0.4104
+      Joint 3: mean=-0.0587, std= 0.2835
+      Joint 4: mean=-0.9784, std= 0.2702
+    Gripper (5): mean= 1.1022, std= 0.5947
+
+[Step 100] Action Debug (env 0):
+  alpha: 0.2268
+
+  Joints (0-4):
+    Joint 0: base= 0.2396, delta= 0.1023, final= 0.2628 (base + 0.23*delta = 0.2628)
+    Joint 1: base=-0.2283, delta= 0.0217, final=-0.2234 (base + 0.23*delta = -0.2234)
+    Joint 2: base= 0.5866, delta= 0.1458, final= 0.6197 (base + 0.23*delta = 0.6197)
+    Joint 3: base= 1.2962, delta=-0.0791, final= 1.2782 (base + 0.23*delta = 1.2782)
+    Joint 4: base= 1.4224, delta=-0.3234, final= 1.3490 (base + 0.23*delta = 1.3490)
+
+  Gripper (5):
+    base: -0.0155
+    delta:  0.1591
+    continuous (base + 0.23*delta):  0.0206
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1108, std= 0.0121, min= 0.1023, max= 0.1194, positive=100.0%
+      Joint 1: mean= 0.0329, std= 0.0158, min= 0.0217, max= 0.0440, positive=100.0%
+      Joint 2: mean= 0.3785, std= 0.3291, min= 0.1458, max= 0.6113, positive=100.0%
+      Joint 3: mean=-0.1886, std= 0.1548, min=-0.2981, max=-0.0791, positive=0.0%
+      Joint 4: mean=-0.3038, std= 0.0277, min=-0.3234, max=-0.2842, positive=0.0%
+    Gripper (5): mean= 0.1085, std= 0.0715, min= 0.0579, max= 0.1591, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1987, std= 0.0218
+      Joint 1: mean= 0.0974, std= 0.0468
+      Joint 2: mean= 0.8006, std= 0.6961
+      Joint 3: mean=-0.7372, std= 0.6052
+      Joint 4: mean=-0.4802, std= 0.0437
+    Gripper (5): mean= 0.6032, std= 0.3978
+
+[Step 110] Action Debug (env 0):
+  alpha: 0.2268
+
+  Joints (0-4):
+    Joint 0: base= 0.2312, delta= 0.6930, final= 0.3884 (base + 0.23*delta = 0.3884)
+    Joint 1: base=-0.1967, delta=-0.1627, final=-0.2336 (base + 0.23*delta = -0.2336)
+    Joint 2: base= 0.5516, delta=-0.5218, final= 0.4333 (base + 0.23*delta = 0.4333)
+    Joint 3: base= 1.3334, delta= 0.1285, final= 1.3625 (base + 0.23*delta = 1.3625)
+    Joint 4: base= 1.4087, delta=-0.8677, final= 1.2118 (base + 0.23*delta = 1.2118)
+
+  Gripper (5):
+    base:  0.0173
+    delta:  0.2820
+    continuous (base + 0.23*delta):  0.0812
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4832, std= 0.2967, min= 0.2733, max= 0.6930, positive=100.0%
+      Joint 1: mean=-0.0373, std= 0.1773, min=-0.1627, max= 0.0881, positive=50.0%
+      Joint 2: mean=-0.0228, std= 0.7057, min=-0.5218, max= 0.4762, positive=50.0%
+      Joint 3: mean= 0.0755, std= 0.0750, min= 0.0224, max= 0.1285, positive=100.0%
+      Joint 4: mean=-0.7422, std= 0.1774, min=-0.8677, max=-0.6168, positive=0.0%
+    Gripper (5): mean= 0.2697, std= 0.0174, min= 0.2574, max= 0.2820, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.8662, std= 0.5320
+      Joint 1: mean=-0.1105, std= 0.5252
+      Joint 2: mean=-0.0482, std= 1.4925
+      Joint 3: mean= 0.2950, std= 0.2933
+      Joint 4: mean=-1.1733, std= 0.2804
+    Gripper (5): mean= 1.4996, std= 0.0969
+
+[Step 120] Action Debug (env 0):
+  alpha: 0.2268
+
+  Joints (0-4):
+    Joint 0: base= 0.3050, delta= 0.1718, final= 0.3440 (base + 0.23*delta = 0.3440)
+    Joint 1: base=-0.1837, delta= 0.1746, final=-0.1441 (base + 0.23*delta = -0.1441)
+    Joint 2: base= 0.5793, delta= 0.1439, final= 0.6120 (base + 0.23*delta = 0.6120)
+    Joint 3: base= 1.2708, delta= 0.1316, final= 1.3007 (base + 0.23*delta = 1.3007)
+    Joint 4: base= 1.4183, delta= 0.1069, final= 1.4425 (base + 0.23*delta = 1.4425)
+
+  Gripper (5):
+    base: -0.0196
+    delta:  0.1941
+    continuous (base + 0.23*delta):  0.0244
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.0723, std= 0.3452, min=-0.3164, max= 0.1718, positive=50.0%
+      Joint 1: mean= 0.1050, std= 0.0984, min= 0.0354, max= 0.1746, positive=100.0%
+      Joint 2: mean= 0.0985, std= 0.0642, min= 0.0531, max= 0.1439, positive=100.0%
+      Joint 3: mean= 0.0606, std= 0.1004, min=-0.0104, max= 0.1316, positive=50.0%
+      Joint 4: mean= 0.3294, std= 0.3146, min= 0.1069, max= 0.5518, positive=100.0%
+    Gripper (5): mean= 0.1686, std= 0.0361, min= 0.1430, max= 0.1941, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.1296, std= 0.6189
+      Joint 1: mean= 0.3109, std= 0.2916
+      Joint 2: mean= 0.2083, std= 0.1357
+      Joint 3: mean= 0.2369, std= 0.3926
+      Joint 4: mean= 0.5206, std= 0.4973
+    Gripper (5): mean= 0.9374, std= 0.2008
+[Iter   18] steps=   4680 | ep_reward=   2.84 | rollout_reward= 0.0358 | episodes= 36 | done_pct=  0.0% | early_done=  0.0% | loss=818.3673 | alpha=0.234
+
+[Step   0] Action Debug (env 0):
+  alpha: 0.2342
+
+  Joints (0-4):
+    Joint 0: base= 0.2877, delta= 0.0232, final= 0.2931 (base + 0.23*delta = 0.2931)
+    Joint 1: base=-0.1988, delta= 0.1879, final=-0.1548 (base + 0.23*delta = -0.1548)
+    Joint 2: base= 0.5715, delta= 0.3343, final= 0.6498 (base + 0.23*delta = 0.6498)
+    Joint 3: base= 1.3018, delta= 0.1325, final= 1.3329 (base + 0.23*delta = 1.3329)
+    Joint 4: base= 1.4785, delta=-0.4951, final= 1.3625 (base + 0.23*delta = 1.3625)
+
+  Gripper (5):
+    base:  0.0270
+    delta:  0.3448
+    continuous (base + 0.23*delta):  0.1078
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1069, std= 0.1183, min= 0.0232, max= 0.1905, positive=100.0%
+      Joint 1: mean= 0.1269, std= 0.0863, min= 0.0660, max= 0.1879, positive=100.0%
+      Joint 2: mean= 0.3056, std= 0.0406, min= 0.2769, max= 0.3343, positive=100.0%
+      Joint 3: mean=-0.0080, std= 0.1988, min=-0.1485, max= 0.1325, positive=50.0%
+      Joint 4: mean=-0.4377, std= 0.0811, min=-0.4951, max=-0.3803, positive=0.0%
+    Gripper (5): mean= 0.2947, std= 0.0710, min= 0.2445, max= 0.3448, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1916, std= 0.2121
+      Joint 1: mean= 0.3761, std= 0.2555
+      Joint 2: mean= 0.6464, std= 0.0859
+      Joint 3: mean=-0.0313, std= 0.7770
+      Joint 4: mean=-0.6919, std= 0.1283
+    Gripper (5): mean= 1.6384, std= 0.3945
+
+[Step  10] Action Debug (env 0):
+  alpha: 0.2342
+
+  Joints (0-4):
+    Joint 0: base= 0.1507, delta= 0.7196, final= 0.3193 (base + 0.23*delta = 0.3193)
+    Joint 1: base=-0.1250, delta= 0.1971, final=-0.0788 (base + 0.23*delta = -0.0788)
+    Joint 2: base= 0.5305, delta= 0.1508, final= 0.5658 (base + 0.23*delta = 0.5658)
+    Joint 3: base= 1.2713, delta=-0.1945, final= 1.2258 (base + 0.23*delta = 1.2258)
+    Joint 4: base= 1.4710, delta= 0.3645, final= 1.5564 (base + 0.23*delta = 1.5564)
+
+  Gripper (5):
+    base: -0.0344
+    delta:  0.1753
+    continuous (base + 0.23*delta):  0.0067
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.5413, std= 0.2521, min= 0.3631, max= 0.7196, positive=100.0%
+      Joint 1: mean= 0.1113, std= 0.1214, min= 0.0254, max= 0.1971, positive=100.0%
+      Joint 2: mean= 0.1407, std= 0.0143, min= 0.1306, max= 0.1508, positive=100.0%
+      Joint 3: mean=-0.2015, std= 0.0099, min=-0.2085, max=-0.1945, positive=0.0%
+      Joint 4: mean= 0.5532, std= 0.2669, min= 0.3645, max= 0.7419, positive=100.0%
+    Gripper (5): mean= 0.1543, std= 0.0297, min= 0.1333, max= 0.1753, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.9706, std= 0.4520
+      Joint 1: mean= 0.3296, std= 0.3596
+      Joint 2: mean= 0.2976, std= 0.0303
+      Joint 3: mean=-0.7879, std= 0.0388
+      Joint 4: mean= 0.8744, std= 0.4219
+    Gripper (5): mean= 0.8579, std= 0.1653
+
+[Step  20] Action Debug (env 0):
+  alpha: 0.2342
+
+  Joints (0-4):
+    Joint 0: base=-0.8542, delta=-0.2796, final=-0.9197 (base + 0.23*delta = -0.9197)
+    Joint 1: base=-0.0134, delta= 0.4182, final= 0.0845 (base + 0.23*delta = 0.0845)
+    Joint 2: base= 0.1667, delta= 0.2140, final= 0.2168 (base + 0.23*delta = 0.2168)
+    Joint 3: base= 1.4071, delta=-0.0515, final= 1.3951 (base + 0.23*delta = 1.3951)
+    Joint 4: base= 0.4233, delta=-0.5926, final= 0.2845 (base + 0.23*delta = 0.2845)
+
+  Gripper (5):
+    base: -0.0615
+    delta:  0.0969
+    continuous (base + 0.23*delta): -0.0388
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0458, std= 0.4601, min=-0.2796, max= 0.3711, positive=50.0%
+      Joint 1: mean= 0.3039, std= 0.1616, min= 0.1896, max= 0.4182, positive=100.0%
+      Joint 2: mean= 0.3052, std= 0.1290, min= 0.2140, max= 0.3964, positive=100.0%
+      Joint 3: mean=-0.0978, std= 0.0654, min=-0.1440, max=-0.0515, positive=0.0%
+      Joint 4: mean=-0.3813, std= 0.2987, min=-0.5926, max=-0.1701, positive=0.0%
+    Gripper (5): mean= 0.1257, std= 0.0408, min= 0.0969, max= 0.1545, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0820, std= 0.8248
+      Joint 1: mean= 0.9002, std= 0.4788
+      Joint 2: mean= 0.6455, std= 0.2729
+      Joint 3: mean=-0.3822, std= 0.2556
+      Joint 4: mean=-0.6028, std= 0.4722
+    Gripper (5): mean= 0.6991, std= 0.2266
+
+[Step  30] Action Debug (env 0):
+  alpha: 0.2342
+
+  Joints (0-4):
+    Joint 0: base=-0.9349, delta= 0.4637, final=-0.8263 (base + 0.23*delta = -0.8263)
+    Joint 1: base= 0.0542, delta=-0.1089, final= 0.0286 (base + 0.23*delta = 0.0286)
+    Joint 2: base= 0.2068, delta= 0.3992, final= 0.3003 (base + 0.23*delta = 0.3003)
+    Joint 3: base= 1.3762, delta=-0.1586, final= 1.3390 (base + 0.23*delta = 1.3390)
+    Joint 4: base= 0.4812, delta= 0.2723, final= 0.5450 (base + 0.23*delta = 0.5450)
+
+  Gripper (5):
+    base:  0.0066
+    delta:  0.0545
+    continuous (base + 0.23*delta):  0.0193
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4224, std= 0.0583, min= 0.3812, max= 0.4637, positive=100.0%
+      Joint 1: mean=-0.0889, std= 0.0283, min=-0.1089, max=-0.0689, positive=0.0%
+      Joint 2: mean= 0.3344, std= 0.0916, min= 0.2697, max= 0.3992, positive=100.0%
+      Joint 3: mean=-0.1072, std= 0.0727, min=-0.1586, max=-0.0558, positive=0.0%
+      Joint 4: mean= 0.2723, std= 0.0001, min= 0.2722, max= 0.2723, positive=100.0%
+    Gripper (5): mean= 0.1256, std= 0.1006, min= 0.0545, max= 0.1968, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.7574, std= 0.1045
+      Joint 1: mean=-0.2633, std= 0.0838
+      Joint 2: mean= 0.7073, std= 0.1937
+      Joint 3: mean=-0.4192, std= 0.2841
+      Joint 4: mean= 0.4304, std= 0.0002
+    Gripper (5): mean= 0.6985, std= 0.5593
+
+[Step  40] Action Debug (env 0):
+  alpha: 0.2342
+
+  Joints (0-4):
+    Joint 0: base=-0.8031, delta= 0.0671, final=-0.7873 (base + 0.23*delta = -0.7873)
+    Joint 1: base=-0.0031, delta=-0.0248, final=-0.0089 (base + 0.23*delta = -0.0089)
+    Joint 2: base= 0.2623, delta= 0.2590, final= 0.3230 (base + 0.23*delta = 0.3230)
+    Joint 3: base= 1.3279, delta=-0.1469, final= 1.2935 (base + 0.23*delta = 1.2935)
+    Joint 4: base= 0.6415, delta=-0.1036, final= 0.6173 (base + 0.23*delta = 0.6173)
+
+  Gripper (5):
+    base:  0.0202
+    delta:  0.2480
+    continuous (base + 0.23*delta):  0.0783
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1297, std= 0.0885, min= 0.0671, max= 0.1923, positive=100.0%
+      Joint 1: mean= 0.0564, std= 0.1149, min=-0.0248, max= 0.1376, positive=50.0%
+      Joint 2: mean= 0.2144, std= 0.0631, min= 0.1698, max= 0.2590, positive=100.0%
+      Joint 3: mean=-0.0671, std= 0.1128, min=-0.1469, max= 0.0126, positive=50.0%
+      Joint 4: mean=-0.0107, std= 0.1314, min=-0.1036, max= 0.0822, positive=50.0%
+    Gripper (5): mean= 0.2435, std= 0.0063, min= 0.2391, max= 0.2480, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2325, std= 0.1587
+      Joint 1: mean= 0.1671, std= 0.3402
+      Joint 2: mean= 0.4535, std= 0.1334
+      Joint 3: mean=-0.2625, std= 0.4408
+      Joint 4: mean=-0.0170, std= 0.2077
+    Gripper (5): mean= 1.3540, std= 0.0348
+
+[Step  50] Action Debug (env 0):
+  alpha: 0.2342
+
+  Joints (0-4):
+    Joint 0: base=-0.8113, delta= 0.3753, final=-0.7234 (base + 0.23*delta = -0.7234)
+    Joint 1: base=-0.0380, delta= 0.2220, final= 0.0140 (base + 0.23*delta = 0.0140)
+    Joint 2: base= 0.2822, delta= 0.0607, final= 0.2964 (base + 0.23*delta = 0.2964)
+    Joint 3: base= 1.3225, delta=-0.2284, final= 1.2691 (base + 0.23*delta = 1.2691)
+    Joint 4: base= 0.7084, delta=-0.1054, final= 0.6838 (base + 0.23*delta = 0.6838)
+
+  Gripper (5):
+    base: -0.0068
+    delta:  0.1027
+    continuous (base + 0.23*delta):  0.0172
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3271, std= 0.0682, min= 0.2789, max= 0.3753, positive=100.0%
+      Joint 1: mean= 0.2385, std= 0.0232, min= 0.2220, max= 0.2549, positive=100.0%
+      Joint 2: mean= 0.1211, std= 0.0855, min= 0.0607, max= 0.1816, positive=100.0%
+      Joint 3: mean=-0.0487, std= 0.2540, min=-0.2284, max= 0.1309, positive=50.0%
+      Joint 4: mean=-0.3261, std= 0.3121, min=-0.5468, max=-0.1054, positive=0.0%
+    Gripper (5): mean= 0.0931, std= 0.0136, min= 0.0835, max= 0.1027, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.5864, std= 0.1222
+      Joint 1: mean= 0.7064, std= 0.0688
+      Joint 2: mean= 0.2562, std= 0.1808
+      Joint 3: mean=-0.1905, std= 0.9931
+      Joint 4: mean=-0.5155, std= 0.4934
+    Gripper (5): mean= 0.5178, std= 0.0754
+
+[Step  60] Action Debug (env 0):
+  alpha: 0.2342
+
+  Joints (0-4):
+    Joint 0: base=-0.8824, delta= 0.2298, final=-0.8286 (base + 0.23*delta = -0.8286)
+    Joint 1: base=-0.0083, delta= 0.0023, final=-0.0078 (base + 0.23*delta = -0.0078)
+    Joint 2: base= 0.2526, delta= 0.5103, final= 0.3721 (base + 0.23*delta = 0.3721)
+    Joint 3: base= 1.3443, delta= 0.1602, final= 1.3818 (base + 0.23*delta = 1.3818)
+    Joint 4: base= 0.5724, delta=-0.0982, final= 0.5494 (base + 0.23*delta = 0.5494)
+
+  Gripper (5):
+    base:  0.0168
+    delta:  0.0338
+    continuous (base + 0.23*delta):  0.0248
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3242, std= 0.1335, min= 0.2298, max= 0.4186, positive=100.0%
+      Joint 1: mean=-0.0307, std= 0.0467, min=-0.0638, max= 0.0023, positive=50.0%
+      Joint 2: mean= 0.3647, std= 0.2059, min= 0.2191, max= 0.5103, positive=100.0%
+      Joint 3: mean=-0.0386, std= 0.2811, min=-0.2373, max= 0.1602, positive=50.0%
+      Joint 4: mean= 0.0887, std= 0.2644, min=-0.0982, max= 0.2757, positive=50.0%
+    Gripper (5): mean= 0.0912, std= 0.0811, min= 0.0338, max= 0.1485, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.5812, std= 0.2393
+      Joint 1: mean=-0.0910, std= 0.1385
+      Joint 2: mean= 0.7714, std= 0.4355
+      Joint 3: mean=-0.1507, std= 1.0987
+      Joint 4: mean= 0.1402, std= 0.4179
+    Gripper (5): mean= 0.5070, std= 0.4511
+
+[Step  70] Action Debug (env 0):
+  alpha: 0.2342
+
+  Joints (0-4):
+    Joint 0: base=-0.8606, delta= 0.5184, final=-0.7391 (base + 0.23*delta = -0.7391)
+    Joint 1: base=-0.0092, delta= 0.2129, final= 0.0407 (base + 0.23*delta = 0.0407)
+    Joint 2: base= 0.2448, delta= 0.4787, final= 0.3569 (base + 0.23*delta = 0.3569)
+    Joint 3: base= 1.3418, delta=-0.1874, final= 1.2979 (base + 0.23*delta = 1.2979)
+    Joint 4: base= 0.6746, delta=-0.1446, final= 0.6407 (base + 0.23*delta = 0.6407)
+
+  Gripper (5):
+    base: -0.0043
+    delta:  0.2385
+    continuous (base + 0.23*delta):  0.0515
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4419, std= 0.1082, min= 0.3654, max= 0.5184, positive=100.0%
+      Joint 1: mean= 0.0978, std= 0.1627, min=-0.0173, max= 0.2129, positive=50.0%
+      Joint 2: mean= 0.1948, std= 0.4015, min=-0.0891, max= 0.4787, positive=50.0%
+      Joint 3: mean=-0.0939, std= 0.1321, min=-0.1874, max=-0.0005, positive=0.0%
+      Joint 4: mean=-0.2134, std= 0.0973, min=-0.2822, max=-0.1446, positive=0.0%
+    Gripper (5): mean= 0.3118, std= 0.1037, min= 0.2385, max= 0.3851, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.7923, std= 0.1939
+      Joint 1: mean= 0.2897, std= 0.4821
+      Joint 2: mean= 0.4121, std= 0.8493
+      Joint 3: mean=-0.3672, std= 0.5165
+      Joint 4: mean=-0.3374, std= 0.1537
+    Gripper (5): mean= 1.7336, std= 0.5764
+
+[Step  80] Action Debug (env 0):
+  alpha: 0.2342
+
+  Joints (0-4):
+    Joint 0: base=-0.8148, delta= 0.0139, final=-0.8115 (base + 0.23*delta = -0.8115)
+    Joint 1: base= 0.0236, delta=-0.0661, final= 0.0082 (base + 0.23*delta = 0.0082)
+    Joint 2: base= 0.2403, delta= 0.2543, final= 0.2999 (base + 0.23*delta = 0.2999)
+    Joint 3: base= 1.3377, delta= 0.0561, final= 1.3509 (base + 0.23*delta = 1.3509)
+    Joint 4: base= 0.6670, delta= 0.3608, final= 0.7515 (base + 0.23*delta = 0.7515)
+
+  Gripper (5):
+    base:  0.0080
+    delta:  0.1258
+    continuous (base + 0.23*delta):  0.0374
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0966, std= 0.1170, min= 0.0139, max= 0.1794, positive=100.0%
+      Joint 1: mean= 0.0842, std= 0.2126, min=-0.0661, max= 0.2346, positive=50.0%
+      Joint 2: mean= 0.2404, std= 0.0195, min= 0.2266, max= 0.2543, positive=100.0%
+      Joint 3: mean= 0.0412, std= 0.0211, min= 0.0263, max= 0.0561, positive=100.0%
+      Joint 4: mean=-0.0427, std= 0.5706, min=-0.4462, max= 0.3608, positive=50.0%
+    Gripper (5): mean= 0.1551, std= 0.0415, min= 0.1258, max= 0.1845, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1733, std= 0.2098
+      Joint 1: mean= 0.2496, std= 0.6298
+      Joint 2: mean= 0.5086, std= 0.0413
+      Joint 3: mean= 0.1611, std= 0.0826
+      Joint 4: mean=-0.0675, std= 0.9020
+    Gripper (5): mean= 0.8624, std= 0.2308
+
+[Step  90] Action Debug (env 0):
+  alpha: 0.2342
+
+  Joints (0-4):
+    Joint 0: base=-0.8704, delta= 0.1392, final=-0.8378 (base + 0.23*delta = -0.8378)
+    Joint 1: base=-0.0462, delta= 0.2319, final= 0.0081 (base + 0.23*delta = 0.0081)
+    Joint 2: base= 0.2895, delta= 0.0249, final= 0.2953 (base + 0.23*delta = 0.2953)
+    Joint 3: base= 1.2845, delta= 0.0381, final= 1.2934 (base + 0.23*delta = 1.2934)
+    Joint 4: base= 0.6065, delta= 0.3580, final= 0.6903 (base + 0.23*delta = 0.6903)
+
+  Gripper (5):
+    base:  0.0126
+    delta:  0.1165
+    continuous (base + 0.23*delta):  0.0399
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1069, std= 0.0456, min= 0.0746, max= 0.1392, positive=100.0%
+      Joint 1: mean= 0.2212, std= 0.0150, min= 0.2106, max= 0.2319, positive=100.0%
+      Joint 2: mean= 0.2173, std= 0.2721, min= 0.0249, max= 0.4097, positive=100.0%
+      Joint 3: mean=-0.0081, std= 0.0653, min=-0.0543, max= 0.0381, positive=50.0%
+      Joint 4: mean=-0.0234, std= 0.5393, min=-0.4047, max= 0.3580, positive=50.0%
+    Gripper (5): mean= 0.1486, std= 0.0454, min= 0.1165, max= 0.1808, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1917, std= 0.0818
+      Joint 1: mean= 0.6554, std= 0.0445
+      Joint 2: mean= 0.4596, std= 0.5755
+      Joint 3: mean=-0.0316, std= 0.2554
+      Joint 4: mean=-0.0370, std= 0.8525
+    Gripper (5): mean= 0.8265, std= 0.2526
+
+[Step 100] Action Debug (env 0):
+  alpha: 0.2342
+
+  Joints (0-4):
+    Joint 0: base=-0.8504, delta= 0.2767, final=-0.7856 (base + 0.23*delta = -0.7856)
+    Joint 1: base=-0.0427, delta= 0.0170, final=-0.0387 (base + 0.23*delta = -0.0387)
+    Joint 2: base= 0.2711, delta= 0.1817, final= 0.3136 (base + 0.23*delta = 0.3136)
+    Joint 3: base= 1.3093, delta=-0.1295, final= 1.2790 (base + 0.23*delta = 1.2790)
+    Joint 4: base= 0.6627, delta= 0.1745, final= 0.7036 (base + 0.23*delta = 0.7036)
+
+  Gripper (5):
+    base: -0.0126
+    delta:  0.2118
+    continuous (base + 0.23*delta):  0.0370
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4034, std= 0.1792, min= 0.2767, max= 0.5301, positive=100.0%
+      Joint 1: mean= 0.0580, std= 0.0580, min= 0.0170, max= 0.0990, positive=100.0%
+      Joint 2: mean= 0.2978, std= 0.1643, min= 0.1817, max= 0.4140, positive=100.0%
+      Joint 3: mean=-0.0742, std= 0.0782, min=-0.1295, max=-0.0189, positive=0.0%
+      Joint 4: mean= 0.1496, std= 0.0352, min= 0.1247, max= 0.1745, positive=100.0%
+    Gripper (5): mean= 0.2541, std= 0.0598, min= 0.2118, max= 0.2964, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.7232, std= 0.3213
+      Joint 1: mean= 0.1718, std= 0.1717
+      Joint 2: mean= 0.6299, std= 0.3475
+      Joint 3: mean=-0.2900, std= 0.3058
+      Joint 4: mean= 0.2364, std= 0.0556
+    Gripper (5): mean= 1.4127, std= 0.3325
+
+[Step 110] Action Debug (env 0):
+  alpha: 0.2342
+
+  Joints (0-4):
+    Joint 0: base=-0.8377, delta= 0.0334, final=-0.8299 (base + 0.23*delta = -0.8299)
+    Joint 1: base=-0.0118, delta=-0.1655, final=-0.0506 (base + 0.23*delta = -0.0506)
+    Joint 2: base= 0.2502, delta= 0.3450, final= 0.3310 (base + 0.23*delta = 0.3310)
+    Joint 3: base= 1.3292, delta=-0.1611, final= 1.2915 (base + 0.23*delta = 1.2915)
+    Joint 4: base= 0.6095, delta=-0.4362, final= 0.5074 (base + 0.23*delta = 0.5074)
+
+  Gripper (5):
+    base:  0.0076
+    delta: -0.0183
+    continuous (base + 0.23*delta):  0.0033
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1436, std= 0.1559, min= 0.0334, max= 0.2538, positive=100.0%
+      Joint 1: mean=-0.0948, std= 0.1000, min=-0.1655, max=-0.0241, positive=0.0%
+      Joint 2: mean= 0.1561, std= 0.2671, min=-0.0327, max= 0.3450, positive=50.0%
+      Joint 3: mean=-0.0157, std= 0.2056, min=-0.1611, max= 0.1297, positive=50.0%
+      Joint 4: mean=-0.1157, std= 0.4532, min=-0.4362, max= 0.2048, positive=50.0%
+    Gripper (5): mean= 0.0415, std= 0.0845, min=-0.0183, max= 0.1012, positive=50.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2575, std= 0.2795
+      Joint 1: mean=-0.2809, std= 0.2963
+      Joint 2: mean= 0.3302, std= 0.5649
+      Joint 3: mean=-0.0613, std= 0.8037
+      Joint 4: mean=-0.1829, std= 0.7164
+    Gripper (5): mean= 0.2305, std= 0.4699
+
+[Step 120] Action Debug (env 0):
+  alpha: 0.2342
+
+  Joints (0-4):
+    Joint 0: base=-0.8120, delta= 0.7302, final=-0.6409 (base + 0.23*delta = -0.6409)
+    Joint 1: base=-0.0111, delta= 0.2031, final= 0.0365 (base + 0.23*delta = 0.0365)
+    Joint 2: base= 0.2331, delta= 0.4086, final= 0.3288 (base + 0.23*delta = 0.3288)
+    Joint 3: base= 1.3395, delta=-0.0142, final= 1.3361 (base + 0.23*delta = 1.3361)
+    Joint 4: base= 0.6653, delta=-0.3719, final= 0.5782 (base + 0.23*delta = 0.5782)
+
+  Gripper (5):
+    base:  0.0360
+    delta:  0.1411
+    continuous (base + 0.23*delta):  0.0691
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.5503, std= 0.2544, min= 0.3704, max= 0.7302, positive=100.0%
+      Joint 1: mean= 0.1591, std= 0.0622, min= 0.1152, max= 0.2031, positive=100.0%
+      Joint 2: mean= 0.4933, std= 0.1197, min= 0.4086, max= 0.5779, positive=100.0%
+      Joint 3: mean=-0.0424, std= 0.0398, min=-0.0705, max=-0.0142, positive=0.0%
+      Joint 4: mean=-0.2965, std= 0.1066, min=-0.3719, max=-0.2211, positive=0.0%
+    Gripper (5): mean= 0.2200, std= 0.1116, min= 0.1411, max= 0.2989, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.9866, std= 0.4561
+      Joint 1: mean= 0.4714, std= 0.1842
+      Joint 2: mean= 1.0433, std= 0.2531
+      Joint 3: mean=-0.1656, std= 0.1555
+      Joint 4: mean=-0.4687, std= 0.1686
+    Gripper (5): mean= 1.2232, std= 0.6204
+[Iter   19] steps=   4940 | ep_reward=   2.75 | rollout_reward= 0.0086 | episodes= 38 | done_pct=  0.0% | early_done=  0.0% | loss=710.9957 | alpha=0.242
+
+[Step   0] Action Debug (env 0):
+  alpha: 0.2416
+
+  Joints (0-4):
+    Joint 0: base=-0.8821, delta=-0.2503, final=-0.9426 (base + 0.24*delta = -0.9426)
+    Joint 1: base= 0.0438, delta= 0.1345, final= 0.0763 (base + 0.24*delta = 0.0763)
+    Joint 2: base= 0.2694, delta= 0.1410, final= 0.3035 (base + 0.24*delta = 0.3035)
+    Joint 3: base= 1.2889, delta= 0.0238, final= 1.2947 (base + 0.24*delta = 1.2947)
+    Joint 4: base= 0.6398, delta= 0.0488, final= 0.6516 (base + 0.24*delta = 0.6516)
+
+  Gripper (5):
+    base:  0.0116
+    delta:  0.0863
+    continuous (base + 0.24*delta):  0.0325
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2646, std= 0.7282, min=-0.2503, max= 0.7795, positive=50.0%
+      Joint 1: mean=-0.0803, std= 0.3039, min=-0.2952, max= 0.1345, positive=50.0%
+      Joint 2: mean= 0.2759, std= 0.1907, min= 0.1410, max= 0.4107, positive=100.0%
+      Joint 3: mean=-0.0335, std= 0.0810, min=-0.0908, max= 0.0238, positive=50.0%
+      Joint 4: mean=-0.1820, std= 0.3263, min=-0.4127, max= 0.0488, positive=50.0%
+    Gripper (5): mean= 0.1615, std= 0.1063, min= 0.0863, max= 0.2366, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4744, std= 1.3055
+      Joint 1: mean=-0.2380, std= 0.9002
+      Joint 2: mean= 0.5834, std= 0.4034
+      Joint 3: mean=-0.1310, std= 0.3168
+      Joint 4: mean=-0.2876, std= 0.5158
+    Gripper (5): mean= 0.8979, std= 0.5910
+
+[Step  10] Action Debug (env 0):
+  alpha: 0.2416
+
+  Joints (0-4):
+    Joint 0: base=-0.7687, delta= 0.7146, final=-0.5960 (base + 0.24*delta = -0.5960)
+    Joint 1: base=-0.0544, delta= 0.0274, final=-0.0477 (base + 0.24*delta = -0.0477)
+    Joint 2: base= 0.3536, delta=-0.1305, final= 0.3221 (base + 0.24*delta = 0.3221)
+    Joint 3: base= 1.3359, delta= 0.0777, final= 1.3547 (base + 0.24*delta = 1.3547)
+    Joint 4: base= 0.6355, delta= 0.3130, final= 0.7111 (base + 0.24*delta = 0.7111)
+
+  Gripper (5):
+    base:  0.0253
+    delta:  0.1006
+    continuous (base + 0.24*delta):  0.0496
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4314, std= 0.4005, min= 0.1482, max= 0.7146, positive=100.0%
+      Joint 1: mean= 0.1032, std= 0.1072, min= 0.0274, max= 0.1790, positive=100.0%
+      Joint 2: mean= 0.0350, std= 0.2340, min=-0.1305, max= 0.2004, positive=50.0%
+      Joint 3: mean= 0.0512, std= 0.0375, min= 0.0247, max= 0.0777, positive=100.0%
+      Joint 4: mean=-0.0977, std= 0.5807, min=-0.5083, max= 0.3130, positive=50.0%
+    Gripper (5): mean= 0.0891, std= 0.0163, min= 0.0775, max= 0.1006, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.7735, std= 0.7180
+      Joint 1: mean= 0.3057, std= 0.3175
+      Joint 2: mean= 0.0740, std= 0.4949
+      Joint 3: mean= 0.2002, std= 0.1467
+      Joint 4: mean=-0.1544, std= 0.9180
+    Gripper (5): mean= 0.4952, std= 0.0909
+
+[Step  20] Action Debug (env 0):
+  alpha: 0.2416
+
+  Joints (0-4):
+    Joint 0: base= 0.2875, delta= 0.3028, final= 0.3606 (base + 0.24*delta = 0.3606)
+    Joint 1: base= 0.1830, delta=-0.1265, final= 0.1524 (base + 0.24*delta = 0.1524)
+    Joint 2: base=-0.0057, delta= 0.2698, final= 0.0595 (base + 0.24*delta = 0.0595)
+    Joint 3: base= 1.1958, delta= 0.1326, final= 1.2278 (base + 0.24*delta = 1.2278)
+    Joint 4: base= 1.3240, delta= 0.2604, final= 1.3869 (base + 0.24*delta = 1.3869)
+
+  Gripper (5):
+    base: -0.0052
+    delta:  0.1807
+    continuous (base + 0.24*delta):  0.0385
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3893, std= 0.1223, min= 0.3028, max= 0.4758, positive=100.0%
+      Joint 1: mean= 0.0144, std= 0.1993, min=-0.1265, max= 0.1553, positive=50.0%
+      Joint 2: mean= 0.2520, std= 0.0251, min= 0.2343, max= 0.2698, positive=100.0%
+      Joint 3: mean= 0.1550, std= 0.0317, min= 0.1326, max= 0.1775, positive=100.0%
+      Joint 4: mean=-0.0045, std= 0.3746, min=-0.2694, max= 0.2604, positive=50.0%
+    Gripper (5): mean= 0.2237, std= 0.0608, min= 0.1807, max= 0.2667, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.6980, std= 0.2193
+      Joint 1: mean= 0.0428, std= 0.5903
+      Joint 2: mean= 0.5331, std= 0.0531
+      Joint 3: mean= 0.6060, std= 0.1241
+      Joint 4: mean=-0.0071, std= 0.5921
+    Gripper (5): mean= 1.2437, std= 0.3380
+
+[Step  30] Action Debug (env 0):
+  alpha: 0.2416
+
+  Joints (0-4):
+    Joint 0: base= 0.3872, delta= 0.4665, final= 0.4999 (base + 0.24*delta = 0.4999)
+    Joint 1: base= 0.2225, delta= 0.1025, final= 0.2472 (base + 0.24*delta = 0.2472)
+    Joint 2: base= 0.0503, delta= 0.1683, final= 0.0910 (base + 0.24*delta = 0.0910)
+    Joint 3: base= 1.0992, delta=-0.1847, final= 1.0546 (base + 0.24*delta = 1.0546)
+    Joint 4: base= 1.6237, delta=-0.1166, final= 1.5956 (base + 0.24*delta = 1.5956)
+
+  Gripper (5):
+    base:  0.0227
+    delta:  0.2512
+    continuous (base + 0.24*delta):  0.0834
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3981, std= 0.0966, min= 0.3298, max= 0.4665, positive=100.0%
+      Joint 1: mean= 0.1070, std= 0.0064, min= 0.1025, max= 0.1115, positive=100.0%
+      Joint 2: mean= 0.2021, std= 0.0479, min= 0.1683, max= 0.2360, positive=100.0%
+      Joint 3: mean=-0.1937, std= 0.0128, min=-0.2028, max=-0.1847, positive=0.0%
+      Joint 4: mean=-0.1095, std= 0.0100, min=-0.1166, max=-0.1025, positive=0.0%
+    Gripper (5): mean= 0.1954, std= 0.0789, min= 0.1396, max= 0.2512, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.7138, std= 0.1732
+      Joint 1: mean= 0.3169, std= 0.0190
+      Joint 2: mean= 0.4275, std= 0.1013
+      Joint 3: mean=-0.7573, std= 0.0501
+      Joint 4: mean=-0.1731, std= 0.0158
+    Gripper (5): mean= 1.0864, std= 0.4389
+
+[Step  40] Action Debug (env 0):
+  alpha: 0.2416
+
+  Joints (0-4):
+    Joint 0: base= 0.3710, delta=-0.2815, final= 0.3030 (base + 0.24*delta = 0.3030)
+    Joint 1: base= 0.1637, delta=-0.0472, final= 0.1523 (base + 0.24*delta = 0.1523)
+    Joint 2: base= 0.1341, delta= 0.2511, final= 0.1947 (base + 0.24*delta = 0.1947)
+    Joint 3: base= 1.0143, delta= 0.5225, final= 1.1405 (base + 0.24*delta = 1.1405)
+    Joint 4: base= 1.5789, delta=-0.2637, final= 1.5151 (base + 0.24*delta = 1.5151)
+
+  Gripper (5):
+    base: -0.0016
+    delta:  0.2190
+    continuous (base + 0.24*delta):  0.0514
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.0265, std= 0.3607, min=-0.2815, max= 0.2285, positive=50.0%
+      Joint 1: mean= 0.0673, std= 0.1619, min=-0.0472, max= 0.1818, positive=50.0%
+      Joint 2: mean= 0.2108, std= 0.0569, min= 0.1706, max= 0.2511, positive=100.0%
+      Joint 3: mean= 0.2980, std= 0.3175, min= 0.0735, max= 0.5225, positive=100.0%
+      Joint 4: mean=-0.1704, std= 0.1319, min=-0.2637, max=-0.0772, positive=0.0%
+    Gripper (5): mean= 0.1199, std= 0.1402, min= 0.0207, max= 0.2190, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.0475, std= 0.6466
+      Joint 1: mean= 0.1994, std= 0.4796
+      Joint 2: mean= 0.4459, std= 0.1204
+      Joint 3: mean= 1.1651, std= 1.2413
+      Joint 4: mean=-0.2694, std= 0.2085
+    Gripper (5): mean= 0.6666, std= 0.7796
+
+[Step  50] Action Debug (env 0):
+  alpha: 0.2416
+
+  Joints (0-4):
+    Joint 0: base= 0.3669, delta= 0.0939, final= 0.3896 (base + 0.24*delta = 0.3896)
+    Joint 1: base= 0.1647, delta= 0.0232, final= 0.1703 (base + 0.24*delta = 0.1703)
+    Joint 2: base= 0.1693, delta= 0.0822, final= 0.1892 (base + 0.24*delta = 0.1892)
+    Joint 3: base= 0.9834, delta=-0.1380, final= 0.9500 (base + 0.24*delta = 0.9500)
+    Joint 4: base= 1.4784, delta= 0.2635, final= 1.5421 (base + 0.24*delta = 1.5421)
+
+  Gripper (5):
+    base: -0.0610
+    delta:  0.1455
+    continuous (base + 0.24*delta): -0.0258
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1719, std= 0.1102, min= 0.0939, max= 0.2498, positive=100.0%
+      Joint 1: mean= 0.0731, std= 0.0706, min= 0.0232, max= 0.1231, positive=100.0%
+      Joint 2: mean= 0.2364, std= 0.2181, min= 0.0822, max= 0.3906, positive=100.0%
+      Joint 3: mean=-0.0796, std= 0.0826, min=-0.1380, max=-0.0212, positive=0.0%
+      Joint 4: mean= 0.2820, std= 0.0261, min= 0.2635, max= 0.3004, positive=100.0%
+    Gripper (5): mean= 0.0878, std= 0.0815, min= 0.0302, max= 0.1455, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3081, std= 0.1976
+      Joint 1: mean= 0.2167, std= 0.2093
+      Joint 2: mean= 0.5000, std= 0.4613
+      Joint 3: mean=-0.3112, std= 0.3231
+      Joint 4: mean= 0.4457, std= 0.0413
+    Gripper (5): mean= 0.4884, std= 0.4533
+
+[Step  60] Action Debug (env 0):
+  alpha: 0.2416
+
+  Joints (0-4):
+    Joint 0: base= 0.2649, delta=-0.2346, final= 0.2082 (base + 0.24*delta = 0.2082)
+    Joint 1: base= 0.1176, delta= 0.2093, final= 0.1682 (base + 0.24*delta = 0.1682)
+    Joint 2: base= 0.1697, delta= 0.5595, final= 0.3049 (base + 0.24*delta = 0.3049)
+    Joint 3: base= 1.0457, delta=-0.1290, final= 1.0145 (base + 0.24*delta = 1.0145)
+    Joint 4: base= 1.3879, delta=-0.3344, final= 1.3071 (base + 0.24*delta = 1.3071)
+
+  Gripper (5):
+    base: -0.0803
+    delta:  0.2500
+    continuous (base + 0.24*delta): -0.0199
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.1921, std= 0.0602, min=-0.2346, max=-0.1495, positive=0.0%
+      Joint 1: mean=-0.0192, std= 0.3232, min=-0.2477, max= 0.2093, positive=50.0%
+      Joint 2: mean= 0.3877, std= 0.2429, min= 0.2160, max= 0.5595, positive=100.0%
+      Joint 3: mean=-0.0218, std= 0.1515, min=-0.1290, max= 0.0853, positive=50.0%
+      Joint 4: mean=-0.2648, std= 0.0985, min=-0.3344, max=-0.1951, positive=0.0%
+    Gripper (5): mean= 0.2459, std= 0.0058, min= 0.2418, max= 0.2500, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.3443, std= 0.1079
+      Joint 1: mean=-0.0569, std= 0.9574
+      Joint 2: mean= 0.8200, std= 0.5137
+      Joint 3: mean=-0.0853, std= 0.5924
+      Joint 4: mean=-0.4185, std= 0.1558
+    Gripper (5): mean= 1.3674, std= 0.0322
+
+[Step  70] Action Debug (env 0):
+  alpha: 0.2416
+
+  Joints (0-4):
+    Joint 0: base= 0.3832, delta=-0.0368, final= 0.3743 (base + 0.24*delta = 0.3743)
+    Joint 1: base= 0.2360, delta= 0.0150, final= 0.2396 (base + 0.24*delta = 0.2396)
+    Joint 2: base= 0.0980, delta= 0.0243, final= 0.1039 (base + 0.24*delta = 0.1039)
+    Joint 3: base= 0.9988, delta=-0.0263, final= 0.9925 (base + 0.24*delta = 0.9925)
+    Joint 4: base= 1.4632, delta=-0.0443, final= 1.4525 (base + 0.24*delta = 1.4525)
+
+  Gripper (5):
+    base:  0.0069
+    delta:  0.3687
+    continuous (base + 0.24*delta):  0.0960
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.0571, std= 0.0287, min=-0.0774, max=-0.0368, positive=0.0%
+      Joint 1: mean=-0.0982, std= 0.1601, min=-0.2114, max= 0.0150, positive=50.0%
+      Joint 2: mean= 0.0733, std= 0.0692, min= 0.0243, max= 0.1222, positive=100.0%
+      Joint 3: mean=-0.0396, std= 0.0188, min=-0.0529, max=-0.0263, positive=0.0%
+      Joint 4: mean=-0.1733, std= 0.1824, min=-0.3022, max=-0.0443, positive=0.0%
+    Gripper (5): mean= 0.2608, std= 0.1525, min= 0.1530, max= 0.3687, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.1024, std= 0.0515
+      Joint 1: mean=-0.2908, std= 0.4744
+      Joint 2: mean= 0.1550, std= 0.1465
+      Joint 3: mean=-0.1547, std= 0.0735
+      Joint 4: mean=-0.2739, std= 0.2883
+    Gripper (5): mean= 1.4503, std= 0.8478
+
+[Step  80] Action Debug (env 0):
+  alpha: 0.2416
+
+  Joints (0-4):
+    Joint 0: base= 0.4518, delta= 0.1191, final= 0.4806 (base + 0.24*delta = 0.4806)
+    Joint 1: base= 0.1298, delta= 0.0558, final= 0.1433 (base + 0.24*delta = 0.1433)
+    Joint 2: base= 0.2109, delta=-0.3772, final= 0.1197 (base + 0.24*delta = 0.1197)
+    Joint 3: base= 1.0389, delta=-0.0424, final= 1.0286 (base + 0.24*delta = 1.0286)
+    Joint 4: base= 1.5298, delta= 0.0195, final= 1.5345 (base + 0.24*delta = 1.5345)
+
+  Gripper (5):
+    base:  0.0276
+    delta:  0.2222
+    continuous (base + 0.24*delta):  0.0813
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3287, std= 0.2964, min= 0.1191, max= 0.5384, positive=100.0%
+      Joint 1: mean= 0.0016, std= 0.0767, min=-0.0527, max= 0.0558, positive=50.0%
+      Joint 2: mean=-0.0171, std= 0.5093, min=-0.3772, max= 0.3431, positive=50.0%
+      Joint 3: mean=-0.0691, std= 0.0377, min=-0.0958, max=-0.0424, positive=0.0%
+      Joint 4: mean=-0.1952, std= 0.3037, min=-0.4099, max= 0.0195, positive=50.0%
+    Gripper (5): mean= 0.1264, std= 0.1355, min= 0.0306, max= 0.2222, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.5894, std= 0.5315
+      Joint 1: mean= 0.0047, std= 0.2273
+      Joint 2: mean=-0.0361, std= 1.0772
+      Joint 3: mean=-0.2703, std= 0.1476
+      Joint 4: mean=-0.3086, std= 0.4800
+    Gripper (5): mean= 0.7027, std= 0.7533
+
+[Step  90] Action Debug (env 0):
+  alpha: 0.2416
+
+  Joints (0-4):
+    Joint 0: base= 0.3201, delta= 0.3910, final= 0.4146 (base + 0.24*delta = 0.4146)
+    Joint 1: base= 0.2143, delta= 0.1922, final= 0.2607 (base + 0.24*delta = 0.2607)
+    Joint 2: base= 0.0636, delta= 0.3858, final= 0.1568 (base + 0.24*delta = 0.1568)
+    Joint 3: base= 1.0426, delta= 0.0868, final= 1.0636 (base + 0.24*delta = 1.0636)
+    Joint 4: base= 1.5880, delta=-0.3553, final= 1.5021 (base + 0.24*delta = 1.5021)
+
+  Gripper (5):
+    base: -0.0350
+    delta:  0.0607
+    continuous (base + 0.24*delta): -0.0204
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4511, std= 0.0850, min= 0.3910, max= 0.5112, positive=100.0%
+      Joint 1: mean= 0.0992, std= 0.1316, min= 0.0062, max= 0.1922, positive=100.0%
+      Joint 2: mean= 0.4894, std= 0.1466, min= 0.3858, max= 0.5931, positive=100.0%
+      Joint 3: mean= 0.1026, std= 0.0225, min= 0.0868, max= 0.1185, positive=100.0%
+      Joint 4: mean=-0.0919, std= 0.3725, min=-0.3553, max= 0.1715, positive=50.0%
+    Gripper (5): mean= 0.0986, std= 0.0536, min= 0.0607, max= 0.1364, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.8088, std= 0.1524
+      Joint 1: mean= 0.2938, std= 0.3897
+      Joint 2: mean= 1.0352, std= 0.3100
+      Joint 3: mean= 0.4012, std= 0.0878
+      Joint 4: mean=-0.1453, std= 0.5888
+    Gripper (5): mean= 0.5480, std= 0.2978
+
+[Step 100] Action Debug (env 0):
+  alpha: 0.2416
+
+  Joints (0-4):
+    Joint 0: base= 0.4061, delta=-0.0118, final= 0.4032 (base + 0.24*delta = 0.4032)
+    Joint 1: base= 0.1718, delta=-0.1651, final= 0.1319 (base + 0.24*delta = 0.1319)
+    Joint 2: base= 0.2217, delta=-0.1218, final= 0.1922 (base + 0.24*delta = 0.1922)
+    Joint 3: base= 1.0189, delta=-0.0832, final= 0.9988 (base + 0.24*delta = 0.9988)
+    Joint 4: base= 1.5113, delta= 0.0536, final= 1.5243 (base + 0.24*delta = 1.5243)
+
+  Gripper (5):
+    base: -0.0502
+    delta:  0.1179
+    continuous (base + 0.24*delta): -0.0217
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0751, std= 0.1229, min=-0.0118, max= 0.1621, positive=50.0%
+      Joint 1: mean=-0.0090, std= 0.2208, min=-0.1651, max= 0.1472, positive=50.0%
+      Joint 2: mean= 0.0769, std= 0.2809, min=-0.1218, max= 0.2755, positive=50.0%
+      Joint 3: mean= 0.0300, std= 0.1600, min=-0.0832, max= 0.1431, positive=50.0%
+      Joint 4: mean=-0.0542, std= 0.1524, min=-0.1619, max= 0.0536, positive=50.0%
+    Gripper (5): mean= 0.1404, std= 0.0319, min= 0.1179, max= 0.1630, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1347, std= 0.2204
+      Joint 1: mean=-0.0266, std= 0.6541
+      Joint 2: mean= 0.1626, std= 0.5942
+      Joint 3: mean= 0.1172, std= 0.6255
+      Joint 4: mean=-0.0856, std= 0.2409
+    Gripper (5): mean= 0.7809, std= 0.1773
+
+[Step 110] Action Debug (env 0):
+  alpha: 0.2416
+
+  Joints (0-4):
+    Joint 0: base= 0.3420, delta= 0.2633, final= 0.4057 (base + 0.24*delta = 0.4057)
+    Joint 1: base= 0.2048, delta= 0.0626, final= 0.2200 (base + 0.24*delta = 0.2200)
+    Joint 2: base= 0.0499, delta=-0.2453, final=-0.0094 (base + 0.24*delta = -0.0094)
+    Joint 3: base= 0.9780, delta= 0.0474, final= 0.9894 (base + 0.24*delta = 0.9894)
+    Joint 4: base= 1.5686, delta=-0.0716, final= 1.5513 (base + 0.24*delta = 1.5513)
+
+  Gripper (5):
+    base: -0.0223
+    delta:  0.2026
+    continuous (base + 0.24*delta):  0.0267
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0645, std= 0.2812, min=-0.1344, max= 0.2633, positive=50.0%
+      Joint 1: mean= 0.1505, std= 0.1243, min= 0.0626, max= 0.2385, positive=100.0%
+      Joint 2: mean=-0.0047, std= 0.3403, min=-0.2453, max= 0.2359, positive=50.0%
+      Joint 3: mean= 0.0250, std= 0.0316, min= 0.0027, max= 0.0474, positive=100.0%
+      Joint 4: mean=-0.1729, std= 0.1433, min=-0.2742, max=-0.0716, positive=0.0%
+    Gripper (5): mean= 0.2402, std= 0.0531, min= 0.2026, max= 0.2777, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1156, std= 0.5041
+      Joint 1: mean= 0.4460, std= 0.3683
+      Joint 2: mean=-0.0100, std= 0.7198
+      Joint 3: mean= 0.0979, std= 0.1235
+      Joint 4: mean=-0.2734, std= 0.2264
+    Gripper (5): mean= 1.3354, std= 0.2953
+
+[Step 120] Action Debug (env 0):
+  alpha: 0.2416
+
+  Joints (0-4):
+    Joint 0: base= 0.3283, delta= 0.3898, final= 0.4225 (base + 0.24*delta = 0.4225)
+    Joint 1: base= 0.1111, delta=-0.2922, final= 0.0405 (base + 0.24*delta = 0.0405)
+    Joint 2: base= 0.1542, delta= 0.1454, final= 0.1894 (base + 0.24*delta = 0.1894)
+    Joint 3: base= 1.0075, delta=-0.1438, final= 0.9728 (base + 0.24*delta = 0.9728)
+    Joint 4: base= 1.4890, delta=-0.2986, final= 1.4168 (base + 0.24*delta = 1.4168)
+
+  Gripper (5):
+    base: -0.0239
+    delta: -0.1035
+    continuous (base + 0.24*delta): -0.0489
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2998, std= 0.1273, min= 0.2097, max= 0.3898, positive=100.0%
+      Joint 1: mean=-0.1048, std= 0.2651, min=-0.2922, max= 0.0826, positive=50.0%
+      Joint 2: mean=-0.2646, std= 0.5798, min=-0.6746, max= 0.1454, positive=50.0%
+      Joint 3: mean=-0.1815, std= 0.0534, min=-0.2193, max=-0.1438, positive=0.0%
+      Joint 4: mean=-0.3996, std= 0.1428, min=-0.5006, max=-0.2986, positive=0.0%
+    Gripper (5): mean= 0.0077, std= 0.1572, min=-0.1035, max= 0.1189, positive=50.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.5375, std= 0.2283
+      Joint 1: mean=-0.3105, std= 0.7852
+      Joint 2: mean=-0.5597, std= 1.2264
+      Joint 3: mean=-0.7097, std= 0.2089
+      Joint 4: mean=-0.6316, std= 0.2258
+    Gripper (5): mean= 0.0430, std= 0.8743
+[Iter   20] steps=   5200 | ep_reward=   2.77 | rollout_reward= 0.0250 | episodes= 40 | done_pct=  0.0% | early_done=  0.0% | loss=661.1892 | alpha=0.249
+[DEBUG] Iteration 20: Debug info saved to ./logs/gr_dit/SO-ARM101-Lift-Cube-v0/2026-01-20_15-03-13/debug_log.jsonl
+
+[Step   0] Action Debug (env 0):
+  alpha: 0.2490
+
+  Joints (0-4):
+    Joint 0: base= 0.4135, delta= 0.3478, final= 0.5001 (base + 0.25*delta = 0.5001)
+    Joint 1: base= 0.1097, delta=-0.0780, final= 0.0903 (base + 0.25*delta = 0.0903)
+    Joint 2: base= 0.1144, delta= 0.0431, final= 0.1251 (base + 0.25*delta = 0.1251)
+    Joint 3: base= 1.0115, delta=-0.1310, final= 0.9789 (base + 0.25*delta = 0.9789)
+    Joint 4: base= 1.4497, delta= 0.1686, final= 1.4916 (base + 0.25*delta = 1.4916)
+
+  Gripper (5):
+    base:  0.0325
+    delta:  0.2110
+    continuous (base + 0.25*delta):  0.0850
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2732, std= 0.1054, min= 0.1987, max= 0.3478, positive=100.0%
+      Joint 1: mean=-0.1402, std= 0.0880, min=-0.2025, max=-0.0780, positive=0.0%
+      Joint 2: mean= 0.1717, std= 0.1819, min= 0.0431, max= 0.3003, positive=100.0%
+      Joint 3: mean=-0.0604, std= 0.0999, min=-0.1310, max= 0.0103, positive=50.0%
+      Joint 4: mean=-0.4518, std= 0.8774, min=-1.0722, max= 0.1686, positive=50.0%
+    Gripper (5): mean= 0.2561, std= 0.0637, min= 0.2110, max= 0.3011, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4899, std= 0.1890
+      Joint 1: mean=-0.4154, std= 0.2607
+      Joint 2: mean= 0.3632, std= 0.3847
+      Joint 3: mean=-0.2360, std= 0.3904
+      Joint 4: mean=-0.7142, std= 1.3869
+    Gripper (5): mean= 1.4239, std= 0.3543
+
+[Step  10] Action Debug (env 0):
+  alpha: 0.2490
+
+  Joints (0-4):
+    Joint 0: base= 0.1712, delta=-0.1736, final= 0.1280 (base + 0.25*delta = 0.1280)
+    Joint 1: base= 0.0895, delta= 0.1286, final= 0.1215 (base + 0.25*delta = 0.1215)
+    Joint 2: base= 0.1035, delta=-0.0578, final= 0.0891 (base + 0.25*delta = 0.0891)
+    Joint 3: base= 1.1637, delta= 0.0778, final= 1.1830 (base + 0.25*delta = 1.1830)
+    Joint 4: base= 1.3611, delta=-0.2092, final= 1.3090 (base + 0.25*delta = 1.3090)
+
+  Gripper (5):
+    base:  0.0346
+    delta:  0.1027
+    continuous (base + 0.25*delta):  0.0602
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.0828, std= 0.1284, min=-0.1736, max= 0.0080, positive=50.0%
+      Joint 1: mean= 0.3055, std= 0.2501, min= 0.1286, max= 0.4824, positive=100.0%
+      Joint 2: mean=-0.0044, std= 0.0755, min=-0.0578, max= 0.0490, positive=50.0%
+      Joint 3: mean= 0.1447, std= 0.0947, min= 0.0778, max= 0.2116, positive=100.0%
+      Joint 4: mean=-0.0269, std= 0.2578, min=-0.2092, max= 0.1554, positive=50.0%
+    Gripper (5): mean= 0.0210, std= 0.1156, min=-0.0608, max= 0.1027, positive=50.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.1485, std= 0.2302
+      Joint 1: mean= 0.9050, std= 0.7410
+      Joint 2: mean=-0.0093, std= 0.1597
+      Joint 3: mean= 0.5656, std= 0.3700
+      Joint 4: mean=-0.0425, std= 0.4076
+    Gripper (5): mean= 0.1166, std= 0.6430
+
+[Step  20] Action Debug (env 0):
+  alpha: 0.2490
+
+  Joints (0-4):
+    Joint 0: base=-0.0116, delta= 0.0990, final= 0.0131 (base + 0.25*delta = 0.0131)
+    Joint 1: base=-0.0416, delta= 0.0941, final=-0.0182 (base + 0.25*delta = -0.0182)
+    Joint 2: base= 0.2861, delta= 0.5865, final= 0.4322 (base + 0.25*delta = 0.4322)
+    Joint 3: base= 1.2438, delta= 0.0138, final= 1.2472 (base + 0.25*delta = 1.2472)
+    Joint 4: base= 1.3516, delta= 0.5668, final= 1.4927 (base + 0.25*delta = 1.4927)
+
+  Gripper (5):
+    base:  0.0575
+    delta:  0.0874
+    continuous (base + 0.25*delta):  0.0793
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2395, std= 0.1988, min= 0.0990, max= 0.3801, positive=100.0%
+      Joint 1: mean= 0.1614, std= 0.0951, min= 0.0941, max= 0.2286, positive=100.0%
+      Joint 2: mean= 0.3958, std= 0.2697, min= 0.2051, max= 0.5865, positive=100.0%
+      Joint 3: mean=-0.0667, std= 0.1139, min=-0.1472, max= 0.0138, positive=50.0%
+      Joint 4: mean= 0.3076, std= 0.3666, min= 0.0484, max= 0.5668, positive=100.0%
+    Gripper (5): mean= 0.1635, std= 0.1076, min= 0.0874, max= 0.2395, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4294, std= 0.3564
+      Joint 1: mean= 0.4780, std= 0.2818
+      Joint 2: mean= 0.8372, std= 0.5704
+      Joint 3: mean=-0.2608, std= 0.4451
+      Joint 4: mean= 0.4862, std= 0.5795
+    Gripper (5): mean= 0.9089, std= 0.5980
+
+[Step  30] Action Debug (env 0):
+  alpha: 0.2490
+
+  Joints (0-4):
+    Joint 0: base=-0.0060, delta= 0.0847, final= 0.0151 (base + 0.25*delta = 0.0151)
+    Joint 1: base=-0.0643, delta=-0.1457, final=-0.1006 (base + 0.25*delta = -0.1006)
+    Joint 2: base= 0.3327, delta= 0.2997, final= 0.4074 (base + 0.25*delta = 0.4074)
+    Joint 3: base= 1.1743, delta= 0.1474, final= 1.2110 (base + 0.25*delta = 1.2110)
+    Joint 4: base= 1.2915, delta= 0.0741, final= 1.3100 (base + 0.25*delta = 1.3100)
+
+  Gripper (5):
+    base:  0.0525
+    delta:  0.1701
+    continuous (base + 0.25*delta):  0.0949
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1217, std= 0.0523, min= 0.0847, max= 0.1586, positive=100.0%
+      Joint 1: mean=-0.0713, std= 0.1052, min=-0.1457, max= 0.0030, positive=50.0%
+      Joint 2: mean= 0.1764, std= 0.1745, min= 0.0530, max= 0.2997, positive=100.0%
+      Joint 3: mean= 0.0071, std= 0.1984, min=-0.1332, max= 0.1474, positive=50.0%
+      Joint 4: mean= 0.0309, std= 0.0611, min=-0.0123, max= 0.0741, positive=50.0%
+    Gripper (5): mean= 0.1130, std= 0.0808, min= 0.0559, max= 0.1701, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2181, std= 0.0937
+      Joint 1: mean=-0.2113, std= 0.3115
+      Joint 2: mean= 0.3731, std= 0.3690
+      Joint 3: mean= 0.0277, std= 0.7757
+      Joint 4: mean= 0.0489, std= 0.0966
+    Gripper (5): mean= 0.6285, std= 0.4490
+
+[Step  40] Action Debug (env 0):
+  alpha: 0.2490
+
+  Joints (0-4):
+    Joint 0: base= 0.0713, delta= 0.5092, final= 0.1981 (base + 0.25*delta = 0.1981)
+    Joint 1: base=-0.0600, delta= 0.1645, final=-0.0190 (base + 0.25*delta = -0.0190)
+    Joint 2: base= 0.3397, delta=-0.3112, final= 0.2623 (base + 0.25*delta = 0.2623)
+    Joint 3: base= 1.1607, delta= 0.0097, final= 1.1631 (base + 0.25*delta = 1.1631)
+    Joint 4: base= 1.3187, delta= 0.0003, final= 1.3187 (base + 0.25*delta = 1.3187)
+
+  Gripper (5):
+    base:  0.0877
+    delta:  0.2903
+    continuous (base + 0.25*delta):  0.1600
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2528, std= 0.3626, min=-0.0036, max= 0.5092, positive=50.0%
+      Joint 1: mean= 0.0689, std= 0.1353, min=-0.0268, max= 0.1645, positive=50.0%
+      Joint 2: mean=-0.2674, std= 0.0619, min=-0.3112, max=-0.2237, positive=0.0%
+      Joint 3: mean= 0.0131, std= 0.0048, min= 0.0097, max= 0.0165, positive=100.0%
+      Joint 4: mean=-0.0119, std= 0.0172, min=-0.0240, max= 0.0003, positive=50.0%
+    Gripper (5): mean= 0.2733, std= 0.0241, min= 0.2562, max= 0.2903, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4532, std= 0.6501
+      Joint 1: mean= 0.2040, std= 0.4008
+      Joint 2: mean=-0.5656, std= 0.1308
+      Joint 3: mean= 0.0512, std= 0.0188
+      Joint 4: mean=-0.0188, std= 0.0272
+    Gripper (5): mean= 1.5194, std= 0.1339
+
+[Step  50] Action Debug (env 0):
+  alpha: 0.2490
+
+  Joints (0-4):
+    Joint 0: base=-0.0238, delta=-0.0818, final=-0.0442 (base + 0.25*delta = -0.0442)
+    Joint 1: base=-0.0364, delta= 0.0814, final=-0.0161 (base + 0.25*delta = -0.0161)
+    Joint 2: base= 0.2851, delta= 0.8392, final= 0.4941 (base + 0.25*delta = 0.4941)
+    Joint 3: base= 1.1723, delta= 0.2696, final= 1.2395 (base + 0.25*delta = 1.2395)
+    Joint 4: base= 1.3047, delta=-0.0369, final= 1.2955 (base + 0.25*delta = 1.2955)
+
+  Gripper (5):
+    base:  0.0428
+    delta:  0.2077
+    continuous (base + 0.25*delta):  0.0946
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1843, std= 0.3763, min=-0.0818, max= 0.4504, positive=50.0%
+      Joint 1: mean= 0.2093, std= 0.1808, min= 0.0814, max= 0.3372, positive=100.0%
+      Joint 2: mean= 0.5926, std= 0.3488, min= 0.3459, max= 0.8392, positive=100.0%
+      Joint 3: mean= 0.1582, std= 0.1576, min= 0.0467, max= 0.2696, positive=100.0%
+      Joint 4: mean=-0.2979, std= 0.3692, min=-0.5590, max=-0.0369, positive=0.0%
+    Gripper (5): mean= 0.2153, std= 0.0108, min= 0.2077, max= 0.2229, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3304, std= 0.6747
+      Joint 1: mean= 0.6200, std= 0.5357
+      Joint 2: mean= 1.2534, std= 0.7378
+      Joint 3: mean= 0.6183, std= 0.6162
+      Joint 4: mean=-0.4710, std= 0.5836
+    Gripper (5): mean= 1.1971, std= 0.0600
+
+[Step  60] Action Debug (env 0):
+  alpha: 0.2490
+
+  Joints (0-4):
+    Joint 0: base= 0.0295, delta=-0.1819, final=-0.0158 (base + 0.25*delta = -0.0158)
+    Joint 1: base=-0.0470, delta= 0.1807, final=-0.0020 (base + 0.25*delta = -0.0020)
+    Joint 2: base= 0.3641, delta= 0.2760, final= 0.4328 (base + 0.25*delta = 0.4328)
+    Joint 3: base= 1.1882, delta= 0.0195, final= 1.1931 (base + 0.25*delta = 1.1931)
+    Joint 4: base= 1.3186, delta= 0.2289, final= 1.3757 (base + 0.25*delta = 1.3757)
+
+  Gripper (5):
+    base:  0.0555
+    delta:  0.3175
+    continuous (base + 0.25*delta):  0.1346
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0562, std= 0.3368, min=-0.1819, max= 0.2944, positive=50.0%
+      Joint 1: mean= 0.2011, std= 0.0288, min= 0.1807, max= 0.2215, positive=100.0%
+      Joint 2: mean= 0.4290, std= 0.2165, min= 0.2760, max= 0.5821, positive=100.0%
+      Joint 3: mean= 0.0628, std= 0.0613, min= 0.0195, max= 0.1062, positive=100.0%
+      Joint 4: mean=-0.0798, std= 0.4365, min=-0.3884, max= 0.2289, positive=50.0%
+    Gripper (5): mean= 0.2830, std= 0.0488, min= 0.2485, max= 0.3175, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1008, std= 0.6038
+      Joint 1: mean= 0.5958, std= 0.0855
+      Joint 2: mean= 0.9074, std= 0.4579
+      Joint 3: mean= 0.2456, std= 0.2397
+      Joint 4: mean=-0.1261, std= 0.6901
+    Gripper (5): mean= 1.5735, std= 0.2715
+
+[Step  70] Action Debug (env 0):
+  alpha: 0.2490
+
+  Joints (0-4):
+    Joint 0: base= 0.0273, delta= 0.2900, final= 0.0996 (base + 0.25*delta = 0.0996)
+    Joint 1: base=-0.0262, delta=-0.0412, final=-0.0365 (base + 0.25*delta = -0.0365)
+    Joint 2: base= 0.3473, delta=-0.2507, final= 0.2849 (base + 0.25*delta = 0.2849)
+    Joint 3: base= 1.1461, delta= 0.0947, final= 1.1697 (base + 0.25*delta = 1.1697)
+    Joint 4: base= 1.3448, delta=-0.0102, final= 1.3423 (base + 0.25*delta = 1.3423)
+
+  Gripper (5):
+    base:  0.0957
+    delta:  0.3911
+    continuous (base + 0.25*delta):  0.1931
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1439, std= 0.2066, min=-0.0021, max= 0.2900, positive=50.0%
+      Joint 1: mean= 0.0143, std= 0.0785, min=-0.0412, max= 0.0698, positive=50.0%
+      Joint 2: mean=-0.0467, std= 0.2885, min=-0.2507, max= 0.1573, positive=50.0%
+      Joint 3: mean= 0.0571, std= 0.0531, min= 0.0196, max= 0.0947, positive=100.0%
+      Joint 4: mean=-0.0818, std= 0.1013, min=-0.1534, max=-0.0102, positive=0.0%
+    Gripper (5): mean= 0.3258, std= 0.0924, min= 0.2605, max= 0.3911, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2581, std= 0.3704
+      Joint 1: mean= 0.0423, std= 0.2326
+      Joint 2: mean=-0.0987, std= 0.6102
+      Joint 3: mean= 0.2234, std= 0.2075
+      Joint 4: mean=-0.1293, std= 0.1601
+    Gripper (5): mean= 1.8114, std= 0.5136
+
+[Step  80] Action Debug (env 0):
+  alpha: 0.2490
+
+  Joints (0-4):
+    Joint 0: base= 0.0430, delta= 0.1709, final= 0.0856 (base + 0.25*delta = 0.0856)
+    Joint 1: base=-0.0433, delta=-0.2371, final=-0.1023 (base + 0.25*delta = -0.1023)
+    Joint 2: base= 0.3355, delta= 0.4754, final= 0.4539 (base + 0.25*delta = 0.4539)
+    Joint 3: base= 1.1867, delta= 0.0656, final= 1.2030 (base + 0.25*delta = 1.2030)
+    Joint 4: base= 1.3444, delta= 0.1827, final= 1.3899 (base + 0.25*delta = 1.3899)
+
+  Gripper (5):
+    base:  0.0622
+    delta:  0.0756
+    continuous (base + 0.25*delta):  0.0811
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0732, std= 0.1382, min=-0.0245, max= 0.1709, positive=50.0%
+      Joint 1: mean=-0.1075, std= 0.1833, min=-0.2371, max= 0.0222, positive=50.0%
+      Joint 2: mean= 0.4287, std= 0.0660, min= 0.3820, max= 0.4754, positive=100.0%
+      Joint 3: mean= 0.1678, std= 0.1446, min= 0.0656, max= 0.2701, positive=100.0%
+      Joint 4: mean=-0.0633, std= 0.3479, min=-0.3093, max= 0.1827, positive=50.0%
+    Gripper (5): mean= 0.1904, std= 0.1623, min= 0.0756, max= 0.3051, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1313, std= 0.2477
+      Joint 1: mean=-0.3183, std= 0.5430
+      Joint 2: mean= 0.9067, std= 0.1396
+      Joint 3: mean= 0.6561, std= 0.5652
+      Joint 4: mean=-0.1001, std= 0.5500
+    Gripper (5): mean= 1.0586, std= 0.9023
+
+[Step  90] Action Debug (env 0):
+  alpha: 0.2490
+
+  Joints (0-4):
+    Joint 0: base= 0.0449, delta= 0.3302, final= 0.1272 (base + 0.25*delta = 0.1272)
+    Joint 1: base=-0.0384, delta=-0.0155, final=-0.0422 (base + 0.25*delta = -0.0422)
+    Joint 2: base= 0.3148, delta=-0.0069, final= 0.3131 (base + 0.25*delta = 0.3131)
+    Joint 3: base= 1.1717, delta= 0.0869, final= 1.1934 (base + 0.25*delta = 1.1934)
+    Joint 4: base= 1.3536, delta=-0.4567, final= 1.2399 (base + 0.25*delta = 1.2399)
+
+  Gripper (5):
+    base:  0.0524
+    delta:  0.2204
+    continuous (base + 0.25*delta):  0.1073
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.3775, std= 0.0669, min= 0.3302, max= 0.4248, positive=100.0%
+      Joint 1: mean= 0.0262, std= 0.0589, min=-0.0155, max= 0.0679, positive=50.0%
+      Joint 2: mean= 0.1716, std= 0.2524, min=-0.0069, max= 0.3500, positive=50.0%
+      Joint 3: mean=-0.0218, std= 0.1538, min=-0.1305, max= 0.0869, positive=50.0%
+      Joint 4: mean=-0.5389, std= 0.1163, min=-0.6212, max=-0.4567, positive=0.0%
+    Gripper (5): mean= 0.2511, std= 0.0433, min= 0.2204, max= 0.2817, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.6768, std= 0.1199
+      Joint 1: mean= 0.0776, std= 0.1746
+      Joint 2: mean= 0.3629, std= 0.5338
+      Joint 3: mean=-0.0852, std= 0.6012
+      Joint 4: mean=-0.8519, std= 0.1838
+    Gripper (5): mean= 1.3961, std= 0.2409
+
+[Step 100] Action Debug (env 0):
+  alpha: 0.2490
+
+  Joints (0-4):
+    Joint 0: base= 0.0557, delta=-0.0325, final= 0.0476 (base + 0.25*delta = 0.0476)
+    Joint 1: base=-0.0115, delta= 0.2062, final= 0.0398 (base + 0.25*delta = 0.0398)
+    Joint 2: base= 0.3039, delta= 0.2944, final= 0.3772 (base + 0.25*delta = 0.3772)
+    Joint 3: base= 1.1781, delta=-0.0501, final= 1.1657 (base + 0.25*delta = 1.1657)
+    Joint 4: base= 1.3324, delta=-0.4505, final= 1.2202 (base + 0.25*delta = 1.2202)
+
+  Gripper (5):
+    base:  0.0974
+    delta:  0.1283
+    continuous (base + 0.25*delta):  0.1293
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1247, std= 0.2223, min=-0.0325, max= 0.2819, positive=50.0%
+      Joint 1: mean= 0.0223, std= 0.2601, min=-0.1616, max= 0.2062, positive=50.0%
+      Joint 2: mean= 0.4766, std= 0.2577, min= 0.2944, max= 0.6588, positive=100.0%
+      Joint 3: mean=-0.0211, std= 0.0409, min=-0.0501, max= 0.0078, positive=50.0%
+      Joint 4: mean=-0.2396, std= 0.2983, min=-0.4505, max=-0.0287, positive=0.0%
+    Gripper (5): mean= 0.1985, std= 0.0992, min= 0.1283, max= 0.2686, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2236, std= 0.3986
+      Joint 1: mean= 0.0661, std= 0.7706
+      Joint 2: mean= 1.0080, std= 0.5450
+      Joint 3: mean=-0.0827, std= 0.1599
+      Joint 4: mean=-0.3788, std= 0.4715
+    Gripper (5): mean= 1.1034, std= 0.5518
+
+[Step 110] Action Debug (env 0):
+  alpha: 0.2490
+
+  Joints (0-4):
+    Joint 0: base=-0.0164, delta= 0.0412, final=-0.0062 (base + 0.25*delta = -0.0062)
+    Joint 1: base=-0.0109, delta= 0.0531, final= 0.0023 (base + 0.25*delta = 0.0023)
+    Joint 2: base= 0.3355, delta= 0.5287, final= 0.4672 (base + 0.25*delta = 0.4672)
+    Joint 3: base= 1.1865, delta=-0.0427, final= 1.1758 (base + 0.25*delta = 1.1758)
+    Joint 4: base= 1.3386, delta=-0.1228, final= 1.3081 (base + 0.25*delta = 1.3081)
+
+  Gripper (5):
+    base:  0.0784
+    delta:  0.1672
+    continuous (base + 0.25*delta):  0.1201
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.0958, std= 0.1937, min=-0.2328, max= 0.0412, positive=50.0%
+      Joint 1: mean= 0.1004, std= 0.0668, min= 0.0531, max= 0.1476, positive=100.0%
+      Joint 2: mean= 0.3418, std= 0.2645, min= 0.1548, max= 0.5287, positive=100.0%
+      Joint 3: mean= 0.0575, std= 0.1418, min=-0.0427, max= 0.1578, positive=50.0%
+      Joint 4: mean=-0.2707, std= 0.2091, min=-0.4186, max=-0.1228, positive=0.0%
+    Gripper (5): mean= 0.2260, std= 0.0830, min= 0.1672, max= 0.2847, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean=-0.1717, std= 0.3474
+      Joint 1: mean= 0.2974, std= 0.1979
+      Joint 2: mean= 0.7228, std= 0.5593
+      Joint 3: mean= 0.2249, std= 0.5542
+      Joint 4: mean=-0.4279, std= 0.3306
+    Gripper (5): mean= 1.2564, std= 0.4617
+
+[Step 120] Action Debug (env 0):
+  alpha: 0.2490
+
+  Joints (0-4):
+    Joint 0: base= 0.0449, delta= 0.5850, final= 0.1906 (base + 0.25*delta = 0.1906)
+    Joint 1: base=-0.0472, delta= 0.1011, final=-0.0220 (base + 0.25*delta = -0.0220)
+    Joint 2: base= 0.3438, delta= 0.1586, final= 0.3833 (base + 0.25*delta = 0.3833)
+    Joint 3: base= 1.1719, delta=-0.0678, final= 1.1551 (base + 0.25*delta = 1.1551)
+    Joint 4: base= 1.3478, delta=-0.0480, final= 1.3358 (base + 0.25*delta = 1.3358)
+
+  Gripper (5):
+    base:  0.0662
+    delta:  0.1977
+    continuous (base + 0.25*delta):  0.1155
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4079, std= 0.2504, min= 0.2309, max= 0.5850, positive=100.0%
+      Joint 1: mean=-0.0164, std= 0.1662, min=-0.1340, max= 0.1011, positive=50.0%
+      Joint 2: mean= 0.2464, std= 0.1242, min= 0.1586, max= 0.3342, positive=100.0%
+      Joint 3: mean=-0.1504, std= 0.1169, min=-0.2331, max=-0.0678, positive=0.0%
+      Joint 4: mean=-0.0888, std= 0.0576, min=-0.1295, max=-0.0480, positive=0.0%
+    Gripper (5): mean= 0.1956, std= 0.0030, min= 0.1934, max= 0.1977, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.7314, std= 0.4489
+      Joint 1: mean=-0.0487, std= 0.4923
+      Joint 2: mean= 0.5211, std= 0.2627
+      Joint 3: mean=-0.5881, std= 0.4568
+      Joint 4: mean=-0.1404, std= 0.0911
+    Gripper (5): mean= 1.0874, std= 0.0169
+[Iter   21] steps=   5460 | ep_reward=   2.90 | rollout_reward= 0.0427 | episodes= 42 | done_pct=  0.0% | early_done=  0.0% | loss=629.6360 | alpha=0.256
+
+[Step   0] Action Debug (env 0):
+  alpha: 0.2564
+
+  Joints (0-4):
+    Joint 0: base=-0.0392, delta=-0.0412, final=-0.0498 (base + 0.26*delta = -0.0498)
+    Joint 1: base=-0.0988, delta= 0.0964, final=-0.0741 (base + 0.26*delta = -0.0741)
+    Joint 2: base= 0.4148, delta= 0.1280, final= 0.4476 (base + 0.26*delta = 0.4476)
+    Joint 3: base= 1.2146, delta=-0.1440, final= 1.1776 (base + 0.26*delta = 1.1776)
+    Joint 4: base= 1.2493, delta=-0.3019, final= 1.1718 (base + 0.26*delta = 1.1718)
+
+  Gripper (5):
+    base:  0.0464
+    delta:  0.3227
+    continuous (base + 0.26*delta):  0.1292
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2543, std= 0.4179, min=-0.0412, max= 0.5498, positive=50.0%
+      Joint 1: mean= 0.1667, std= 0.0993, min= 0.0964, max= 0.2369, positive=100.0%
+      Joint 2: mean= 0.2536, std= 0.1776, min= 0.1280, max= 0.3792, positive=100.0%
+      Joint 3: mean=-0.1629, std= 0.0267, min=-0.1817, max=-0.1440, positive=0.0%
+      Joint 4: mean=-0.2473, std= 0.0772, min=-0.3019, max=-0.1928, positive=0.0%
+    Gripper (5): mean= 0.2655, std= 0.0810, min= 0.2082, max= 0.3227, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4559, std= 0.7492
+      Joint 1: mean= 0.4937, std= 0.2942
+      Joint 2: mean= 0.5365, std= 0.3757
+      Joint 3: mean=-0.6366, std= 0.1043
+      Joint 4: mean=-0.3910, std= 0.1220
+    Gripper (5): mean= 1.4760, std= 0.4502
+
+[Step  10] Action Debug (env 0):
+  alpha: 0.2564
+
+  Joints (0-4):
+    Joint 0: base= 0.0690, delta= 0.1147, final= 0.0984 (base + 0.26*delta = 0.0984)
+    Joint 1: base=-0.0173, delta=-0.1051, final=-0.0443 (base + 0.26*delta = -0.0443)
+    Joint 2: base= 0.1469, delta=-0.4384, final= 0.0344 (base + 0.26*delta = 0.0344)
+    Joint 3: base= 1.2078, delta=-0.0420, final= 1.1970 (base + 0.26*delta = 1.1970)
+    Joint 4: base= 1.2508, delta= 0.2988, final= 1.3274 (base + 0.26*delta = 1.3274)
+
+  Gripper (5):
+    base:  0.0352
+    delta:  0.1408
+    continuous (base + 0.26*delta):  0.0713
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.4072, std= 0.4137, min= 0.1147, max= 0.6997, positive=100.0%
+      Joint 1: mean=-0.0599, std= 0.0640, min=-0.1051, max=-0.0146, positive=0.0%
+      Joint 2: mean=-0.0713, std= 0.5192, min=-0.4384, max= 0.2958, positive=50.0%
+      Joint 3: mean= 0.1063, std= 0.2098, min=-0.0420, max= 0.2546, positive=50.0%
+      Joint 4: mean= 0.2673, std= 0.0445, min= 0.2359, max= 0.2988, positive=100.0%
+    Gripper (5): mean= 0.1880, std= 0.0667, min= 0.1408, max= 0.2352, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.7300, std= 0.7417
+      Joint 1: mean=-0.1774, std= 0.1896
+      Joint 2: mean=-0.1508, std= 1.0981
+      Joint 3: mean= 0.4155, std= 0.8200
+      Joint 4: mean= 0.4226, std= 0.0703
+    Gripper (5): mean= 1.0453, std= 0.3709
+
+[Step  20] Action Debug (env 0):
+  alpha: 0.2564
+
+  Joints (0-4):
+    Joint 0: base= 0.4298, delta= 0.4936, final= 0.5564 (base + 0.26*delta = 0.5564)
+    Joint 1: base= 0.1326, delta=-0.0247, final= 0.1263 (base + 0.26*delta = 0.1263)
+    Joint 2: base= 0.0681, delta= 0.4126, final= 0.1739 (base + 0.26*delta = 0.1739)
+    Joint 3: base= 1.1136, delta=-0.2123, final= 1.0592 (base + 0.26*delta = 1.0592)
+    Joint 4: base= 1.4997, delta=-0.2851, final= 1.4266 (base + 0.26*delta = 1.4266)
+
+  Gripper (5):
+    base:  0.0737
+    delta:  0.0663
+    continuous (base + 0.26*delta):  0.0907
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.1304, std= 0.5137, min=-0.2329, max= 0.4936, positive=50.0%
+      Joint 1: mean= 0.1403, std= 0.2334, min=-0.0247, max= 0.3053, positive=50.0%
+      Joint 2: mean= 0.2369, std= 0.2485, min= 0.0612, max= 0.4126, positive=100.0%
+      Joint 3: mean=-0.0964, std= 0.1639, min=-0.2123, max= 0.0195, positive=50.0%
+      Joint 4: mean=-0.1935, std= 0.1294, min=-0.2851, max=-0.1020, positive=0.0%
+    Gripper (5): mean= 0.1823, std= 0.1640, min= 0.0663, max= 0.2983, positive=100.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.2337, std= 0.9211
+      Joint 1: mean= 0.4155, std= 0.6913
+      Joint 2: mean= 0.5011, std= 0.5256
+      Joint 3: mean=-0.3768, std= 0.6407
+      Joint 4: mean=-0.3060, std= 0.2046
+    Gripper (5): mean= 1.0137, std= 0.9119
+
+[Step  30] Action Debug (env 0):
+  alpha: 0.2564
+
+  Joints (0-4):
+    Joint 0: base= 0.4735, delta= 0.2431, final= 0.5359 (base + 0.26*delta = 0.5359)
+    Joint 1: base= 0.1330, delta= 0.0767, final= 0.1527 (base + 0.26*delta = 0.1527)
+    Joint 2: base= 0.0917, delta= 0.5241, final= 0.2261 (base + 0.26*delta = 0.2261)
+    Joint 3: base= 1.0292, delta= 0.0318, final= 1.0373 (base + 0.26*delta = 1.0373)
+    Joint 4: base= 1.4853, delta=-0.0227, final= 1.4795 (base + 0.26*delta = 1.4795)
+
+  Gripper (5):
+    base:  0.0896
+    delta: -0.0237
+    continuous (base + 0.26*delta):  0.0836
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0231, std= 0.3110, min=-0.1968, max= 0.2431, positive=50.0%
+      Joint 1: mean= 0.1561, std= 0.1123, min= 0.0767, max= 0.2356, positive=100.0%
+      Joint 2: mean= 0.3427, std= 0.2566, min= 0.1612, max= 0.5241, positive=100.0%
+      Joint 3: mean= 0.0226, std= 0.0129, min= 0.0135, max= 0.0318, positive=100.0%
+      Joint 4: mean= 0.1060, std= 0.1820, min=-0.0227, max= 0.2347, positive=50.0%
+    Gripper (5): mean= 0.0990, std= 0.1735, min=-0.0237, max= 0.2217, positive=50.0%
+
+  Delta_norm Statistics (normalized, all envs):
+    Joints (0-4):
+      Joint 0: mean= 0.0415, std= 0.5576
+      Joint 1: mean= 0.4625, std= 0.3327
+      Joint 2: mean= 0.7248, std= 0.5427
+      Joint 3: mean= 0.0885, std= 0.0505
+      Joint 4: mean= 0.1675, std= 0.2878
+    Gripper (5): mean= 0.5504, std= 0.9649
+
+[Step  40] Action Debug (env 0):
+  alpha: 0.2564
+
+  Joints (0-4):
+    Joint 0: base= 0.4850, delta= 0.1378, final= 0.5203 (base + 0.26*delta = 0.5203)
+    Joint 1: base= 0.1260, delta= 0.1432, final= 0.1628 (base + 0.26*delta = 0.1628)
+    Joint 2: base= 0.1013, delta= 0.1823, final= 0.1481 (base + 0.26*delta = 0.1481)
+    Joint 3: base= 1.0250, delta= 0.1192, final= 1.0556 (base + 0.26*delta = 1.0556)
+    Joint 4: base= 1.5267, delta=-0.4474, final= 1.4120 (base + 0.26*delta = 1.4120)
+
+  Gripper (5):
+    base:  0.0669
+    delta:  0.2242
+    continuous (base + 0.26*delta):  0.1244
+    threshold: -0.2
+    binary (final):  1.0000 (open)
+
+  Delta Statistics (all envs):
