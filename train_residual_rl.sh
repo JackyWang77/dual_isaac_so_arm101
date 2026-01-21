@@ -87,30 +87,6 @@ fi
 echo ""
 echo "Checking environment..."
 
-# Check Python
-if ! command -v python &> /dev/null; then
-    echo "❌ Error: Python not found!"
-    exit 1
-fi
-
-# Check PyTorch
-if ! python -c "import torch" 2>/dev/null; then
-    echo "❌ Error: PyTorch not found!"
-    echo "Please activate your conda environment:"
-    echo "  conda activate env_isaaclab"
-    exit 1
-fi
-
-# Check CUDA
-CUDA_AVAILABLE=$(python -c "import torch; print(torch.cuda.is_available())")
-if [ "$CUDA_AVAILABLE" = "True" ]; then
-    GPU_NAME=$(python -c "import torch; print(torch.cuda.get_device_name(0))")
-    GPU_MEM=$(python -c "import torch; print(f'{torch.cuda.get_device_properties(0).total_memory / 1e9:.1f}GB')")
-    echo "✅ CUDA available: $GPU_NAME ($GPU_MEM)"
-else
-    echo "⚠️  Warning: CUDA not available, training will be slow!"
-fi
-
 # Set headless flag
 if [ "$HEADLESS" = "true" ] || [ "$HEADLESS" = "1" ]; then
     HEADLESS_FLAG="--headless"
