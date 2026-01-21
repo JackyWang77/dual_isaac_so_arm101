@@ -85,7 +85,7 @@ def object_ee_distance(
 # ============================================================
 def grasp_reward(
     env: ManagerBasedRLEnv,
-    threshold_distance: float = 0.01,
+    threshold_distance: float = 0.02,
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
     ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
     robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
@@ -97,7 +97,7 @@ def grasp_reward(
     - 不正确的gripper状态 -> 0或负奖励
 
     Args:
-        threshold_distance: EE需要离物体多近才算"准备好抓" (默认0.01m，更严格确保能抓起来)
+        threshold_distance: EE需要离物体多近才算"准备好抓" (默认0.02m)
     """
     object: RigidObject = env.scene[object_cfg.name]
     ee_frame: FrameTransformer = env.scene[ee_frame_cfg.name]

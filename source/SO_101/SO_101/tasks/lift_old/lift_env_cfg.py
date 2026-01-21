@@ -173,7 +173,7 @@ class RewardsCfg:
     reaching_object = RewTerm(
         func=mdp.object_ee_distance,
         params={"std": 0.05},
-        weight=5.0,
+        weight=1.0,
     )
 
     # ============================================================
@@ -181,7 +181,7 @@ class RewardsCfg:
     # ============================================================
     grasp_behavior = RewTerm(
         func=mdp.grasp_reward,
-        params={"threshold_distance": 0.01},  # EE距离物体0.01m内算"接近" (更严格，确保能抓起来)
+        params={"threshold_distance": 0.02},  # EE距离物体0.02m内算"接近"
         weight=2.0,  # 权重要高，直接教gripper行为
     )
 

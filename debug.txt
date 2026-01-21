@@ -1,0 +1,13 @@
+[Trainer] Starting training for 500 iterations...
+Traceback (most recent call last):
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/train_graph_dit_rl.py", line 1290, in <module>
+    main()
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/train_graph_dit_rl.py", line 1280, in main
+    trainer.train(
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/train_graph_dit_rl.py", line 686, in train
+    rollout_stats = self.collect_rollout()
+                    ^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/train_graph_dit_rl.py", line 480, in collect_rollout
+    if action_dim >= 6:
+       ^^^^^^^^^^
+NameError: name 'action_dim' is not defined
