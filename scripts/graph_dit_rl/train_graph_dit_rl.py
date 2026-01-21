@@ -52,7 +52,7 @@ simulation_app = app_launcher.app
 import os
 import json
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict  # List, Optional removed (unused)
 
 import gymnasium as gym
 import numpy as np
@@ -249,8 +249,10 @@ class GraphDiTRLTrainer:
 
         # Optimizer (只优化 trainable 参数)
         trainable_params = [p for p in policy.parameters() if p.requires_grad]
+        
         # CRITICAL: Also include node_to_z parameters if it's trainable
         # node_to_z is in backbone.backbone.node_to_z, not in policy.parameters()
+        node_to_z_params = []
         if hasattr(policy, 'backbone') and hasattr(policy.backbone, 'backbone'):
             graph_dit = policy.backbone.backbone
             if hasattr(graph_dit, 'node_to_z'):
@@ -258,6 +260,15 @@ class GraphDiTRLTrainer:
                 trainable_params.extend(node_to_z_params)
                 if len(node_to_z_params) > 0:
                     print(f"[Trainer] Including {len(node_to_z_params)} node_to_z parameters in optimizer")
+        
+        # Verify all trainable components
+        policy_param_names = [name for name, param in policy.named_parameters() if param.requires_grad]
+        print(f"[Trainer] Policy trainable components: {len([n for n in policy_param_names if 'z_adapter' in n])} z_adapter, "
+              f"{len([n for n in policy_param_names if 'gate' in n])} gate, "
+              f"{len([n for n in policy_param_names if 'actor' in n])} actor, "
+              f"{len([n for n in policy_param_names if 'critic' in n])} critic")
+        print(f"[Trainer] Total trainable params: {len(trainable_params)} (policy: {len(trainable_params) - len(node_to_z_params)}, node_to_z: {len(node_to_z_params)})")
+        
         self.optimizer = optim.AdamW(trainable_params, lr=lr)
 
         # Logger
@@ -335,6 +346,9 @@ class GraphDiTRLTrainer:
 
         ep_rewards = torch.zeros(self.num_envs, device=self.device)
         ep_lengths = torch.zeros(self.num_envs, device=self.device)
+        
+        # Track individual reward terms
+        reward_terms_dict = {}  # {reward_name: list of [N] tensors}
 
         for step in range(self.steps_per_env):
             # CRITICAL: Normalize observations (same as Graph-DiT play.py)
@@ -478,6 +492,23 @@ class GraphDiTRLTrainer:
             next_obs = self._process_obs(next_obs)
             reward = reward.to(self.device).float()
             done = done.to(self.device).float()
+            
+            # Extract individual reward terms from reward manager (if available)
+            if hasattr(self.env, 'rew_manager'):
+                rew_manager = self.env.rew_manager
+                # Try to get reward terms from the manager
+                # Isaac Lab stores computed rewards in rew_manager.reward_buf
+                if hasattr(rew_manager, 'reward_buf'):
+                    reward_buf = rew_manager.reward_buf
+                    for reward_name in ['grasp_behavior', 'object_grasped', 'task_complete', 'gripper_smooth']:
+                        if reward_name in reward_buf:
+                            reward_value = reward_buf[reward_name]
+                            if isinstance(reward_value, torch.Tensor):
+                                if reward_name not in reward_terms_dict:
+                                    # Initialize list for this reward term
+                                    reward_terms_dict[reward_name] = []
+                                # Store reward value for this timestep
+                                reward_terms_dict[reward_name].append(reward_value.clone().to(self.device))
 
             # Store (obs is raw, obs_norm is normalized)
             self.buffer.add(obs, obs_norm, action, reward, done, info)
@@ -587,26 +618,23 @@ class GraphDiTRLTrainer:
             stats["ep_length_mean"] = np.mean(self.episode_lengths[-100:])
             stats["ep_reward_max"] = np.max(self.episode_rewards[-100:])
             stats["ep_reward_min"] = np.min(self.episode_rewards[-100:])
-            stats["num_episodes"] = len(self.episode_rewards)
         else:
             # No episodes completed in this rollout - this is a problem!
             stats["ep_reward_mean"] = 0.0
             stats["ep_length_mean"] = 0.0
-            stats["num_episodes"] = 0
             stats["warning"] = "No episodes completed in this rollout!"
         
-        # Also track immediate reward stats (from current rollout)
-        rollout_rewards = self.buffer.rewards  # [T, N]
-        stats["rollout_reward_mean"] = rollout_rewards.mean().item()
-        stats["rollout_reward_sum"] = rollout_rewards.sum().item()
-        stats["rollout_reward_max"] = rollout_rewards.max().item()
-        stats["rollout_reward_min"] = rollout_rewards.min().item()
-        stats["rollout_nonzero_reward_pct"] = (rollout_rewards != 0).float().mean().item() * 100
-        
-        # Track done statistics
-        rollout_dones = self.buffer.dones  # [T, N]
-        stats["rollout_done_pct"] = rollout_dones.mean().item() * 100
-        stats["rollout_early_done_pct"] = rollout_dones[:self.steps_per_env//2].mean().item() * 100  # First half
+        # Track individual reward terms collected during rollout
+        # reward_terms_dict contains lists of tensors for each reward term
+        # Convert to stacked tensors and compute statistics
+        for reward_name, reward_list in reward_terms_dict.items():
+            if len(reward_list) > 0:
+                # Stack all timesteps: [T, N]
+                reward_tensor = torch.stack(reward_list, dim=0)
+                stats[f"reward_{reward_name}_mean"] = reward_tensor.mean().item()
+                stats[f"reward_{reward_name}_sum"] = reward_tensor.sum().item()
+                stats[f"reward_{reward_name}_max"] = reward_tensor.max().item()
+                stats[f"reward_{reward_name}_min"] = reward_tensor.min().item()
         
         return stats
 
@@ -687,8 +715,22 @@ class GraphDiTRLTrainer:
     def _log(self, iteration: int, rollout_stats: Dict, update_stats: Dict):
         """记录日志"""
         # TensorBoard (only numeric values)
+        # Filter out unwanted metrics
+        excluded_keys = {
+            "num_episodes",
+            "rollout_done_pct",
+            "rollout_early_done_pct",
+            "rollout_nonzero_reward_pct",
+            "rollout_reward_max",
+            "rollout_reward_mean",
+            "rollout_reward_min",
+            "rollout_reward_sum",
+        }
+        
         for k, v in rollout_stats.items():
-            # Skip non-numeric values (like 'warning' string)
+            # Skip excluded keys and non-numeric values (like 'warning' string)
+            if k in excluded_keys:
+                continue
             if isinstance(v, (int, float)) or (hasattr(v, 'item') and hasattr(v, 'dtype')):
                 try:
                     if hasattr(v, 'item'):
@@ -711,10 +753,12 @@ class GraphDiTRLTrainer:
 
         # Console
         ep_reward = rollout_stats.get("ep_reward_mean", 0)
-        num_episodes = rollout_stats.get("num_episodes", 0)
-        rollout_reward_mean = rollout_stats.get("rollout_reward_mean", 0)
-        rollout_done_pct = rollout_stats.get("rollout_done_pct", 0)
-        early_done_pct = rollout_stats.get("rollout_early_done_pct", 0)
+        
+        # Get individual reward terms for display
+        reward_grasp = rollout_stats.get("reward_grasp_behavior_mean", 0)
+        reward_grasped = rollout_stats.get("reward_object_grasped_mean", 0)
+        reward_success = rollout_stats.get("reward_task_complete_mean", 0)
+        reward_gripper_smooth = rollout_stats.get("reward_gripper_smooth_mean", 0)
         
         warning = rollout_stats.get("warning", "")
         if warning:
@@ -724,10 +768,10 @@ class GraphDiTRLTrainer:
             f"[Iter {iteration:4d}] "
             f"steps={self.total_steps:7d} | "
             f"ep_reward={ep_reward:7.2f} | "
-            f"rollout_reward={rollout_reward_mean:7.4f} | "
-            f"episodes={num_episodes:3d} | "
-            f"done_pct={rollout_done_pct:5.1f}% | "
-            f"early_done={early_done_pct:5.1f}% | "
+            f"grasp={reward_grasp:6.3f} | "
+            f"grasped={reward_grasped:6.3f} | "
+            f"success={reward_success:6.3f} | "
+            f"gripper_smooth={reward_gripper_smooth:6.3f} | "
             f"loss={update_stats['loss_total']:7.4f} | "
             f"alpha={update_stats['alpha']:.3f}"
         )
@@ -916,7 +960,11 @@ def main():
     if hasattr(graph_dit, 'node_to_z'):
         for p in graph_dit.node_to_z.parameters():
             p.requires_grad = True
-        print(f"[Main] node_to_z made trainable (was not trained in Graph-DiT)")
+        n2z_trainable = sum(1 for p in graph_dit.node_to_z.parameters() if p.requires_grad)
+        n2z_total = len(list(graph_dit.node_to_z.parameters()))
+        print(f"[Main] node_to_z made trainable: {n2z_trainable}/{n2z_total} params trainable (was not trained in Graph-DiT)")
+    else:
+        print(f"[Main] ⚠️  WARNING: node_to_z not found in Graph-DiT!")
     print(f"[Main] GraphDiT loaded and frozen (except node_to_z)")
 
     # Create backbone adapter
@@ -999,17 +1047,27 @@ def main():
     print(f"[Main] residual_action_mask: None (all dimensions including gripper can have residual)")
 
     # Create policy config
+    # CRITICAL: Get obs_structure from Graph-DiT config to ensure consistency
+    obs_structure = getattr(graph_dit.cfg, "obs_structure", None)
+    print(f"[Main] Graph-DiT obs_structure: {obs_structure}")
+    
     policy_cfg = GraphDiTResidualRLCfg(
         obs_dim=obs_dim,
         action_dim=action_dim,
         z_dim=graph_dit.cfg.z_dim,
         num_layers=graph_dit.cfg.num_layers,
         device=device,
-        # 从 graph_dit 获取 obs_structure (如果有)
-        obs_structure=getattr(graph_dit.cfg, "obs_structure", None),
+        obs_structure=obs_structure,  # CRITICAL: Use same obs_structure as Graph-DiT
         robot_state_dim=6,  # 根据你的机器人调整
         residual_action_mask=residual_action_mask,  # Exclude gripper from residual
     )
+    print(f"[Main] Residual RL obs_structure: {policy_cfg.obs_structure}")
+    
+    # Verify obs_structure consistency
+    if getattr(graph_dit.cfg, "obs_structure", None) != policy_cfg.obs_structure:
+        print("[Main] ⚠️  WARNING: obs_structure MISMATCH between Graph-DiT and Residual RL!")
+    else:
+        print("[Main] ✅ obs_structure consistent between Graph-DiT and Residual RL")
 
     # Create policy
     policy = GraphDiTResidualRLPolicy(
@@ -1134,6 +1192,88 @@ def main():
         action_mean=action_mean, action_std=action_std,
     )
     print(f"[Main] Set normalization stats in trainer")
+    
+    # Verify normalization stats
+    print(f"[Main] Normalization stats verification:")
+    for name, val in [('obs_mean', obs_mean), ('obs_std', obs_std),
+                      ('action_mean', action_mean), ('action_std', action_std),
+                      ('ee_node_mean', ee_node_mean), ('ee_node_std', ee_node_std),
+                      ('object_node_mean', object_node_mean), ('object_node_std', object_node_std),
+                      ('joint_mean', joint_mean), ('joint_std', joint_std)]:
+        shape = val.shape if val is not None else 'None'
+        print(f"    {name}: {shape}")
+        if val is None:
+            print(f"      ⚠️  WARNING: {name} is None!")
+
+    # ============================================================
+    # PRE-TRAINING VERIFICATION
+    # ============================================================
+    print("\n" + "=" * 60)
+    print("PRE-TRAINING VERIFICATION")
+    print("=" * 60)
+    
+    # 1. obs_structure 检查
+    print(f"\n[1] obs_structure:")
+    graph_dit_obs_struct = getattr(graph_dit.cfg, 'obs_structure', None)
+    print(f"    Graph-DiT: {graph_dit_obs_struct}")
+    print(f"    Residual RL: {policy_cfg.obs_structure}")
+    if graph_dit_obs_struct != policy_cfg.obs_structure:
+        print("    ⚠️  WARNING: obs_structure MISMATCH!")
+    else:
+        print("    ✅ obs_structure consistent")
+    
+    # 2. 可训练参数检查
+    print(f"\n[2] Trainable parameters:")
+    policy_trainable = [(name, param.shape) for name, param in policy.named_parameters() if param.requires_grad]
+    print(f"    Policy trainable params: {len(policy_trainable)}")
+    for name, shape in policy_trainable[:5]:  # Show first 5
+        print(f"      {name}: {shape}")
+    if len(policy_trainable) > 5:
+        print(f"      ... and {len(policy_trainable) - 5} more")
+    
+    # 3. node_to_z 检查
+    print(f"\n[3] node_to_z:")
+    if hasattr(graph_dit, 'node_to_z'):
+        n2z_trainable = sum(1 for p in graph_dit.node_to_z.parameters() if p.requires_grad)
+        n2z_total = len(list(graph_dit.node_to_z.parameters()))
+        print(f"    Trainable params: {n2z_trainable}/{n2z_total}")
+        if n2z_trainable == 0:
+            print("    ⚠️  WARNING: node_to_z has NO trainable params!")
+        else:
+            print("    ✅ node_to_z is trainable")
+    else:
+        print("    ⚠️  WARNING: node_to_z not found!")
+    
+    # 4. 归一化统计量检查
+    print(f"\n[4] Normalization stats:")
+    stats_ok = True
+    for name, val in [('obs_mean', obs_mean), ('action_mean', action_mean),
+                      ('ee_node_mean', ee_node_mean), ('joint_mean', joint_mean)]:
+        if val is not None:
+            print(f"    {name}: {val.shape} ✅")
+        else:
+            print(f"    {name}: None ⚠️  WARNING!")
+            stats_ok = False
+    if stats_ok:
+        print("    ✅ All normalization stats loaded")
+    else:
+        print("    ⚠️  WARNING: Some normalization stats are missing!")
+    
+    # 5. 测试 forward pass
+    print(f"\n[5] Test forward pass:")
+    try:
+        test_obs = torch.randn(2, obs_dim, device=device)
+        policy.init_env_buffers(2)
+        # Test z extraction
+        z = policy._get_z_layers_fast(test_obs)
+        print(f"    z_layers shape: {z.shape} ✅")
+        print(f"    Forward pass test: OK")
+    except Exception as e:
+        print(f"    ❌ FAILED: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    print("=" * 60 + "\n")
 
     # Train
     trainer.train(

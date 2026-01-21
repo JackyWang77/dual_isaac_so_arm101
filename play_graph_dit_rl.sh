@@ -1,10 +1,10 @@
 #!/bin/bash
 # Play/Test trained Residual RL Policy (Graph-DiT + PPO fine-tuned)
-# This script plays a model trained with train_residual_rl.sh
+# This script plays a model trained with train_graph_dit_rl.py
 #
 # Usage:
-#   ./play_graph_dit_rl.sh                           # Auto-detect latest checkpoint
-#   ./play_graph_dit_rl.sh <checkpoint_path>         # Use specific checkpoint
+#   ./play_graph_dit_rl.sh <checkpoint_path> [pretrained_checkpoint] [task]
+#   ./play_graph_dit_rl.sh ./logs/gr_dit/SO-ARM101-Lift-Cube-v0/2026-01-20_14-43-40/policy_iter_300.pt
 
 set -e
 
@@ -12,101 +12,62 @@ echo "========================================"
 echo "Testing Residual RL Policy (Graph-DiT + PPO)"
 echo "========================================"
 
-# Check if RSL-RL module is available
-if ! python -c "from rsl_rl.modules import ActorCritic" 2>/dev/null; then
-    echo "⚠️  Warning: RSL-RL modules not found!"
-    echo ""
-    echo "Please activate conda environment first:"
-    echo "  conda activate env_isaaclab"
-    exit 1
-fi
-
-# Checkpoint path (first argument, or auto-detect latest)
+# Checkpoint path (first argument, required)
 CHECKPOINT="${1:-}"
-
-# Base directory for RL training logs (matches train_residual_rl.sh output)
-BASE_DIR="./logs/rsl_rl/lift_residual_rl"
-
-# Auto-detect latest checkpoint if not provided
-if [ -z "$CHECKPOINT" ]; then
-    # Find latest run directory
-    LATEST_RUN=$(ls -dt "$BASE_DIR"/*/ 2>/dev/null | head -1)
-
-    if [ -n "$LATEST_RUN" ]; then
-        # Find the highest numbered model checkpoint in the latest run
-        LATEST_CHECKPOINT=$(ls -v "$LATEST_RUN"model_*.pt 2>/dev/null | tail -1)
-
-        if [ -n "$LATEST_CHECKPOINT" ]; then
-            CHECKPOINT="$LATEST_CHECKPOINT"
-            echo "Auto-detected latest checkpoint: $CHECKPOINT"
-        fi
-    fi
-fi
 
 # Validate checkpoint exists
 if [ -z "$CHECKPOINT" ] || [ ! -f "$CHECKPOINT" ]; then
     echo "❌ Error: Checkpoint not found!"
     echo ""
     echo "Usage:"
-    echo "  $0                          # Auto-detect latest checkpoint"
-    echo "  $0 <checkpoint_path>        # Use specific checkpoint"
+    echo "  $0 <checkpoint_path> [pretrained_checkpoint] [task]"
     echo ""
-    echo "Example:"
-    echo "  $0 ./logs/rsl_rl/lift_residual_rl/2025-12-30_19-52-29/model_299.pt"
+    echo "Examples:"
+    echo "  $0 ./logs/gr_dit/SO-ARM101-Lift-Cube-v0/2026-01-20_14-43-40/policy_iter_300.pt"
+    echo "  $0 ./logs/gr_dit/SO-ARM101-Lift-Cube-v0/2026-01-20_14-43-40/policy_iter_300.pt \\"
+    echo "     ./logs/graph_dit/lift_joint_flow_matching/2026-01-20_11-46-23/best_model.pt"
     echo ""
-    echo "Available checkpoints in $BASE_DIR:"
-    for dir in $(ls -dt "$BASE_DIR"/*/ 2>/dev/null | head -5); do
-        latest=$(ls -v "${dir}"model_*.pt 2>/dev/null | tail -1)
-        [ -n "$latest" ] && echo "  $latest"
+    echo "Available checkpoints in logs/gr_dit:"
+    find logs/gr_dit -name "policy_*.pt" -type f 2>/dev/null | head -5 | while read f; do
+        echo "  $f"
     done
     exit 1
 fi
 
-echo "Using checkpoint: $CHECKPOINT"
+echo "Using RL checkpoint: $CHECKPOINT"
 
-# ============================================================
-# CRITICAL: Extract pretrained_checkpoint path from saved config
-# The Residual RL policy needs the Graph-DiT checkpoint path,
-# which is stored in params/agent.yaml from training.
-# ============================================================
-CHECKPOINT_DIR=$(dirname "$CHECKPOINT")
-AGENT_YAML="$CHECKPOINT_DIR/params/agent.yaml"
+# Pretrained Graph-DiT checkpoint (second argument, or auto-detect)
+PRETRAINED_CHECKPOINT="${2:-}"
 
-if [ -f "$AGENT_YAML" ]; then
-    # Extract pretrained_checkpoint path from YAML
-    PRETRAINED_CHECKPOINT=$(grep "pretrained_checkpoint:" "$AGENT_YAML" | sed 's/.*pretrained_checkpoint: //' | tr -d ' ')
-
-    if [ -n "$PRETRAINED_CHECKPOINT" ] && [ -f "$PRETRAINED_CHECKPOINT" ]; then
-        echo "Found Graph-DiT checkpoint: $PRETRAINED_CHECKPOINT"
-        export RESIDUAL_RL_PRETRAINED_CHECKPOINT="$PRETRAINED_CHECKPOINT"
-    else
-        echo "⚠️  Warning: pretrained_checkpoint from config not found: $PRETRAINED_CHECKPOINT"
-        echo "   Trying to find a valid checkpoint..."
-
-        # Fallback: find latest Graph-DiT checkpoint
-        FALLBACK_CHECKPOINT=$(ls -t ./logs/graph_dit/lift_joint_flow_matching/*/best_model.pt 2>/dev/null | head -1)
-        if [ -n "$FALLBACK_CHECKPOINT" ]; then
-            echo "   Using fallback: $FALLBACK_CHECKPOINT"
-            export RESIDUAL_RL_PRETRAINED_CHECKPOINT="$FALLBACK_CHECKPOINT"
-        else
-            echo "❌ Error: No Graph-DiT checkpoint found!"
-            exit 1
-        fi
+if [ -z "$PRETRAINED_CHECKPOINT" ]; then
+    # Auto-detect: find latest Graph-DiT checkpoint
+    PRETRAINED_CHECKPOINT=$(ls -t ./logs/graph_dit/lift_joint_flow_matching/*/best_model.pt 2>/dev/null | head -1)
+    if [ -z "$PRETRAINED_CHECKPOINT" ] || [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
+        echo "❌ Error: No Graph-DiT checkpoint found!"
+        echo "   Please specify --pretrained_checkpoint manually"
+        echo ""
+        echo "Available Graph-DiT checkpoints:"
+        find logs/graph_dit -name "best_model.pt" -type f 2>/dev/null | head -5 | while read f; do
+            echo "  $f"
+        done
+        exit 1
     fi
+    echo "Auto-detected Graph-DiT checkpoint: $PRETRAINED_CHECKPOINT"
 else
-    echo "⚠️  Warning: Agent config not found: $AGENT_YAML"
-    # Fallback: find latest Graph-DiT checkpoint
-    FALLBACK_CHECKPOINT=$(ls -t ./logs/graph_dit/lift_joint_flow_matching/*/best_model.pt 2>/dev/null | head -1)
-    if [ -n "$FALLBACK_CHECKPOINT" ]; then
-        echo "   Using fallback: $FALLBACK_CHECKPOINT"
-        export RESIDUAL_RL_PRETRAINED_CHECKPOINT="$FALLBACK_CHECKPOINT"
+    if [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
+        echo "❌ Error: Graph-DiT checkpoint not found: $PRETRAINED_CHECKPOINT"
+        exit 1
     fi
+    echo "Using Graph-DiT checkpoint: $PRETRAINED_CHECKPOINT"
 fi
 
-echo ""
+# Task name (third argument, or default)
+TASK="${3:-SO-ARM101-Lift-Cube-v0}"
+echo "Using task: $TASK"
 
 # Default parameters (can be overridden via environment variables)
-NUM_ENVS="${NUM_ENVS:-4}"            # Default: 4 environments for playback
+NUM_ENVS="${NUM_ENVS:-2}"            # Default: 64 environments for playback
+NUM_EPISODES="${NUM_EPISODES:-10}"    # Default: 10 episodes
 
 # Check if headless mode
 HEADLESS_FLAG=""
@@ -114,14 +75,21 @@ if [ "${HEADLESS:-false}" = "true" ]; then
     HEADLESS_FLAG="--headless"
 fi
 
+echo ""
 echo "Playback settings:"
+echo "  Task: $TASK"
+echo "  RL Checkpoint: $CHECKPOINT"
+echo "  Graph-DiT Checkpoint: $PRETRAINED_CHECKPOINT"
 echo "  Num envs: $NUM_ENVS"
+echo "  Num episodes: $NUM_EPISODES"
 echo "  Headless: ${HEADLESS:-false}"
 echo ""
 
-# Run the play script using RSL-RL play
-python scripts/rsl_rl/play.py \
-    --task SO-ARM101-Lift-Cube-ResidualRL-v0 \
+# Run the play script
+python scripts/graph_dit_rl/play_graph_dit_rl.py \
+    --task "$TASK" \
     --checkpoint "$CHECKPOINT" \
+    --pretrained_checkpoint "$PRETRAINED_CHECKPOINT" \
     --num_envs "$NUM_ENVS" \
+    --num_episodes "$NUM_EPISODES" \
     $HEADLESS_FLAG

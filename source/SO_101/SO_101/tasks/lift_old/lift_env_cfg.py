@@ -167,16 +167,72 @@ class EventCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
 
+    # ============================================================
+    # 1. Reaching Reward (密集，引导接近物体)
+    # ============================================================
+    reaching_object = RewTerm(
+        func=mdp.object_ee_distance,
+        params={"std": 0.05},
+        weight=5.0,
+    )
+
+    # ============================================================
+    # 2. Grasp Behavior Reward (密集，教gripper正确开合) - 关键新增！
+    # ============================================================
+    grasp_behavior = RewTerm(
+        func=mdp.grasp_reward,
+        params={"threshold_distance": 0.01},  # EE距离物体0.01m内算"接近" (更严格，确保能抓起来)
+        weight=2.0,  # 权重要高，直接教gripper行为
+    )
+
+    # ============================================================
+    # 3. Object Grasped Reward (中等密集，检测是否真正抓住)
+    # ============================================================
+    object_grasped = RewTerm(
+        func=mdp.object_grasped_reward,
+        params={
+            "lift_threshold": 0.02,  # 物体需要抬起0.02m
+            "grasp_distance_threshold": 0.05,  # 抓住时EE和物体距离<0.05m
+            "initial_height": 0.015,
+        },
+        weight=3.0,  # 权重要高
+    )
+
+    # ============================================================
+    # 4. Lifting Reward (密集，鼓励抬起物体)
+    # ============================================================
     # CRITICAL: initial_height must match cube's actual initial height (0.015m from joint_pos_env_cfg.py)
     # minimal_height=0.04 means target height is 0.04m (2.5cm lift from initial 0.015m)
     lifting_object = RewTerm(
         func=mdp.object_is_lifted,
         params={"minimal_height": 0.04, "initial_height": 0.015},
-        weight=15.0,
+        weight=15.0,  # 保持高权重
     )
-    reaching_object = RewTerm(
-        func=mdp.object_ee_distance, params={"std": 0.05}, weight=5.0
+
+    # ============================================================
+    # 5. Success Bonus (稀疏大奖励)
+    # ============================================================
+    task_complete = RewTerm(
+        func=mdp.task_success_bonus,
+        params={
+            "bonus": 10.0,  # 成功时给予10.0奖励
+            "target_height": 0.1,  # 目标高度0.1m
+            "hold_time_steps": 10,  # 需要保持10步
+        },
+        weight=1.0,  # 内部已经是10.0，这里权重设为1.0
     )
+
+    # ============================================================
+    # 6. Gripper Smoothness Penalty (防止频繁开合)
+    # ============================================================
+    gripper_smooth = RewTerm(
+        func=mdp.gripper_action_penalty,
+        weight=1.0,
+    )
+
+    # ============================================================
+    # 7. Regularization Terms (保持原有)
+    # ============================================================
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-4)
     joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-1e-4)
 

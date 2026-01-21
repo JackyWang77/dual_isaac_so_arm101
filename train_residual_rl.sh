@@ -27,7 +27,7 @@ set -e
 # ============================================================
 PRETRAINED_CHECKPOINT="${1:-}"
 NUM_ENVS="${2:-2}"
-MAX_ITERATIONS="${3:-200}"
+MAX_ITERATIONS="${3:-500}"
 STEPS_PER_ENV="${4:-130}"  # Increased from 24 to 130 to allow episodes to complete
 MINI_BATCH_SIZE="${5:-64}"
 NUM_EPOCHS="${6:-5}"

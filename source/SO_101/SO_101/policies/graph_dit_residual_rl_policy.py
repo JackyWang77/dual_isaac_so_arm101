@@ -583,12 +583,25 @@ class GraphDiTResidualRLPolicy(nn.Module):
             ee_pos = obs[:, obs_struct["ee_position"][0]:obs_struct["ee_position"][1]]
             ee_ori = obs[:, obs_struct["ee_orientation"][0]:obs_struct["ee_orientation"][1]]
         else:
-            # Default structure: [joint_pos(6), obj_pos(3), obj_ori(4), ee_pos(3), ee_ori(4), ...]
-            robot_state_dim = cfg.robot_state_dim
-            obj_pos = obs[:, robot_state_dim:robot_state_dim + 3]
-            obj_ori = obs[:, robot_state_dim + 3:robot_state_dim + 7]
-            ee_pos = obs[:, robot_state_dim + 7:robot_state_dim + 10]
-            ee_ori = obs[:, robot_state_dim + 10:robot_state_dim + 14]
+            # Default structure: [joint_pos(6), joint_vel(6), obj_pos(3), obj_ori(4), ee_pos(3), ee_ori(4), ...]
+            # WARNING: This default assumes joint_pos(6) + joint_vel(6) = 12 before object_position
+            # This matches graph_dit_policy.py default: object_position = obs[:, 12:15]
+            # If obs_structure is None, both should use the same default indices
+            # CRITICAL: Always pass obs_structure from Graph-DiT config to avoid inconsistency!
+            import warnings
+            warnings.warn(
+                "obs_structure is None! Using default indices. "
+                "This may be inconsistent with Graph-DiT default indices. "
+                "Please ensure obs_structure is passed from Graph-DiT config.",
+                UserWarning
+            )
+            # Default: [joint_pos(6), joint_vel(6), obj_pos(3), obj_ori(4), ee_pos(3), ee_ori(4), ...]
+            # object_position starts at index 12 (6 + 6)
+            object_start_idx = 12  # joint_pos(6) + joint_vel(6)
+            obj_pos = obs[:, object_start_idx:object_start_idx + 3]
+            obj_ori = obs[:, object_start_idx + 3:object_start_idx + 7]
+            ee_pos = obs[:, object_start_idx + 7:object_start_idx + 10]
+            ee_ori = obs[:, object_start_idx + 10:object_start_idx + 14]
         
         ee_node = torch.cat([ee_pos, ee_ori], dim=-1)      # [B, 7]
         obj_node = torch.cat([obj_pos, obj_ori], dim=-1)   # [B, 7]
@@ -995,21 +1008,72 @@ class GraphDiTResidualRLPolicy(nn.Module):
     # Save / Load
     # -----------------------------
     def save(self, path: str):
-        """Save policy"""
+        """Save policy including trainable node_to_z from backbone"""
+        policy_state_dict = self.state_dict()
+        
+        # CRITICAL: Also save node_to_z weights from backbone if it's trainable
+        # node_to_z is in backbone.backbone.node_to_z, not in policy.parameters()
+        node_to_z_state_dict = {}
+        if hasattr(self, 'backbone') and hasattr(self.backbone, 'backbone'):
+            graph_dit = self.backbone.backbone
+            if hasattr(graph_dit, 'node_to_z'):
+                # Extract node_to_z weights from Graph-DiT
+                for name, param in graph_dit.node_to_z.named_parameters():
+                    node_to_z_state_dict[f"backbone.backbone.node_to_z.{name}"] = param.data.clone()
+                if len(node_to_z_state_dict) > 0:
+                    print(f"[GraphDiTResidualRLPolicy] Saving {len(node_to_z_state_dict)} node_to_z parameters")
+                    print(f"[GraphDiTResidualRLPolicy] node_to_z_state_dict keys: {list(node_to_z_state_dict.keys())[:3]}...")
+                else:
+                    print("[GraphDiTResidualRLPolicy] ⚠️  WARNING: node_to_z_state_dict is EMPTY!")
+            else:
+                print("[GraphDiTResidualRLPolicy] ⚠️  WARNING: graph_dit has no node_to_z attribute!")
+        else:
+            print("[GraphDiTResidualRLPolicy] ⚠️  WARNING: Cannot access backbone.backbone!")
+        
         torch.save({
-            "policy_state_dict": self.state_dict(),
+            "policy_state_dict": policy_state_dict,
+            "node_to_z_state_dict": node_to_z_state_dict if len(node_to_z_state_dict) > 0 else None,
             "cfg": self.cfg,
         }, path)
         print(f"[GraphDiTResidualRLPolicy] Saved to: {path}")
     
     @classmethod
     def load(cls, path: str, backbone: GraphDiTBackboneAdapter, device: str = "cuda"):
-        """Load policy"""
+        """Load policy including trainable node_to_z from backbone"""
         checkpoint = torch.load(path, map_location=device, weights_only=False)
         cfg = checkpoint["cfg"]
         
         policy = cls(cfg, backbone)
         policy.load_state_dict(checkpoint["policy_state_dict"])
+        
+        # CRITICAL: Also load node_to_z weights from checkpoint if available
+        # This ensures we load the trained node_to_z, not the original Graph-DiT node_to_z
+        node_to_z_state_dict = checkpoint.get("node_to_z_state_dict", None)
+        if node_to_z_state_dict is not None and len(node_to_z_state_dict) > 0:
+            if hasattr(backbone, 'backbone'):
+                graph_dit = backbone.backbone
+                if hasattr(graph_dit, 'node_to_z'):
+                    # Load node_to_z weights into Graph-DiT
+                    node_to_z_dict = {}
+                    for key, value in node_to_z_state_dict.items():
+                        # Remove "backbone.backbone." prefix
+                        if key.startswith("backbone.backbone.node_to_z."):
+                            param_name = key[len("backbone.backbone.node_to_z."):]
+                            node_to_z_dict[param_name] = value
+                    
+                    missing_keys, unexpected_keys = graph_dit.node_to_z.load_state_dict(node_to_z_dict, strict=False)
+                    if missing_keys:
+                        print(f"[GraphDiTResidualRLPolicy] Warning: Missing node_to_z keys: {missing_keys}")
+                    if unexpected_keys:
+                        print(f"[GraphDiTResidualRLPolicy] Warning: Unexpected node_to_z keys: {unexpected_keys}")
+                    print(f"[GraphDiTResidualRLPolicy] Loaded {len(node_to_z_dict)} node_to_z parameters from checkpoint")
+                else:
+                    print("[GraphDiTResidualRLPolicy] Warning: node_to_z_state_dict found but graph_dit has no node_to_z")
+            else:
+                print("[GraphDiTResidualRLPolicy] Warning: node_to_z_state_dict found but backbone has no backbone")
+        else:
+            print("[GraphDiTResidualRLPolicy] No node_to_z_state_dict in checkpoint (using original Graph-DiT node_to_z)")
+        
         policy.to(device)
         
         print(f"[GraphDiTResidualRLPolicy] Loaded from: {path}")

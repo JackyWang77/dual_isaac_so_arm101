@@ -26,6 +26,7 @@ simulation_app = app_launcher.app
 """Rest everything follows."""
 
 import time
+import numpy as np
 
 import gymnasium as gym
 import SO_101.tasks  # noqa: F401  # Register environments
@@ -82,17 +83,72 @@ def play_graph_dit_rl_policy(
     policy.eval()
     print(f"[Play] RL policy loaded")
 
-    # Load normalization stats from GraphDiT checkpoint
+    # Load normalization stats from GraphDiT checkpoint (same as train_graph_dit_rl.py)
     checkpoint = torch.load(pretrained_checkpoint, map_location=device, weights_only=False)
-    if "node_stats" in checkpoint:
-        node_stats = checkpoint["node_stats"]
-        policy.set_normalization_stats(
-            ee_node_mean=node_stats.get("ee_mean"),
-            ee_node_std=node_stats.get("ee_std"),
-            object_node_mean=node_stats.get("object_mean"),
-            object_node_std=node_stats.get("object_std"),
-        )
-        print(f"[Play] Loaded normalization stats")
+    
+    # Load obs stats
+    obs_stats = checkpoint.get("obs_stats", None)
+    obs_mean, obs_std = None, None
+    if obs_stats is not None:
+        if isinstance(obs_stats["mean"], np.ndarray):
+            obs_mean = torch.from_numpy(obs_stats["mean"]).squeeze().to(device)
+            obs_std = torch.from_numpy(obs_stats["std"]).squeeze().to(device)
+        else:
+            obs_mean = obs_stats["mean"].squeeze().to(device)
+            obs_std = obs_stats["std"].squeeze().to(device)
+        print(f"[Play] Loaded obs normalization stats")
+    
+    # Load node stats
+    node_stats = checkpoint.get("node_stats", None)
+    ee_node_mean, ee_node_std = None, None
+    object_node_mean, object_node_std = None, None
+    if node_stats is not None:
+        if isinstance(node_stats["ee_mean"], np.ndarray):
+            ee_node_mean = torch.from_numpy(node_stats["ee_mean"]).squeeze().to(device)
+            ee_node_std = torch.from_numpy(node_stats["ee_std"]).squeeze().to(device)
+            object_node_mean = torch.from_numpy(node_stats["object_mean"]).squeeze().to(device)
+            object_node_std = torch.from_numpy(node_stats["object_std"]).squeeze().to(device)
+        else:
+            ee_node_mean = node_stats["ee_mean"].squeeze().to(device)
+            ee_node_std = node_stats["ee_std"].squeeze().to(device)
+            object_node_mean = node_stats["object_mean"].squeeze().to(device)
+            object_node_std = node_stats["object_std"].squeeze().to(device)
+        print(f"[Play] Loaded node normalization stats")
+    
+    # Load action stats
+    action_stats = checkpoint.get("action_stats", None)
+    action_mean, action_std = None, None
+    if action_stats is not None:
+        if isinstance(action_stats["mean"], np.ndarray):
+            action_mean = torch.from_numpy(action_stats["mean"]).squeeze().to(device)
+            action_std = torch.from_numpy(action_stats["std"]).squeeze().to(device)
+        else:
+            action_mean = action_stats["mean"].squeeze().to(device)
+            action_std = action_stats["std"].squeeze().to(device)
+        print(f"[Play] Loaded action normalization stats")
+    
+    # Load joint stats
+    joint_stats = checkpoint.get("joint_stats", None)
+    joint_mean, joint_std = None, None
+    if joint_stats is not None:
+        if isinstance(joint_stats["mean"], np.ndarray):
+            joint_mean = torch.from_numpy(joint_stats["mean"]).squeeze().to(device)
+            joint_std = torch.from_numpy(joint_stats["std"]).squeeze().to(device)
+        else:
+            joint_mean = joint_stats["mean"].squeeze().to(device)
+            joint_std = joint_stats["std"].squeeze().to(device)
+        print(f"[Play] Loaded joint normalization stats")
+    
+    # Set normalization stats in policy (same as train_graph_dit_rl.py)
+    policy.set_normalization_stats(
+        ee_node_mean=ee_node_mean,
+        ee_node_std=ee_node_std,
+        object_node_mean=object_node_mean,
+        object_node_std=object_node_std,
+        action_mean=action_mean,
+        action_std=action_std,
+    )
+    print(f"[Play] Set normalization stats in policy")
 
     # Create environment
     print(f"\n[Play] Creating environment...")
@@ -138,23 +194,43 @@ def play_graph_dit_rl_policy(
     step_count = 0
     try:
         while simulation_app.is_running() and completed_episodes < num_episodes:
+            # CRITICAL: Normalize observations (same as train_graph_dit_rl.py)
+            if obs_mean is not None and obs_std is not None:
+                obs_norm = (obs - obs_mean) / obs_std
+            else:
+                obs_norm = obs
+            
             # Extract current node features and joint states from obs
             ee_node_current, object_node_current = policy._extract_nodes_from_obs(obs)
             # NOTE: GraphDiT expects 6 dimensions (was trained with 6), regardless of residual RL config
             joint_states_current = obs[:, :6]  # [B, 6] - always 6 for GraphDiT compatibility
             
+            # CRITICAL: Normalize node and joint histories (same as train_graph_dit_rl.py)
             # History tensors are already in batch format [num_envs, history_len, dim]
-            # No need to stack, just use directly
+            action_history_norm = action_history  # [B, H, action_dim] - already normalized (stored as normalized)
+            
+            # Normalize node histories
+            ee_node_history_norm = ee_node_history.clone()  # [B, H, 7]
+            object_node_history_norm = object_node_history.clone()  # [B, H, 7]
+            if ee_node_mean is not None and ee_node_std is not None:
+                ee_node_history_norm = (ee_node_history_norm - ee_node_mean) / ee_node_std
+            if object_node_mean is not None and object_node_std is not None:
+                object_node_history_norm = (object_node_history_norm - object_node_mean) / object_node_std
+            
+            # Normalize joint history
+            joint_state_history_norm = joint_state_history.clone()  # [B, H, 6]
+            if joint_mean is not None and joint_std is not None:
+                joint_state_history_norm = (joint_state_history_norm - joint_mean) / joint_std
             
             # Get action from policy
             with torch.no_grad():
                 action, policy_info = policy.act(
                     obs_raw=obs,
-                    obs_norm=obs,
-                    action_history=action_history,  # [num_envs, history_len, action_dim]
-                    ee_node_history=ee_node_history,  # [num_envs, history_len, 7]
-                    object_node_history=object_node_history,  # [num_envs, history_len, 7]
-                    joint_states_history=joint_state_history,  # [num_envs, history_len, joint_dim]
+                    obs_norm=obs_norm,  # Use normalized obs
+                    action_history=action_history_norm,  # [num_envs, history_len, action_dim] - normalized
+                    ee_node_history=ee_node_history_norm,  # [num_envs, history_len, 7] - normalized
+                    object_node_history=object_node_history_norm,  # [num_envs, history_len, 7] - normalized
+                    joint_states_history=joint_state_history_norm,  # [num_envs, history_len, joint_dim] - normalized
                     deterministic=deterministic
                 )
 
@@ -167,19 +243,91 @@ def play_graph_dit_rl_policy(
                         torch.tensor(env.action_space.high, device=action.device, dtype=action.dtype)
                     )
             
-            # CRITICAL: Binarize gripper action (same as play.py)
-            # Action is already: a_base + alpha * delta (continuous value for all dimensions including gripper)
-            # Isaac Sim expects gripper: > -0.2 -> 1.0 (open), <= -0.2 -> -1.0 (close)
-            # This allows RL to learn fine-tuning of gripper timing, especially when base policy
-            # outputs values near -0.2 threshold
+            # DEBUG: Print all joints and gripper base action, residual, and final action (same as train_graph_dit_rl.py)
             action_dim = action.shape[-1]
             if action_dim >= 6:
+                a_base = policy_info.get("a_base", None)  # [B, action_dim] - denormalized base action
+                delta = policy_info.get("delta", None)  # [B, action_dim] - denormalized delta
+                delta_norm = policy_info.get("delta_norm", None)  # [B, action_dim] - normalized delta (Actor output)
+                alpha_val = policy_info.get("alpha", None)
+                if alpha_val is not None:
+                    if isinstance(alpha_val, torch.Tensor):
+                        alpha = alpha_val.item()
+                    else:
+                        alpha = float(alpha_val)
+                else:
+                    alpha = policy.alpha.item() if hasattr(policy, 'alpha') else 0.1
+                
+                if a_base is not None and delta is not None:
+                    # Print for first env only, every 10 steps
+                    if step_count % 10 == 0:
+                        print(f"\n[Play Step {step_count:3d}] Action Debug (env 0):")
+                        print(f"  alpha: {alpha:.4f}")
+                        print(f"\n  Joints (0-4):")
+                        for i in range(min(5, action_dim)):
+                            a_base_i = a_base[0, i].item()
+                            delta_i = delta[0, i].item()
+                            final_i = action[0, i].item()
+                            print(f"    Joint {i}: base={a_base_i:7.4f}, delta={delta_i:7.4f}, final={final_i:7.4f} (base + {alpha:.2f}*delta = {a_base_i + alpha * delta_i:.4f})")
+                        
+                        # Gripper (index 5) - before binarization
+                        if action_dim >= 6:
+                            a_base_gripper = a_base[0, 5].item()
+                            delta_gripper = delta[0, 5].item()
+                            gripper_continuous_before_bin = action[0, 5].item()
+                            print(f"\n  Gripper (5) - Before Binarization:")
+                            print(f"    base: {a_base_gripper:7.4f}")
+                            print(f"    delta: {delta_gripper:7.4f}")
+                            print(f"    continuous (base + {alpha:.2f}*delta): {gripper_continuous_before_bin:7.4f}")
+                            print(f"    threshold: -0.2")
+                        
+                        # Statistics across all envs
+                        print(f"\n  Delta Statistics (all envs):")
+                        delta_mean = delta.mean(dim=0)  # [action_dim]
+                        delta_std = delta.std(dim=0)  # [action_dim]
+                        delta_min = delta.min(dim=0)[0]  # [action_dim]
+                        delta_max = delta.max(dim=0)[0]  # [action_dim]
+                        delta_positive_ratio = (delta > 0).float().mean(dim=0)  # [action_dim]
+                        
+                        print(f"    Joints (0-4):")
+                        for i in range(min(5, action_dim)):
+                            print(f"      Joint {i}: mean={delta_mean[i].item():7.4f}, std={delta_std[i].item():7.4f}, "
+                                  f"min={delta_min[i].item():7.4f}, max={delta_max[i].item():7.4f}, "
+                                  f"positive={delta_positive_ratio[i].item():.1%}")
+                        
+                        if action_dim >= 6:
+                            print(f"    Gripper (5): mean={delta_mean[5].item():7.4f}, std={delta_std[5].item():7.4f}, "
+                                  f"min={delta_min[5].item():7.4f}, max={delta_max[5].item():7.4f}, "
+                                  f"positive={delta_positive_ratio[5].item():.1%}")
+                        
+                        if delta_norm is not None:
+                            delta_norm_mean = delta_norm.mean(dim=0)  # [action_dim]
+                            delta_norm_std = delta_norm.std(dim=0)  # [action_dim]
+                            print(f"\n  Delta_norm Statistics (normalized, all envs):")
+                            print(f"    Joints (0-4):")
+                            for i in range(min(5, action_dim)):
+                                print(f"      Joint {i}: mean={delta_norm_mean[i].item():7.4f}, std={delta_norm_std[i].item():7.4f}")
+                            if action_dim >= 6:
+                                print(f"    Gripper (5): mean={delta_norm_mean[5].item():7.4f}, std={delta_norm_std[5].item():7.4f}")
+                
+                # CRITICAL: Binarize gripper action (same as play.py)
+                # Action is already: a_base + alpha * delta (continuous value for all dimensions including gripper)
+                # Isaac Sim expects gripper: > -0.2 -> 1.0 (open), <= -0.2 -> -1.0 (close)
+                # This allows RL to learn fine-tuning of gripper timing, especially when base policy
+                # outputs values near -0.2 threshold
                 gripper_continuous = action[:, 5]  # [num_envs] - continuous value: a_base_gripper + alpha * delta_gripper
-                action[:, 5] = torch.where(
+                gripper_binary = torch.where(
                     gripper_continuous > -0.2,
                     torch.tensor(1.0, device=action.device, dtype=action.dtype),
                     torch.tensor(-1.0, device=action.device, dtype=action.dtype)
                 )
+                action[:, 5] = gripper_binary
+                
+                # Print gripper binarization result (for first env, every 10 steps)
+                if step_count % 10 == 0 and a_base is not None and delta is not None:
+                    gripper_binary_val = gripper_binary[0].item()
+                    print(f"  Gripper (5) - After Binarization:")
+                    print(f"    binary (final): {gripper_binary_val:7.4f} ({'open' if gripper_binary_val > 0 else 'close'})")
 
             # Step environment
             next_obs, reward, terminated, truncated, env_info = env.step(action)
@@ -190,12 +338,14 @@ def play_graph_dit_rl_policy(
             reward = reward.to(device).float()
             done = done.to(device).float()
 
-            # Update history buffers (optimized: use torch.roll for efficiency)
-            action_normalized = action  # Assuming action is already in normalized space
+            # Update history buffers
+            # NOTE: For test_dit_only, Graph-DiT's action is already in normalized space
+            # So we can directly use action for history
+            action_for_history = action
             
             # Roll all histories: shift left by 1, new data goes to last position
             action_history = torch.roll(action_history, -1, dims=1)
-            action_history[:, -1, :] = action_normalized  # [num_envs, action_dim]
+            action_history[:, -1, :] = action_for_history  # [num_envs, action_dim]
             
             ee_node_history = torch.roll(ee_node_history, -1, dims=1)
             ee_node_history[:, -1, :] = ee_node_current  # [num_envs, 7]
@@ -447,12 +597,14 @@ def test_dit_only(
             reward = reward.to(device).float()
             done = done.to(device).float()
             
-            # Update history buffers (optimized: use torch.roll for efficiency)
-            action_normalized = action  # Assuming action is already in normalized space
+            # Update history buffers
+            # NOTE: For test_dit_only, Graph-DiT's action is already in normalized space
+            # So we can directly use action for history
+            action_for_history = action
             
             # Roll all histories: shift left by 1, new data goes to last position
             action_history = torch.roll(action_history, -1, dims=1)
-            action_history[:, -1, :] = action_normalized  # [num_envs, action_dim]
+            action_history[:, -1, :] = action_for_history  # [num_envs, action_dim]
             
             ee_node_history = torch.roll(ee_node_history, -1, dims=1)
             ee_node_history[:, -1, :] = ee_node_current  # [num_envs, 7]
