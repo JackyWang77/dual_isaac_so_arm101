@@ -182,7 +182,7 @@ class RewardsCfg:
     grasp_behavior = RewTerm(
         func=mdp.grasp_reward,
         params={"threshold_distance": 0.02},  # EE距离物体0.02m内算"接近"
-        weight=2.0,  # 权重要高，直接教gripper行为
+        weight=5.0,  # 权重要高，直接教gripper行为
     )
 
     # ============================================================
@@ -195,7 +195,7 @@ class RewardsCfg:
             "grasp_distance_threshold": 0.05,  # 抓住时EE和物体距离<0.05m
             "initial_height": 0.015,
         },
-        weight=3.0,  # 权重要高
+        weight=7.0,  # 权重要高
     )
 
     # ============================================================
