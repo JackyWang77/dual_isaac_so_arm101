@@ -48,8 +48,8 @@ class GripperDataset(Dataset):
         trigger_open_count = 0
         
         # 从图看，阈值：
-        OPEN_THRESHOLD = -0.2  # > -0.05 认为是OPEN
-        CLOSE_THRESHOLD = -0.2  # < -0.35 认为是CLOSED
+        OPEN_THRESHOLD = -0.2  # > -0.2 认为是OPEN
+        CLOSE_THRESHOLD = -0.2  # < -0.2 认为是CLOSED
         
         with h5py.File(hdf5_path, 'r') as f:
             demo_keys = sorted([k for k in f['data'].keys() if k.startswith('demo_')])
@@ -63,7 +63,7 @@ class GripperDataset(Dataset):
                 ee_pos = np.array(obs_container['ee_position'])
                 object_pos = np.array(obs_container['object_position'])
                 joint_pos = np.array(obs_container['joint_pos'])
-                joint_vel = np.array(obs_container['joint_vel'])
+                # joint_vel not needed anymore - only using gripper_state, ee_pos, object_pos
                 
                 T = len(ee_pos)
                 
@@ -108,11 +108,11 @@ class GripperDataset(Dataset):
                 
                 # 🔥 采样策略（只从skip之后开始）
                 for t in range(skip, T - 3):
+                    # Input: [gripper_state(1), ee_pos(3), object_pos(3)] = 7
                     input_data = np.concatenate([
-                        ee_pos[t],
-                        object_pos[t],
-                        joint_pos[t][:6],
-                        joint_vel[t][:6]
+                        [joint_pos[t][5]],  # gripper_state: current gripper joint value
+                        ee_pos[t],          # ee_pos: [3]
+                        object_pos[t]       # object_pos: [3]
                     ]).astype(np.float32)
                     
                     is_close_transition = t in close_transition_indices
@@ -134,10 +134,9 @@ class GripperDataset(Dataset):
                             if skip <= t_neighbor < T - 3:
                                 if t_neighbor not in close_transition_indices and t_neighbor not in open_transition_indices:
                                     neighbor_input = np.concatenate([
-                                        ee_pos[t_neighbor],
-                                        object_pos[t_neighbor],
-                                        joint_pos[t_neighbor][:6],
-                                        joint_vel[t_neighbor][:6]
+                                        [joint_pos[t_neighbor][5]],  # gripper_state
+                                        ee_pos[t_neighbor],          # ee_pos
+                                        object_pos[t_neighbor]       # object_pos
                                     ]).astype(np.float32)
                                     
                                     for _ in range(5):
@@ -160,10 +159,9 @@ class GripperDataset(Dataset):
                             if skip <= t_neighbor < T - 3:
                                 if t_neighbor not in close_transition_indices and t_neighbor not in open_transition_indices:
                                     neighbor_input = np.concatenate([
-                                        ee_pos[t_neighbor],
-                                        object_pos[t_neighbor],
-                                        joint_pos[t_neighbor][:6],
-                                        joint_vel[t_neighbor][:6]
+                                        [joint_pos[t_neighbor][5]],  # gripper_state
+                                        ee_pos[t_neighbor],          # ee_pos
+                                        object_pos[t_neighbor]       # object_pos
                                     ]).astype(np.float32)
                                     
                                     for _ in range(5):
@@ -306,14 +304,13 @@ def train_gripper_model(
             inputs = batch['input'].to(device)  # [B, 18]
             labels = batch['label'].to(device)  # [B]
             
-            # 拆分输入
-            ee_pos = inputs[:, 0:3]
-            object_pos = inputs[:, 3:6]
-            joint_pos = inputs[:, 6:12]
-            joint_vel = inputs[:, 12:18]
+            # 拆分输入: [gripper_state(1), ee_pos(3), object_pos(3)] = 7
+            gripper_state = inputs[:, 0:1]  # [B, 1]
+            ee_pos = inputs[:, 1:4]         # [B, 3]
+            object_pos = inputs[:, 4:7]      # [B, 3]
             
             # 前向传播
-            logits = model(ee_pos, object_pos, joint_pos, joint_vel)  # [B, 2]
+            logits = model(gripper_state, ee_pos, object_pos)  # [B, 3]
             loss = criterion(logits, labels)
             
             # 计算准确率
@@ -347,12 +344,11 @@ def train_gripper_model(
                 sample_inputs = sample_batch['input'][:32].to(device)
                 sample_labels = sample_batch['label'][:32].to(device)
                 
-                ee_pos = sample_inputs[:, 0:3]
-                object_pos = sample_inputs[:, 3:6]
-                joint_pos = sample_inputs[:, 6:12]
-                joint_vel = sample_inputs[:, 12:18]
+                gripper_state = sample_inputs[:, 0:1]
+                ee_pos = sample_inputs[:, 1:4]
+                object_pos = sample_inputs[:, 4:7]
                 
-                logits = model(ee_pos, object_pos, joint_pos, joint_vel)
+                logits = model(gripper_state, ee_pos, object_pos)
                 preds = torch.argmax(logits, dim=-1)
                 
                 val_acc = (preds == sample_labels).float().mean()

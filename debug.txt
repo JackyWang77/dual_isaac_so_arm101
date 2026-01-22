@@ -1,11 +1,27 @@
-Diffusion Steps:   Default (2 for Flow Matching)
-========================================
+Creating window for environment.
+[INFO]: Completed setting up the environment...
+[Play] Observation space: Dict('policy': Box(-inf, inf, (2, 32), float32), 'subtask_terms': Dict('lift_object': Box(-inf, inf, (2,), float32)))
+[Play] Action space: Box(-inf, inf, (2, 6), float32)
+[Play] Obs dim: 32, Action dim: 6
 
+[Play] Loading policy from: ./logs/graph_dit/lift_joint_flow_matching/2026-01-12_12-35-32/best_model.pt
+[GraphDiTPolicy] Added missing z_dim=128 to config for backward compatibility
+[GraphDiTPolicy] Warning: Missing keys in checkpoint (will use default initialization):
+  - node_to_z.0.weight
+  - node_to_z.0.bias
+  - node_to_z.1.weight
+  - node_to_z.1.bias
+  - node_to_z.3.weight
+  - node_to_z.3.bias
+[GraphDiTPolicy] Loaded model from: ./logs/graph_dit/lift_joint_flow_matching/2026-01-12_12-35-32/best_model.pt
+[Play] Loading gripper model from: ./logs/gripper_model/gripper_model.pt
+[Play] Raw input_mean shape: (1, 7), input_std shape: (1, 7)
 Traceback (most recent call last):
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit/play.py", line 34, in <module>
-    AppLauncher.add_app_launcher_args(parser)
-  File "/mnt/ssd/IsaacLab/source/isaaclab/isaaclab/app/app_launcher.py", line 257, in add_app_launcher_args
-    AppLauncher._check_argparser_config_params(config)
-  File "/mnt/ssd/IsaacLab/source/isaaclab/isaaclab/app/app_launcher.py", line 449, in _check_argparser_config_params
-    raise ValueError(
-ValueError: The passed ArgParser object already has the field 'device'. This field will be added by `AppLauncher.add_app_launcher_args()`, and should not be added directly. Please remove the argument or rename it to a non-conflicting name.
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit/play.py", line 1038, in <module>
+    main()
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit/play.py", line 1026, in main
+    play_graph_dit_policy(
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit/play.py", line 263, in play_graph_dit_policy
+    assert input_mean.shape == (1, 18), f"input_mean shape mismatch: {input_mean.shape}, expected (1, 18)"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: input_mean shape mismatch: (1, 7), expected (1, 18)

@@ -317,12 +317,12 @@ def main():
             output_file.write("=" * 80 + "\n")
         else:
             # Interactive mode: print to console
-            print("=" * 80)
-            print("🔍 HDF5 Data Browser")
-            print("=" * 80)
-            print(f"📁 File: {file_path}")
-            print(f"📦 Size: {format_size(Path(file_path).stat().st_size)}")
-            print("=" * 80)
+    print("=" * 80)
+    print("🔍 HDF5 Data Browser")
+    print("=" * 80)
+    print(f"📁 File: {file_path}")
+    print(f"📦 Size: {format_size(Path(file_path).stat().st_size)}")
+    print("=" * 80)
         with h5py.File(file_path, "r") as f:
             # Print file structure
             if output_file:
@@ -330,8 +330,8 @@ def main():
                 output_file.write("-" * 80 + "\n")
                 print_structure("root", f, output_file, max_depth=3, show_samples=False)
             else:
-                print("\n📂 File Structure:")
-                print("-" * 80)
+            print("\n📂 File Structure:")
+            print("-" * 80)
                 # For interactive mode, we still need to print to console
                 # Create a wrapper that prints to console
                 class ConsoleOutput:
@@ -346,9 +346,9 @@ def main():
                 output_file.write("📊 Summary Statistics\n")
                 output_file.write("=" * 80 + "\n")
             else:
-                print("\n" + "=" * 80)
-                print("📊 Summary Statistics")
-                print("=" * 80)
+            print("\n" + "=" * 80)
+            print("📊 Summary Statistics")
+            print("=" * 80)
 
             # Count demos
             if "data" in f:
@@ -360,7 +360,7 @@ def main():
                 if output_file:
                     output_file.write(f"\n📈 Total Demonstrations: {len(demo_keys)}\n")
                 else:
-                    print(f"\n📈 Total Demonstrations: {len(demo_keys)}")
+                print(f"\n📈 Total Demonstrations: {len(demo_keys)}")
 
                 if demo_keys:
                     # Analyze all demos
@@ -383,12 +383,12 @@ def main():
                             output_file.write(f"📏 Min Length: {min(demo_lengths)} steps\n")
                             output_file.write(f"📏 Max Length: {max(demo_lengths)} steps\n")
                         else:
-                            print(f"📏 Total Steps: {total_steps}")
-                            print(
-                                f"📏 Average Demo Length: {np.mean(demo_lengths):.1f} steps"
-                            )
-                            print(f"📏 Min Length: {min(demo_lengths)} steps")
-                            print(f"📏 Max Length: {max(demo_lengths)} steps")
+                        print(f"📏 Total Steps: {total_steps}")
+                        print(
+                            f"📏 Average Demo Length: {np.mean(demo_lengths):.1f} steps"
+                        )
+                        print(f"📏 Min Length: {min(demo_lengths)} steps")
+                        print(f"📏 Max Length: {max(demo_lengths)} steps")
 
                     # Get observation keys from first demo
                     first_demo = f[f"data/{demo_keys[0]}"]
@@ -404,11 +404,11 @@ def main():
                                 if isinstance(obs_data, h5py.Dataset):
                                     output_file.write(f"   • {key}: {obs_data.shape}, {obs_data.dtype}\n")
                         else:
-                            print(f"\n👁️  Observation Keys ({len(obs_keys)}):")
-                            for key in obs_keys:
-                                obs_data = obs_container[key]
-                                if isinstance(obs_data, h5py.Dataset):
-                                    print(f"   • {key}: {obs_data.shape}, {obs_data.dtype}")
+                        print(f"\n👁️  Observation Keys ({len(obs_keys)}):")
+                        for key in obs_keys:
+                            obs_data = obs_container[key]
+                            if isinstance(obs_data, h5py.Dataset):
+                                print(f"   • {key}: {obs_data.shape}, {obs_data.dtype}")
 
                     # Check actions
                     if "actions" in first_demo:
@@ -423,14 +423,14 @@ def main():
                                     f"   dimension: {actions.shape[1] if len(actions.shape) > 1 else 1}\n"
                                 )
                         else:
-                            print("\n🎮 Actions:")
-                            print(f"   shape: {actions.shape}")
-                            print(f"   dtype: {actions.dtype}")
-                            if actions.size > 0:
-                                action_data = actions[:]
-                                print(
-                                    f"   dimension: {actions.shape[1] if len(actions.shape) > 1 else 1}"
-                                )
+                        print("\n🎮 Actions:")
+                        print(f"   shape: {actions.shape}")
+                        print(f"   dtype: {actions.dtype}")
+                        if actions.size > 0:
+                            action_data = actions[:]
+                            print(
+                                f"   dimension: {actions.shape[1] if len(actions.shape) > 1 else 1}"
+                            )
 
                     # Print all demos in detail if --all flag is set
                     if print_all:
@@ -445,9 +445,9 @@ def main():
                                     output_file.write("=" * 80 + "\n")
                                     show_demo_steps(f, demo_key, demo_idx, output_file, max_steps=None)
                                 else:
-                                    print("\n" + "=" * 80)
-                                    print(f"📋 Complete Demo {demo_num}: {demo_key}")
-                                    print("=" * 80)
+                                print("\n" + "=" * 80)
+                                print(f"📋 Complete Demo {demo_num}: {demo_key}")
+                                print("=" * 80)
                                     show_demo_steps(f, demo_key, demo_idx, ConsoleOutput(), max_steps=None)
                             else:
                                 error_msg = f"❌ Error: Demo {demo_num} not found. Available demos: 1-{len(demo_keys)}"
@@ -464,10 +464,10 @@ def main():
                                 for i, demo_key in enumerate(demo_keys[:5]):
                                     show_demo_steps(f, demo_key, i, output_file, max_steps=10)
                             else:
-                                print("\n" + "=" * 80)
-                                print("📋 First 5 Demonstrations - First 10 Steps Each")
-                                print("=" * 80)
-                                for i, demo_key in enumerate(demo_keys[:5]):
+                            print("\n" + "=" * 80)
+                            print("📋 First 5 Demonstrations - First 10 Steps Each")
+                            print("=" * 80)
+                            for i, demo_key in enumerate(demo_keys[:5]):
                                     show_demo_steps(f, demo_key, i, ConsoleOutput(), max_steps=10)
                     else:
                         # Interactive browsing
@@ -555,7 +555,7 @@ def main():
                     print_structure("root", f, output_file, max_depth=10)
                 else:
                     print(msg)
-                    print("\nFull structure:")
+                print("\nFull structure:")
                     class ConsoleOutput:
                         def write(self, text):
                             print(text, end="")

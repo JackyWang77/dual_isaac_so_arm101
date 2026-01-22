@@ -247,21 +247,23 @@ def play_graph_dit_policy(
             input_std = input_std.cpu().numpy()
         
         # Ensure correct shape
-        # input_mean/std should be [1, 18] or [18] -> [1, 18]
+        # input_mean/std should be [1, 7] or [7] -> [1, 7]
+        # 🔥 MODIFIED: Gripper model input is now 7-dim: [gripper_state(1), ee_pos(3), object_pos(3)]
         print(f"[Play] Raw input_mean shape: {input_mean.shape}, input_std shape: {input_std.shape}")
         
         if input_mean.ndim == 1:
             input_mean = input_mean.reshape(1, -1)
         elif input_mean.ndim == 0:
-            raise ValueError(f"input_mean has wrong shape: {input_mean.shape}, expected [1, 18] or [18]")
+            raise ValueError(f"input_mean has wrong shape: {input_mean.shape}, expected [1, 7] or [7]")
         if input_std.ndim == 1:
             input_std = input_std.reshape(1, -1)
         elif input_std.ndim == 0:
-            raise ValueError(f"input_std has wrong shape: {input_std.shape}, expected [1, 18] or [18]")
+            raise ValueError(f"input_std has wrong shape: {input_std.shape}, expected [1, 7] or [7]")
         
         # Verify shapes
-        assert input_mean.shape == (1, 18), f"input_mean shape mismatch: {input_mean.shape}, expected (1, 18)"
-        assert input_std.shape == (1, 18), f"input_std shape mismatch: {input_std.shape}, expected (1, 18)"
+        # 🔥 MODIFIED: Gripper model input is now 7-dim: [gripper_state(1), ee_pos(3), object_pos(3)]
+        assert input_mean.shape == (1, 7), f"input_mean shape mismatch: {input_mean.shape}, expected (1, 7)"
+        assert input_std.shape == (1, 7), f"input_std shape mismatch: {input_std.shape}, expected (1, 7)"
         
         # Convert to torch tensors
         gripper_input_mean = torch.from_numpy(input_mean).float().to(device)
@@ -800,24 +802,23 @@ def play_graph_dit_policy(
                 # Extract inputs from current observation
                 # obs_tensor structure: joint_pos[0:6], joint_vel[6:12], object_position[12:15], 
                 #                      object_orientation[15:19], ee_position[19:22], ee_orientation[22:26]
+                # 🔥 MODIFIED: Gripper model input is now 7-dim: [gripper_state(1), ee_pos(3), object_pos(3)]
+                gripper_state = obs_tensor[:, 5:6]  # [num_envs, 1] - gripper joint (6th joint, index 5)
                 ee_pos = obs_tensor[:, 19:22]  # [num_envs, 3]
                 object_pos = obs_tensor[:, 12:15]  # [num_envs, 3]
-                joint_pos = obs_tensor[:, 0:6]  # [num_envs, 6] - all 6 joints including gripper
-                joint_vel = obs_tensor[:, 6:12]  # [num_envs, 6] - all 6 joint velocities
                 
-                # Prepare gripper input: [num_envs, 18] (3+3+6+6)
+                # Prepare gripper input: [num_envs, 7] (1+3+3)
                 gripper_input = torch.cat([
-                    ee_pos,      # 3
-                    object_pos,  # 3
-                    joint_pos,   # 6
-                    joint_vel    # 6
-                ], dim=-1).float()  # [num_envs, 18]
+                    gripper_state,  # 1
+                    ee_pos,         # 3
+                    object_pos      # 3
+                ], dim=-1).float()  # [num_envs, 7]
                 
                 # Debug: Check shapes on first step
                 if step_count == 0:
-                    print(f"[Play] Gripper input shape: {gripper_input.shape}, expected: [num_envs, 18]")
-                    print(f"[Play] Gripper input_mean shape: {gripper_input_mean.shape}, expected: [1, 18]")
-                    print(f"[Play] Gripper input_std shape: {gripper_input_std.shape}, expected: [1, 18]")
+                    print(f"[Play] Gripper input shape: {gripper_input.shape}, expected: [num_envs, 7]")
+                    print(f"[Play] Gripper input_mean shape: {gripper_input_mean.shape}, expected: [1, 7]")
+                    print(f"[Play] Gripper input_std shape: {gripper_input_std.shape}, expected: [1, 7]")
                 
                 # Normalize
                 gripper_input_norm = (gripper_input - gripper_input_mean) / gripper_input_std
@@ -827,48 +828,53 @@ def play_graph_dit_policy(
                     # Debug: Check input dimensions
                     if step_count == 0:
                         print(f"[Play] Gripper model input dimensions:")
-                        print(f"  ee_pos: {gripper_input_norm[:, 0:3].shape} (expected [num_envs, 3])")
-                        print(f"  object_pos: {gripper_input_norm[:, 3:6].shape} (expected [num_envs, 3])")
-                        print(f"  joint_pos: {gripper_input_norm[:, 6:12].shape} (expected [num_envs, 6])")
-                        print(f"  joint_vel: {gripper_input_norm[:, 12:18].shape} (expected [num_envs, 6])")
-                        print(f"  Total input dim: {gripper_input_norm.shape[1]} (expected 18)")
+                        print(f"  gripper_state: {gripper_input_norm[:, 0:1].shape} (expected [num_envs, 1])")
+                        print(f"  ee_pos: {gripper_input_norm[:, 1:4].shape} (expected [num_envs, 3])")
+                        print(f"  object_pos: {gripper_input_norm[:, 4:7].shape} (expected [num_envs, 3])")
+                        print(f"  Total input dim: {gripper_input_norm.shape[1]} (expected 7)")
                     
                     gripper_action, confidence, pred_class = gripper_model.predict(
-                        gripper_input_norm[:, 0:3],    # ee_pos [num_envs, 3]
-                        gripper_input_norm[:, 3:6],    # object_pos [num_envs, 3]
-                        gripper_input_norm[:, 6:12],   # joint_pos [num_envs, 6]
-                        gripper_input_norm[:, 12:18]   # joint_vel [num_envs, 6]
+                        gripper_input_norm[:, 0:1],    # gripper_state [num_envs, 1]
+                        gripper_input_norm[:, 1:4],    # ee_pos [num_envs, 3]
+                        gripper_input_norm[:, 4:7]     # object_pos [num_envs, 3]
                     )  # gripper_action: [num_envs, 1], confidence: [num_envs, 1], pred_class: [num_envs, 1]
                 
-                # 🔥 状态机逻辑
+                # 🔥 状态机逻辑（3-class: 0=KEEP_CURRENT, 1=TRIGGER_CLOSE, 2=TRIGGER_OPEN）
                 for env_id in range(num_envs):
                     curr_state = gripper_states[env_id].item()
-                    pred = pred_class[env_id, 0].item()  # 0=NOT_CLOSING, 1=START_CLOSING
+                    pred = pred_class[env_id, 0].item()  # 0=KEEP_CURRENT, 1=TRIGGER_CLOSE, 2=TRIGGER_OPEN
                     
                     if curr_state == 0:  # 当前OPEN
-                        if pred == 1:  # 预测START_CLOSING
+                        if pred == 1:  # 预测TRIGGER_CLOSE
                             gripper_states[env_id] = 1  # 进入CLOSING状态
                             gripper_close_steps[env_id] = 0
                             actions[env_id, 5] = -1.0  # Close
-                        else:
+                        else:  # KEEP_CURRENT (0) or TRIGGER_OPEN (2) - 保持打开
                             actions[env_id, 5] = 1.0  # Keep open
                     
                     elif curr_state == 1:  # 正在CLOSING
-                        # 保持关闭状态一段时间（至少10步）
-                        gripper_close_steps[env_id] += 1
-                        if gripper_close_steps[env_id] >= 10:
-                            gripper_states[env_id] = 2  # 进入CLOSED状态
-                        actions[env_id, 5] = -1.0  # Keep closing
+                        if pred == 2:  # 预测TRIGGER_OPEN（提前打开）
+                            gripper_states[env_id] = 0  # 回到OPEN状态
+                            actions[env_id, 5] = 1.0  # Open
+                        else:  # KEEP_CURRENT (0) or TRIGGER_CLOSE (1) - 继续关闭
+                            # 保持关闭状态一段时间（至少10步）
+                            gripper_close_steps[env_id] += 1
+                            if gripper_close_steps[env_id] >= 10:
+                                gripper_states[env_id] = 2  # 进入CLOSED状态
+                            actions[env_id, 5] = -1.0  # Keep closing
                     
                     elif curr_state == 2:  # CLOSED
-                        # 保持关闭（除非重置）
-                        actions[env_id, 5] = -1.0
+                        if pred == 2:  # 预测TRIGGER_OPEN
+                            gripper_states[env_id] = 0  # 回到OPEN状态
+                            actions[env_id, 5] = 1.0  # Open
+                        else:  # KEEP_CURRENT (0) or TRIGGER_CLOSE (1) - 保持关闭
+                            actions[env_id, 5] = -1.0  # Keep closed
                 
                 # 🔍 调试
                 if step_count % 10 == 0:
                     print(f"\n[Gripper Debug Step {step_count}]")
                     state_names = ["OPEN", "CLOSING", "CLOSED"]
-                    pred_names = ["NOT_CLOSING", "START_CLOSING"]
+                    pred_names = ["KEEP_CURRENT", "TRIGGER_CLOSE", "TRIGGER_OPEN"]
                     
                     for env_id in range(min(2, num_envs)):
                         ee = ee_pos[env_id].cpu().numpy()
@@ -885,10 +891,9 @@ def play_graph_dit_policy(
                         print(f"    Action: {'OPEN' if actions[env_id, 5] > 0 else 'CLOSE'}")
                 
                 # 归一化版本（用于history）
-                if action_mean is not None and action_std is not None:
-                    actions_normalized[:, 5] = (gripper_action.squeeze(-1) - action_mean[5]) / action_std[5]
-                else:
-                    actions_normalized[:, 5] = gripper_action.squeeze(-1)
+                # 🔥 MODIFIED: action_mean/action_std only have 5 dims (arm joints), gripper is already 1.0/-1.0
+                # So we directly use gripper_action without normalization
+                actions_normalized[:, 5] = gripper_action.squeeze(-1)
 
             # EMA smoothing for joints only (gripper excluded)
             # NOTE: With ema_alpha=1.0, this is effectively disabled (no smoothing)

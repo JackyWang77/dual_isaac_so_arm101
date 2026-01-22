@@ -13,7 +13,7 @@ import torch.nn as nn
 class GripperPredictor(nn.Module):
     """3-class classifier for gripper state transitions.
     
-    Input: [ee_pos(3), object_pos(3), joint_pos(6), joint_vel(6)] = 18
+    Input: [gripper_state(1), ee_pos(3), object_pos(3)] = 7
     Output: logits [3] -> softmax -> [prob_keep, prob_close, prob_open]
     """
     
@@ -26,7 +26,7 @@ class GripperPredictor(nn.Module):
         """
         super().__init__()
         
-        input_dim = 18
+        input_dim = 7  # gripper_state(1) + ee_pos(3) + object_pos(3)
         output_dim = 3  # 3分类：KEEP_CURRENT (0), TRIGGER_CLOSE (1), TRIGGER_OPEN (2)
         
         layers = []
@@ -43,37 +43,35 @@ class GripperPredictor(nn.Module):
         layers.append(nn.Linear(prev_dim, output_dim))
         self.network = nn.Sequential(*layers)
         
-    def forward(self, ee_pos, object_pos, joint_pos, joint_vel):
+    def forward(self, gripper_state, ee_pos, object_pos):
         """Forward pass.
         
         Args:
+            gripper_state: [B, 1] - Current gripper joint value
             ee_pos: [B, 3] - End-effector position
             object_pos: [B, 3] - Object position
-            joint_pos: [B, 6] - All 6 joint positions (including gripper)
-            joint_vel: [B, 6] - All 6 joint velocities
             
         Returns:
             logits: [B, 3] - raw logits for [KEEP_CURRENT, TRIGGER_CLOSE, TRIGGER_OPEN]
         """
-        x = torch.cat([ee_pos, object_pos, joint_pos, joint_vel], dim=-1)  # [B, 18]
+        x = torch.cat([gripper_state, ee_pos, object_pos], dim=-1)  # [B, 7]
         logits = self.network(x)  # [B, 3]
         return logits
     
-    def predict(self, ee_pos, object_pos, joint_pos, joint_vel):
+    def predict(self, gripper_state, ee_pos, object_pos):
         """Predict gripper action (transition detection).
         
         Args:
+            gripper_state: [B, 1] - Current gripper joint value
             ee_pos: [B, 3] - End-effector position
             object_pos: [B, 3] - Object position
-            joint_pos: [B, 6] - All 6 joint positions
-            joint_vel: [B, 6] - All 6 joint velocities
         
         Returns:
             action: [B, 1] - 1.0 for open, -1.0 for close
             confidence: [B, 1] - confidence (probability of predicted class)
             pred_class: [B, 1] - predicted class (0=KEEP_CURRENT, 1=TRIGGER_CLOSE, 2=TRIGGER_OPEN)
         """
-        logits = self.forward(ee_pos, object_pos, joint_pos, joint_vel)  # [B, 3]
+        logits = self.forward(gripper_state, ee_pos, object_pos)  # [B, 3]
         probs = torch.softmax(logits, dim=-1)  # [B, 3]
         
         # Class 0 = KEEP_CURRENT, Class 1 = TRIGGER_CLOSE, Class 2 = TRIGGER_OPEN

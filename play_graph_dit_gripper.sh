@@ -33,11 +33,11 @@ while [[ $# -gt 0 ]]; do
             GRIPPER_MODEL="$2"
             shift 2
             ;;
-        --num-envs)
+        --num-envs|--num_envs)
             NUM_ENVS="$2"
             shift 2
             ;;
-        --num-episodes)
+        --num-episodes|--num_episodes)
             NUM_EPISODES="$2"
             shift 2
             ;;
@@ -59,8 +59,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --task TASK_NAME              Task name (default: SO-ARM101-Lift-Cube-Play-v0)"
             echo "  --checkpoint PATH             Path to Graph-DiT checkpoint (required)"
             echo "  --gripper-model PATH          Path to gripper model checkpoint (required)"
-            echo "  --num-envs N                  Number of parallel environments (default: 64)"
-            echo "  --num-episodes N              Number of episodes to run (default: 10)"
+            echo "  --num-envs N (or --num_envs)  Number of parallel environments (default: 2)"
+            echo "  --num-episodes N (or --num_episodes) Number of episodes to run (default: 10)"
             echo "  --device DEVICE               Device: cuda or cpu (default: cuda)"
             echo "  --num-diffusion-steps N       Number of diffusion steps (default: 2 for Flow Matching)"
             echo ""
