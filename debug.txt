@@ -1,13 +1,11 @@
-[Trainer] Starting training for 500 iterations...
+Diffusion Steps:   Default (2 for Flow Matching)
+========================================
+
 Traceback (most recent call last):
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/train_graph_dit_rl.py", line 1290, in <module>
-    main()
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/train_graph_dit_rl.py", line 1280, in main
-    trainer.train(
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/train_graph_dit_rl.py", line 686, in train
-    rollout_stats = self.collect_rollout()
-                    ^^^^^^^^^^^^^^^^^^^^^^
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/train_graph_dit_rl.py", line 480, in collect_rollout
-    if action_dim >= 6:
-       ^^^^^^^^^^
-NameError: name 'action_dim' is not defined
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit/play.py", line 34, in <module>
+    AppLauncher.add_app_launcher_args(parser)
+  File "/mnt/ssd/IsaacLab/source/isaaclab/isaaclab/app/app_launcher.py", line 257, in add_app_launcher_args
+    AppLauncher._check_argparser_config_params(config)
+  File "/mnt/ssd/IsaacLab/source/isaaclab/isaaclab/app/app_launcher.py", line 449, in _check_argparser_config_params
+    raise ValueError(
+ValueError: The passed ArgParser object already has the field 'device'. This field will be added by `AppLauncher.add_app_launcher_args()`, and should not be added directly. Please remove the argument or rename it to a non-conflicting name.

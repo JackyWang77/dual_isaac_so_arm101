@@ -16,15 +16,33 @@ Usage:
 
 """Launch Isaac Sim Simulator first."""
 
+import argparse
+
 from isaaclab.app import AppLauncher
 
+# Create argument parser first
+parser = argparse.ArgumentParser(description="Play Graph-DiT Policy with Gripper Model")
+parser.add_argument("--task", type=str, required=True, help="Task name")
+parser.add_argument("--checkpoint", type=str, required=True, help="Path to Graph-DiT checkpoint")
+parser.add_argument("--gripper-model", type=str, default=None, help="Path to gripper model checkpoint")
+parser.add_argument("--num_envs", type=int, default=2, help="Number of environments")
+parser.add_argument("--num_episodes", type=int, default=10, help="Number of episodes to run")
+parser.add_argument("--num_diffusion_steps", type=int, default=None, help="Number of diffusion steps")
+
+# Append AppLauncher CLI args (this will add --device automatically)
+AppLauncher.add_app_launcher_args(parser)
+
+# Parse arguments (but don't use them yet, will parse again later)
+args_cli, unknown = parser.parse_known_args()
+
 # Launch Isaac Sim
-app_launcher = AppLauncher(headless=False)
+app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
-import argparse
+import os
+import sys
 
 import gymnasium as gym
 import numpy as np
@@ -32,6 +50,11 @@ import SO_101.tasks  # noqa: F401  # Register environments
 import torch
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
 from SO_101.policies.graph_dit_policy import GraphDiTPolicy
+
+# Add current directory to path for gripper_model import
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, current_dir)
+from gripper_model import GripperPredictor
 
 # Try to import visualization utilities (if available)
 try:
@@ -49,6 +72,7 @@ def play_graph_dit_policy(
     num_episodes: int = 10,
     device: str = "cuda",
     num_diffusion_steps: int | None = None,
+    gripper_model_path: str | None = None,
 ):
     """Play trained Graph-DiT policy.
     
@@ -194,6 +218,62 @@ def play_graph_dit_policy(
     policy = GraphDiTPolicy.load(checkpoint_path, device=device)
     policy.eval()
     
+    # Load gripper model (if provided)
+    gripper_model = None
+    gripper_input_mean = None
+    gripper_input_std = None
+    
+    if gripper_model_path is not None and os.path.exists(gripper_model_path):
+        print(f"[Play] Loading gripper model from: {gripper_model_path}")
+        gripper_checkpoint = torch.load(gripper_model_path, map_location=device, weights_only=False)
+        
+        # Get model config
+        hidden_dims = gripper_checkpoint.get('hidden_dims', [128, 128, 64])
+        dropout = gripper_checkpoint.get('dropout', 0.1)
+        
+        # Load model
+        gripper_model = GripperPredictor(hidden_dims=hidden_dims, dropout=dropout).to(device)
+        gripper_model.load_state_dict(gripper_checkpoint['model_state_dict'])
+        gripper_model.eval()
+        
+        # Load normalization stats (binary classification doesn't need target stats)
+        input_mean = gripper_checkpoint['input_mean']
+        input_std = gripper_checkpoint['input_std']
+        
+        # Ensure numpy arrays
+        if isinstance(input_mean, torch.Tensor):
+            input_mean = input_mean.cpu().numpy()
+        if isinstance(input_std, torch.Tensor):
+            input_std = input_std.cpu().numpy()
+        
+        # Ensure correct shape
+        # input_mean/std should be [1, 18] or [18] -> [1, 18]
+        print(f"[Play] Raw input_mean shape: {input_mean.shape}, input_std shape: {input_std.shape}")
+        
+        if input_mean.ndim == 1:
+            input_mean = input_mean.reshape(1, -1)
+        elif input_mean.ndim == 0:
+            raise ValueError(f"input_mean has wrong shape: {input_mean.shape}, expected [1, 18] or [18]")
+        if input_std.ndim == 1:
+            input_std = input_std.reshape(1, -1)
+        elif input_std.ndim == 0:
+            raise ValueError(f"input_std has wrong shape: {input_std.shape}, expected [1, 18] or [18]")
+        
+        # Verify shapes
+        assert input_mean.shape == (1, 18), f"input_mean shape mismatch: {input_mean.shape}, expected (1, 18)"
+        assert input_std.shape == (1, 18), f"input_std shape mismatch: {input_std.shape}, expected (1, 18)"
+        
+        # Convert to torch tensors
+        gripper_input_mean = torch.from_numpy(input_mean).float().to(device)
+        gripper_input_std = torch.from_numpy(input_std).float().to(device)
+        
+        print(f"[Play] Gripper model loaded successfully (Binary Classification)")
+        print(f"[Play] Gripper input_mean shape: {gripper_input_mean.shape}, input_std shape: {gripper_input_std.shape}")
+    else:
+        if gripper_model_path is not None:
+            print(f"[Play] Warning: Gripper model path provided but file not found: {gripper_model_path}")
+        print(f"[Play] Using Graph-DiT for all action dimensions (including gripper)")
+    
     # Determine mode and set default diffusion steps if not provided
     cfg = checkpoint.get("cfg", None)
     if cfg is not None:
@@ -303,7 +383,7 @@ def play_graph_dit_policy(
         policy.cfg.pred_horizon if hasattr(policy.cfg, "pred_horizon") else 16
     )
     exec_horizon = policy.cfg.exec_horizon if hasattr(policy.cfg, "exec_horizon") else 8
-
+    
     # Run episodes
     print(f"\n[Play] Running {num_episodes} episodes...")
     print(f"[Play] Action history length: {action_history_length}")
@@ -342,7 +422,7 @@ def play_graph_dit_policy(
     # ==========================================================================
     # EMA SMOOTHING for action smoothing (joints only, gripper excluded)
     # ==========================================================================
-    ema_alpha = 0.5  # EMA weight: higher = more responsive, lower = smoother
+    ema_alpha = 0.3  # EMA weight: higher = more responsive, lower = smoother
     ema_smoothed_joints = None  # Will be initialized on first action [num_envs, joint_dim]
     print(f"[Play] EMA smoothing enabled: alpha={ema_alpha} (joints only, gripper excluded)")
 
@@ -363,8 +443,12 @@ def play_graph_dit_policy(
     ]  # List of lists for dynamic management
     action_buffers_normalized = [
         [] for _ in range(num_envs)
-    ]  # Normalized versions for history
-
+    ]
+    
+    # Initialize gripper state machine (0=OPEN, 1=CLOSING, 2=CLOSED)
+    gripper_states = torch.zeros(num_envs, dtype=torch.long, device=device)
+    gripper_close_steps = torch.zeros(num_envs, dtype=torch.long, device=device)  # Steps since close triggered  # Normalized versions for history
+    
     step_count = 0
     
     def _extract_node_features_from_obs(obs_tensor):
@@ -626,13 +710,13 @@ def play_graph_dit_policy(
                 # Predict action trajectory for ALL environments (batched inference)
                 # Output: [num_envs, pred_horizon, action_dim] (normalized)
                 action_trajectory_normalized = policy.predict(
-                    obs_tensor_normalized,
-                    action_history=action_history_tensor,
-                    ee_node_history=ee_node_history_tensor,
-                    object_node_history=object_node_history_tensor,
+                obs_tensor_normalized,
+                action_history=action_history_tensor,
+                ee_node_history=ee_node_history_tensor,
+                object_node_history=object_node_history_tensor,
                     joint_states_history=joint_states_history_tensor,
-                    subtask_condition=subtask_condition,
-                    num_diffusion_steps=num_diffusion_steps,
+                subtask_condition=subtask_condition,
+                num_diffusion_steps=num_diffusion_steps,
                     deterministic=True, 
                 )  # [num_envs, pred_horizon, action_dim]
             
@@ -710,13 +794,104 @@ def play_graph_dit_policy(
             actions_normalized = torch.stack(
                 actions_normalized_list, dim=0
             )  # [num_envs, action_dim]
-
-            # Map gripper (last dimension) to binary: > -0.25 -> 1 (open), <= -0.25 -> -1 (close)
-            if action_dim >= 6:
-                gripper_raw = actions[:, 5]  # [num_envs]
-                actions[:, 5] = torch.where(gripper_raw > -0.2, torch.tensor(1.0, device=device), torch.tensor(-1.0, device=device))
+            
+            # Replace gripper (6th dimension, index 5) with gripper model prediction
+            if gripper_model is not None and action_dim >= 6:
+                # Extract inputs from current observation
+                # obs_tensor structure: joint_pos[0:6], joint_vel[6:12], object_position[12:15], 
+                #                      object_orientation[15:19], ee_position[19:22], ee_orientation[22:26]
+                ee_pos = obs_tensor[:, 19:22]  # [num_envs, 3]
+                object_pos = obs_tensor[:, 12:15]  # [num_envs, 3]
+                joint_pos = obs_tensor[:, 0:6]  # [num_envs, 6] - all 6 joints including gripper
+                joint_vel = obs_tensor[:, 6:12]  # [num_envs, 6] - all 6 joint velocities
+                
+                # Prepare gripper input: [num_envs, 18] (3+3+6+6)
+                gripper_input = torch.cat([
+                    ee_pos,      # 3
+                    object_pos,  # 3
+                    joint_pos,   # 6
+                    joint_vel    # 6
+                ], dim=-1).float()  # [num_envs, 18]
+                
+                # Debug: Check shapes on first step
+                if step_count == 0:
+                    print(f"[Play] Gripper input shape: {gripper_input.shape}, expected: [num_envs, 18]")
+                    print(f"[Play] Gripper input_mean shape: {gripper_input_mean.shape}, expected: [1, 18]")
+                    print(f"[Play] Gripper input_std shape: {gripper_input_std.shape}, expected: [1, 18]")
+                
+                # Normalize
+                gripper_input_norm = (gripper_input - gripper_input_mean) / gripper_input_std
+                
+                # 🔥 分类预测
+                with torch.no_grad():
+                    # Debug: Check input dimensions
+                    if step_count == 0:
+                        print(f"[Play] Gripper model input dimensions:")
+                        print(f"  ee_pos: {gripper_input_norm[:, 0:3].shape} (expected [num_envs, 3])")
+                        print(f"  object_pos: {gripper_input_norm[:, 3:6].shape} (expected [num_envs, 3])")
+                        print(f"  joint_pos: {gripper_input_norm[:, 6:12].shape} (expected [num_envs, 6])")
+                        print(f"  joint_vel: {gripper_input_norm[:, 12:18].shape} (expected [num_envs, 6])")
+                        print(f"  Total input dim: {gripper_input_norm.shape[1]} (expected 18)")
+                    
+                    gripper_action, confidence, pred_class = gripper_model.predict(
+                        gripper_input_norm[:, 0:3],    # ee_pos [num_envs, 3]
+                        gripper_input_norm[:, 3:6],    # object_pos [num_envs, 3]
+                        gripper_input_norm[:, 6:12],   # joint_pos [num_envs, 6]
+                        gripper_input_norm[:, 12:18]   # joint_vel [num_envs, 6]
+                    )  # gripper_action: [num_envs, 1], confidence: [num_envs, 1], pred_class: [num_envs, 1]
+                
+                # 🔥 状态机逻辑
+                for env_id in range(num_envs):
+                    curr_state = gripper_states[env_id].item()
+                    pred = pred_class[env_id, 0].item()  # 0=NOT_CLOSING, 1=START_CLOSING
+                    
+                    if curr_state == 0:  # 当前OPEN
+                        if pred == 1:  # 预测START_CLOSING
+                            gripper_states[env_id] = 1  # 进入CLOSING状态
+                            gripper_close_steps[env_id] = 0
+                            actions[env_id, 5] = -1.0  # Close
+                        else:
+                            actions[env_id, 5] = 1.0  # Keep open
+                    
+                    elif curr_state == 1:  # 正在CLOSING
+                        # 保持关闭状态一段时间（至少10步）
+                        gripper_close_steps[env_id] += 1
+                        if gripper_close_steps[env_id] >= 10:
+                            gripper_states[env_id] = 2  # 进入CLOSED状态
+                        actions[env_id, 5] = -1.0  # Keep closing
+                    
+                    elif curr_state == 2:  # CLOSED
+                        # 保持关闭（除非重置）
+                        actions[env_id, 5] = -1.0
+                
+                # 🔍 调试
+                if step_count % 10 == 0:
+                    print(f"\n[Gripper Debug Step {step_count}]")
+                    state_names = ["OPEN", "CLOSING", "CLOSED"]
+                    pred_names = ["NOT_CLOSING", "START_CLOSING"]
+                    
+                    for env_id in range(min(2, num_envs)):
+                        ee = ee_pos[env_id].cpu().numpy()
+                        obj = object_pos[env_id].cpu().numpy()
+                        dist = np.linalg.norm(ee - obj)
+                        state = gripper_states[env_id].item()
+                        pred = pred_class[env_id, 0].item()
+                        conf = confidence[env_id, 0].item()
+                        
+                        print(f"  Env {env_id}:")
+                        print(f"    Distance: {dist:.3f}")
+                        print(f"    State: {state_names[state]}")
+                        print(f"    Prediction: {pred_names[pred]} (confidence: {conf:.2%})")
+                        print(f"    Action: {'OPEN' if actions[env_id, 5] > 0 else 'CLOSE'}")
+                
+                # 归一化版本（用于history）
+                if action_mean is not None and action_std is not None:
+                    actions_normalized[:, 5] = (gripper_action.squeeze(-1) - action_mean[5]) / action_std[5]
+                else:
+                    actions_normalized[:, 5] = gripper_action.squeeze(-1)
 
             # EMA smoothing for joints only (gripper excluded)
+            # NOTE: With ema_alpha=1.0, this is effectively disabled (no smoothing)
             if action_dim >= 6:
                 joints = actions[:, :5]  # [num_envs, 5]
                 gripper = actions[:, 5:6]  # [num_envs, 1]
@@ -724,26 +899,27 @@ def play_graph_dit_policy(
                     ema_smoothed_joints = joints.clone()
                 else:
                     ema_smoothed_joints = ema_alpha * joints + (1 - ema_alpha) * ema_smoothed_joints
-                    actions = torch.cat([ema_smoothed_joints, gripper], dim=-1)  # [num_envs, 6]
-
+                # Always update actions with smoothed joints (even if alpha=1.0, this is just joints)
+                actions = torch.cat([ema_smoothed_joints, gripper], dim=-1)  # [num_envs, 6]
+            
             # Update history buffers (shift and add new)
             # IMPORTANT: Store normalized actions in history buffer, as policy expects normalized action_history
             for env_id in range(num_envs):
                 # Shift action history (use normalized actions, not denormalized!)
                 action_history_buffers[env_id] = torch.cat(
                     [
-                        action_history_buffers[env_id][1:],
+                    action_history_buffers[env_id][1:],
                         actions_normalized[
                             env_id : env_id + 1
                         ],  # [1, action_dim] - Use normalized actions!
                     ],
                     dim=0,
                 )
-
+                
                 # Shift node histories
                 ee_node_history_buffers[env_id] = torch.cat(
                     [
-                        ee_node_history_buffers[env_id][1:],
+                    ee_node_history_buffers[env_id][1:],
                         ee_node_current[env_id : env_id + 1],
                     ],
                     dim=0,
@@ -751,7 +927,7 @@ def play_graph_dit_policy(
 
                 object_node_history_buffers[env_id] = torch.cat(
                     [
-                        object_node_history_buffers[env_id][1:],
+                    object_node_history_buffers[env_id][1:],
                         object_node_current[env_id : env_id + 1],
                     ],
                     dim=0,
@@ -788,6 +964,11 @@ def play_graph_dit_policy(
                         episode_count += 1
                         current_episode_rewards[i] = 0.0
                         
+                        # Reset gripper state to OPEN
+                        if gripper_model is not None:
+                            gripper_states[i] = 0
+                            gripper_close_steps[i] = 0
+                        
                         # Reset history buffers for this environment
                         action_history_buffers[i].zero_()
                         ee_node_history_buffers[i].zero_()
@@ -806,7 +987,7 @@ def play_graph_dit_policy(
                         # Reset EMA state for this environment
                         if ema_smoothed_joints is not None:
                             ema_smoothed_joints[i] = 0.0
-
+                        
                         if episode_count >= num_episodes:
                             break
             
@@ -841,36 +1022,15 @@ def play_graph_dit_policy(
 
 def main():
     """Main playback function."""
-    parser = argparse.ArgumentParser(description="Play Graph-DiT Policy")
-    
-    parser.add_argument("--task", type=str, required=True, help="Task name")
-    parser.add_argument(
-        "--checkpoint", type=str, required=True, help="Policy checkpoint path"
-    )
-    parser.add_argument(
-        "--num_envs", type=int, default=64, help="Number of parallel environments"
-    )
-    parser.add_argument(
-        "--num_episodes", type=int, default=10, help="Number of episodes to run"
-    )
-    parser.add_argument("--device", type=str, default="cuda", help="Device (cuda/cpu)")
-    parser.add_argument(
-        "--num_diffusion_steps",
-        type=int,
-        default=None,
-        help="Number of diffusion steps for inference (default: 2 for Flow Matching)",
-    )
-    
-    args = parser.parse_args()
-    
-    # Run playback
+    # Use args_cli that was already parsed at the top of the file (before AppLauncher)
     play_graph_dit_policy(
-        task_name=args.task,
-        checkpoint_path=args.checkpoint,
-        num_envs=args.num_envs,
-        num_episodes=args.num_episodes,
-        device=args.device,
-        num_diffusion_steps=args.num_diffusion_steps,
+        task_name=args_cli.task,
+        checkpoint_path=args_cli.checkpoint,
+        num_envs=args_cli.num_envs,
+        num_episodes=args_cli.num_episodes,
+        device=args_cli.device,
+        num_diffusion_steps=args_cli.num_diffusion_steps,
+        gripper_model_path=getattr(args_cli, "gripper_model", None),
     )
 
 
