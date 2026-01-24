@@ -27,7 +27,12 @@ parser.add_argument("--checkpoint", type=str, required=True, help="Path to Graph
 parser.add_argument("--gripper-model", type=str, default=None, help="Path to gripper model checkpoint")
 parser.add_argument("--num_envs", type=int, default=2, help="Number of environments")
 parser.add_argument("--num_episodes", type=int, default=10, help="Number of episodes to run")
-parser.add_argument("--num_diffusion_steps", type=int, default=None, help="Number of diffusion steps")
+parser.add_argument(
+    "--num_diffusion_steps", 
+    type=int, 
+    default=None, 
+    help="Number of flow matching inference steps (default: uses checkpoint config, typically 30). More steps = smoother but slower."
+)
 
 # Append AppLauncher CLI args (this will add --device automatically)
 AppLauncher.add_app_launcher_args(parser)
@@ -281,14 +286,16 @@ def play_graph_dit_policy(
     if cfg is not None:
         mode = getattr(cfg, "mode", "flow_matching")
         print(f"[Play] Policy mode: {mode.upper()}")
-        # Set default steps for Flow Matching (2-4 steps for 50Hz real-time control)
+        # Use num_inference_steps from checkpoint config if available (default: 30)
+        # This matches the training configuration
         if num_diffusion_steps is None:
-            num_diffusion_steps = 2  # Flow Matching: 2-4 steps for real-time control
-            print(f"[Play] Using default diffusion steps: {num_diffusion_steps}")
+            num_diffusion_steps = getattr(cfg, "num_inference_steps", 30)
+            print(f"[Play] Using inference steps from checkpoint config: {num_diffusion_steps}")
     else:
+        # Fallback: use 30 as default (matches training default)
         if num_diffusion_steps is None:
-            num_diffusion_steps = 2  # Default for Flow Matching
-            print(f"[Play] Using default diffusion steps: {num_diffusion_steps}")
+            num_diffusion_steps = 30  # Default for Flow Matching (matches training)
+            print(f"[Play] Using default inference steps: {num_diffusion_steps}")
     
     # Load normalization stats (if available)
     obs_stats = checkpoint.get("obs_stats", None)

@@ -198,7 +198,7 @@ class NodeHistoryBuffer:
         ...     buffer.update(ee_node, object_node)
         ...     ee_history, obj_history = buffer.get_history()
         ...     action = policy.predict(obs, ee_node_history=ee_history, object_node_history=obj_history)
-        ...     env.step(action)
+        ...     env.step(action) 
         ...     if done.any():
         ...         buffer.reset(env_ids=done.nonzero().squeeze())
     """
@@ -544,7 +544,7 @@ class GraphDiTPolicyCfg:
     hidden_dim: int = 256
     """Hidden dimension for Graph-DiT."""
 
-    z_dim: int = 128
+    z_dim: int = 64
     """Graph latent dimension for RL heads (layer-wise z^k pooled from node features)."""
     
     num_layers: int = 6
@@ -559,17 +559,23 @@ class GraphDiTPolicyCfg:
     diffusion_steps: int = 100
     """Number of diffusion steps."""
     
-    noise_schedule: str = "cosine"
-    """Noise schedule: 'cosine', 'linear'."""
+    num_inference_steps: int = 30
+    """Number of inference steps for flow matching prediction.
     
-    mode: str = "flow_matching"
-    """Training/inference mode: 'flow_matching' (Rectified Flow).
-    
-    Flow matching requires only 1-10 steps for inference (fast).
+    This controls how many ODE integration steps are used during inference.
+    More steps = smoother, more accurate predictions but slower.
+    Default: 30 (good balance between quality and speed).
+    For faster inference, can use 10-20 steps. For higher quality, use 50-100 steps.
     """
     
-    num_subtasks: int = 2
-    """Number of subtasks (for conditional generation)."""
+    num_subtasks: int = 1
+    """Number of subtasks (for conditional generation).
+    
+    This parameter enables multi-stage task conditioning (e.g., lift_object, place_object).
+    During training, the actual number is dynamically read from the dataset.
+    If the dataset has no subtasks, this will be set to 0 and subtask conditioning is disabled.
+    Default is 2 to support future multi-stage tasks (currently datasets have 1 subtask: 'lift_object').
+    """
     
     device: str = "cuda"
     """Device to run on."""
@@ -589,7 +595,7 @@ class GraphDiTPolicyCfg:
     """Number of historical actions to use for self-attention."""
     
     # Action Chunking (Receding Horizon Control)
-    pred_horizon: int = 16
+    pred_horizon: int = 20
     """Prediction horizon: number of future action steps to predict at once.
     
     This is the core of Diffusion Policy's "Action Chunking" mechanism.
@@ -597,7 +603,7 @@ class GraphDiTPolicyCfg:
     Typical values: 16 for 50Hz control (320ms lookahead).
     """
     
-    exec_horizon: int = 8
+    exec_horizon: int = 10
     """Execution horizon: number of predicted actions to actually execute.
     
     After predicting pred_horizon steps, we execute the first exec_horizon steps,
@@ -1268,91 +1274,6 @@ class GraphDiTUnit(nn.Module):
         return noise_embed, node_features_new  # (action_out, node_out)
 
 
-class NoiseScheduler:
-    """Noise scheduler for diffusion process."""
-    
-    def __init__(self, num_steps: int = 100, schedule: str = "cosine"):
-        self.num_steps = num_steps
-        self.schedule = schedule
-        
-        if schedule == "cosine":
-            # Cosine schedule: alpha_bar(t) = cos^2(π/2 * (t/T))
-            self.alphas_cumprod = (
-                torch.cos(torch.linspace(0, math.pi / 2, num_steps)) ** 2
-            )
-        elif schedule == "linear":
-            # Linear schedule: alpha_bar(t) = 1 - t/T
-            self.alphas_cumprod = torch.linspace(1.0, 0.0, num_steps)
-        else:
-            raise ValueError(f"Unknown schedule: {schedule}")
-        
-        # Compute alpha values for noise schedule
-        # alpha_t = alpha_bar_t / alpha_bar_{t-1}
-        # For t=0, alpha_0 = alpha_bar_0 (since alpha_bar_{-1} = 1.0)
-        # For t>0, alpha_t = alpha_bar_t / alpha_bar_{t-1}
-        alpha_bar_prev = torch.cat(
-            [torch.tensor([1.0]), self.alphas_cumprod[:-1]]
-        )  # [num_steps]
-        self.alphas = self.alphas_cumprod / (alpha_bar_prev + 1e-8)  # [num_steps]
-        self.betas = 1.0 - self.alphas
-        self.alphas_cumprod_prev = alpha_bar_prev
-        
-        # Precompute for efficiency
-        self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
-        self.sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - self.alphas_cumprod)
-    
-    def add_noise(self, x: torch.Tensor, noise: torch.Tensor, t: torch.Tensor):
-        """Add noise to x at timestep t.
-        
-        Supports both single action [batch, action_dim] and trajectory [batch, pred_horizon, action_dim].
-        """
-        # Move scheduler buffers to the same device as x
-        sqrt_alphas_cumprod = self.sqrt_alphas_cumprod.to(x.device)
-        sqrt_one_minus_alphas_cumprod = self.sqrt_one_minus_alphas_cumprod.to(x.device)
-        
-        sqrt_alphas_cumprod_t = sqrt_alphas_cumprod[t]  # [batch]
-        sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod[t]  # [batch]
-        
-        # Reshape for broadcasting: handle both 2D [batch, dim] and 3D [batch, seq, dim]
-        if len(x.shape) == 2:
-            # Single action: [batch, action_dim]
-            sqrt_alphas_cumprod_t = sqrt_alphas_cumprod_t.view(-1, 1)
-            sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod_t.view(
-                -1, 1
-            )
-        elif len(x.shape) == 3:
-            # Trajectory: [batch, pred_horizon, action_dim]
-            sqrt_alphas_cumprod_t = sqrt_alphas_cumprod_t.view(-1, 1, 1)
-            sqrt_one_minus_alphas_cumprod_t = sqrt_one_minus_alphas_cumprod_t.view(
-                -1, 1, 1
-            )
-        
-        noisy_x = sqrt_alphas_cumprod_t * x + sqrt_one_minus_alphas_cumprod_t * noise
-        return noisy_x
-    
-    def get_alpha_t(self, t: torch.Tensor):
-        """Get alpha_t for timestep t."""
-        return self.alphas.to(t.device)[t]
-    
-    def get_alpha_bar_t(self, t: torch.Tensor):
-        """Get alpha_bar_t (alphas_cumprod) for timestep t.
-        
-        Clamp to prevent division by near-zero values.
-        """
-        alpha_bar = self.alphas_cumprod.to(t.device)[t]
-        # Clamp to prevent numerical explosion when alpha_bar is very close to 0
-        return alpha_bar.clamp(min=1e-5)
-    
-    def get_alpha_bar_t_prev(self, t: torch.Tensor):
-        """Get alpha_bar_t_prev for timestep t.
-        
-        Clamp to prevent division by near-zero values.
-        """
-        alpha_bar_prev = self.alphas_cumprod_prev.to(t.device)[t]
-        # Clamp to prevent numerical explosion when alpha_bar_prev is very close to 0
-        return alpha_bar_prev.clamp(min=1e-5)
-
-
 class GraphDiTPolicy(nn.Module):
     """Graph-DiT (Graph Diffusion Transformer) Policy.
     
@@ -1453,14 +1374,14 @@ class GraphDiTPolicy(nn.Module):
         # Graph DiT units (stacked layers)
         self.graph_dit_units = nn.ModuleList(
             [
-            GraphDiTUnit(
+                GraphDiTUnit(
                     cfg.hidden_dim,
                     cfg.num_heads,
                     cfg.graph_edge_dim,
-                use_edge_modulation=cfg.use_edge_modulation,
+                    use_edge_modulation=cfg.use_edge_modulation,
                     joint_dim=cfg.joint_dim,
-            )
-            for _ in range(cfg.num_layers)
+                )
+                for _ in range(cfg.num_layers)
             ]
         )
         
@@ -1473,9 +1394,6 @@ class GraphDiTPolicy(nn.Module):
             nn.Dropout(0.1),
             nn.Linear(cfg.hidden_dim, cfg.action_dim),
         )
-        
-        # Noise scheduler
-        self.noise_scheduler = NoiseScheduler(cfg.diffusion_steps, cfg.noise_schedule)
         
         # Initialize weights
         self._init_weights()
@@ -2467,11 +2385,11 @@ class GraphDiTPolicy(nn.Module):
         Flow Matching requires only 2-10 steps for fast inference.
         """
         self.eval()
-        # Flow Matching typically needs 1-10 steps
+        # Flow Matching inference steps: use config default (30) if not specified
         num_steps = (
             num_diffusion_steps
             if num_diffusion_steps is not None
-            else max(1, self.cfg.diffusion_steps // 10)
+            else self.cfg.num_inference_steps
         )
         
         with torch.no_grad():

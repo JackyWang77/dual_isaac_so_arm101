@@ -828,6 +828,7 @@ def train_graph_dit_policy(
     exec_horizon: int = 8,
     lr_schedule: str = "constant",
     skip_first_steps: int = 10,
+    num_inference_steps: int = 30,
 ):
     """Train Graph-DiT Policy with Action Chunking.
 
@@ -849,6 +850,8 @@ def train_graph_dit_policy(
         pred_horizon: Prediction horizon for action chunking (default: 16).
         exec_horizon: Execution horizon for receding horizon control (default: 8).
         lr_schedule: Learning rate schedule: "constant" (stable) or "cosine" (warmup + cosine annealing).
+        num_inference_steps: Number of ODE integration steps for flow matching inference (default: 30).
+            More steps = smoother predictions but slower. Recommended: 30 for good balance.
     """
 
     # Create directories with timestamp and mode suffix
@@ -1047,6 +1050,7 @@ def train_graph_dit_policy(
         mode=mode,  # "flow_matching"
         device=device,
         obs_structure=obs_structure,  # CRITICAL: Pass dynamic obs_structure instead of hardcoded indices
+        num_inference_steps=num_inference_steps,  # Flow matching inference steps (default: 30)
     )
 
     if num_subtasks > 0:
@@ -1473,6 +1477,14 @@ def main():
         help="Learning rate schedule: 'constant' (stable) or 'cosine' (warmup + cosine annealing)",
     )
 
+    # Flow matching inference steps
+    parser.add_argument(
+        "--num_inference_steps",
+        type=int,
+        default=30,
+        help="Number of ODE integration steps for flow matching inference (default: 30). More steps = smoother but slower.",
+    )
+
     # Paths
     parser.add_argument(
         "--save_dir",
@@ -1530,6 +1542,7 @@ def main():
         exec_horizon=args.exec_horizon,
         lr_schedule=args.lr_schedule,
         skip_first_steps=args.skip_first_steps,
+        num_inference_steps=args.num_inference_steps,
     )
 
 
