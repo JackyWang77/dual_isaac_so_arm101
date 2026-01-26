@@ -3,34 +3,24 @@
 
 # Mode selection (default: flow_matching)
 MODE="${1:-flow_matching}"
-# LR schedule selection (default: constant)
-LR_SCHEDULE="${2:-constant}"
 
 # Validate mode (only flow_matching supported)
 if [ "$MODE" != "flow_matching" ]; then
     echo "❌ Error: Invalid mode '$MODE'"
     echo ""
     echo "Usage:"
-    echo "  $0 [flow_matching] [constant|cosine]"
+    echo "  $0 [flow_matching]"
     echo ""
     echo "Examples:"
-    echo "  $0                        # Train with Flow Matching + constant LR (default)"
-    echo "  $0 flow_matching          # Train with Flow Matching + constant LR"
-    echo "  $0 flow_matching cosine   # Train with Flow Matching + cosine LR schedule"
-    exit 1
-fi
-
-# Validate lr_schedule
-if [ "$LR_SCHEDULE" != "constant" ] && [ "$LR_SCHEDULE" != "cosine" ]; then
-    echo "❌ Error: Invalid lr_schedule '$LR_SCHEDULE'"
-    echo "  Valid options: constant, cosine"
+    echo "  $0                        # Train with Flow Matching (default)"
+    echo "  $0 flow_matching          # Train with Flow Matching"
     exit 1
 fi
 
 echo "========================================"
 echo "Training Graph DiT Policy"
 echo "Mode: $MODE"
-echo "LR Schedule: $LR_SCHEDULE"
+echo "LR Schedule: constant (fixed)"
 echo "========================================"
 
 # DEMO-LEVEL TRAINING: Each sample is a complete demo sequence
@@ -48,12 +38,12 @@ python scripts/graph_dit/train.py \
     --task SO-ARM101-Lift-Cube-v0 \
     --dataset ./datasets/lift_annotated_dataset.hdf5 \
     --obs_dim 32 \
-    --action_dim 6 \
+    --action_dim 5 \
     --action_history_length 10 \
     --skip_first_steps 0 \
     --mode "$MODE" \
-    --lr_schedule "$LR_SCHEDULE" \
-    --epochs 1000 \
+    --lr_schedule constant \
+    --epochs 500 \
     --batch_size 32 \
     --lr 3e-4 \
     --hidden_dim 64 \

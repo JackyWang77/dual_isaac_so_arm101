@@ -45,7 +45,7 @@ while [[ $# -gt 0 ]]; do
             DEVICE="$2"
             shift 2
             ;;
-        --num-diffusion-steps)
+        --num-diffusion-steps|--num_diffusion_steps)
             NUM_DIFFUSION_STEPS="$2"
             shift 2
             ;;
@@ -128,7 +128,7 @@ CMD="$CMD --checkpoint \"$CHECKPOINT\""
 CMD="$CMD --gripper-model \"$GRIPPER_MODEL\""
 CMD="$CMD --num_envs $NUM_ENVS"
 CMD="$CMD --num_episodes $NUM_EPISODES"
-CMD="$CMD --device $DEVICE"  # This is handled by AppLauncher
+CMD="$CMD --device $DEVICE"
 
 if [ -n "$NUM_DIFFUSION_STEPS" ]; then
     CMD="$CMD --num_diffusion_steps $NUM_DIFFUSION_STEPS"

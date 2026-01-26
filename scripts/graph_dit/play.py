@@ -431,7 +431,7 @@ def play_graph_dit_policy(
     # ==========================================================================
     # EMA SMOOTHING for action smoothing (joints only, gripper excluded)
     # ==========================================================================
-    ema_alpha = 0.3  # EMA weight: higher = more responsive, lower = smoother
+    ema_alpha = 1  # EMA weight: higher = more responsive, lower = smoother
     ema_smoothed_joints = None  # Will be initialized on first action [num_envs, joint_dim]
     print(f"[Play] EMA smoothing enabled: alpha={ema_alpha} (joints only, gripper excluded)")
 
@@ -663,7 +663,14 @@ def play_graph_dit_policy(
             # Stack into batch format
             action_history_tensor = torch.stack(action_history_batch, dim=0).to(
                 device
-            )  # [num_envs, history_length, action_dim]
+            )  # [num_envs, history_length, action_dim] - should be 6-dim (5 arm + 1 gripper)
+            
+            # 🔥 MODIFIED: Graph-DiT expects 5-dim action_history (arm joints only)
+            # Extract only first 5 dims for Graph-DiT input
+            if action_history_tensor.shape[2] >= 6:
+                action_history_tensor_5d = action_history_tensor[:, :, :5]  # [num_envs, history_length, 5]
+            else:
+                action_history_tensor_5d = action_history_tensor  # Already 5-dim or less
             ee_node_history_tensor = torch.stack(ee_node_history_batch, dim=0).to(
                 device
             )  # [num_envs, history_length, 7]
@@ -717,42 +724,56 @@ def play_graph_dit_policy(
 
             if needs_replan:
                 # Predict action trajectory for ALL environments (batched inference)
-                # Output: [num_envs, pred_horizon, action_dim] (normalized)
+                # 🔥 MODIFIED: Graph-DiT outputs 5-dim (arm joints only), input action_history should also be 5-dim
+                # Output: [num_envs, pred_horizon, 5] (normalized, arm joints only)
                 action_trajectory_normalized = policy.predict(
                 obs_tensor_normalized,
-                action_history=action_history_tensor,
+                action_history=action_history_tensor_5d,  # [num_envs, history_length, 5] - only arm joints
                 ee_node_history=ee_node_history_tensor,
                 object_node_history=object_node_history_tensor,
                     joint_states_history=joint_states_history_tensor,
                 subtask_condition=subtask_condition,
                 num_diffusion_steps=num_diffusion_steps,
                     deterministic=True, 
-                )  # [num_envs, pred_horizon, action_dim]
+                )  # [num_envs, pred_horizon, 5] - arm joints only
             
-                # Denormalize trajectory
+                # 🔥 MODIFIED: Graph-DiT outputs 5-dim (arm joints only), need to add gripper dimension
+                # action_trajectory_normalized is [num_envs, pred_horizon, 5] (arm joints only)
+                
+                # Denormalize trajectory (only for arm joints, first 5 dims)
                 if action_mean is not None and action_std is not None:
-                    # Broadcast mean/std for trajectory: [action_dim] -> [1, 1, action_dim]
-                    action_trajectory = (
-                        action_trajectory_normalized * action_std.unsqueeze(0).unsqueeze(0)
-                        + action_mean.unsqueeze(0).unsqueeze(0)
-                    )
+                    # Use only first 5 dims of action_mean/action_std (arm joints)
+                    action_mean_5d = action_mean[:5] if action_mean.shape[0] >= 5 else action_mean
+                    action_std_5d = action_std[:5] if action_std.shape[0] >= 5 else action_std
+                    # Broadcast mean/std for trajectory: [5] -> [1, 1, 5]
+                    action_trajectory_5d = (
+                        action_trajectory_normalized * action_std_5d.unsqueeze(0).unsqueeze(0)
+                        + action_mean_5d.unsqueeze(0).unsqueeze(0)
+                    )  # [num_envs, pred_horizon, 5]
                 else:
-                    action_trajectory = action_trajectory_normalized
+                    action_trajectory_5d = action_trajectory_normalized
                     if step_count == 0:
                         print(
                             f"[Play] Warning: No action normalization stats, using normalized actions directly"
                         )
+                
+                # Add gripper dimension (will be filled later by gripper_model)
+                # action_trajectory_5d: [num_envs, pred_horizon, 5] -> [num_envs, pred_horizon, 6]
+                action_trajectory = torch.cat([
+                    action_trajectory_5d,  # [num_envs, pred_horizon, 5]
+                    torch.zeros(num_envs, pred_horizon, 1, device=device)  # [num_envs, pred_horizon, 1] - gripper placeholder
+                ], dim=-1)  # [num_envs, pred_horizon, 6]
 
                 # 🟢 VISUAL DEBUG: Store target joint positions for visualization
-                # action_trajectory is [num_envs, pred_horizon, action_dim]
+                # action_trajectory is [num_envs, pred_horizon, 6] (5 arm + 1 gripper placeholder)
                 # We'll visualize the first action (target joint_pos[t+1]) for each env
-                target_joint_positions = action_trajectory[:, 0, :].cpu().numpy()  # [num_envs, action_dim]
+                target_joint_positions = action_trajectory[:, 0, :5].cpu().numpy()  # [num_envs, 5] - only arm joints
                 
                 # 🟢 VISUAL DEBUG: Print target vs current for first env (every replanning step)
                 if step_count % 10 == 0:  # Print every 10 replanning steps
                     env_id = 0
-                    target_joint = target_joint_positions[env_id]
-                    current_joint = obs_tensor[env_id, :6].cpu().numpy()
+                    target_joint = target_joint_positions[env_id]  # [5] - arm joints only
+                    current_joint = obs_tensor[env_id, :5].cpu().numpy()  # [5] - first 5 joints (arm only)
                     current_ee_pos_debug = current_ee_pos[env_id]
                     object_pos_debug = object_node_current[env_id, :3].cpu().numpy()
                     
@@ -768,16 +789,22 @@ def play_graph_dit_policy(
                     print(f"  =========================================\n")
 
                 # Fill action buffers with first exec_horizon actions
+                # action_trajectory is [num_envs, pred_horizon, 6] (5 arm + 1 gripper placeholder)
+                # action_trajectory_normalized is [num_envs, pred_horizon, 5] (arm only)
                 for env_id in range(num_envs):
                     if len(action_buffers[env_id]) == 0:
                         # Store exec_horizon actions in buffer (as list for easy pop)
                         for t in range(min(exec_horizon, pred_horizon)):
                             action_buffers[env_id].append(
-                                action_trajectory[env_id, t, :]
+                                action_trajectory[env_id, t, :]  # [6] - 5 arm + 1 gripper placeholder
                             )
-                            action_buffers_normalized[env_id].append(
-                                action_trajectory_normalized[env_id, t, :]
-                            )
+                            # For normalized, we need to pad to 6-dim for consistency
+                            normalized_5d = action_trajectory_normalized[env_id, t, :]  # [5]
+                            normalized_6d = torch.cat([
+                                normalized_5d,
+                                torch.zeros(1, device=device)  # gripper placeholder
+                            ], dim=0)  # [6]
+                            action_buffers_normalized[env_id].append(normalized_6d)
 
             # Pop the first action from each buffer
             actions_list = []
@@ -898,9 +925,24 @@ def play_graph_dit_policy(
                         print(f"    Action: {'OPEN' if actions[env_id, 5] > 0 else 'CLOSE'}")
                 
                 # 归一化版本（用于history）
-                # 🔥 MODIFIED: action_mean/action_std only have 5 dims (arm joints), gripper is already 1.0/-1.0
-                # So we directly use gripper_action without normalization
-                actions_normalized[:, 5] = gripper_action.squeeze(-1)
+                # 🔥 MODIFIED: Graph-DiT outputs 5-dim, but history buffer needs 6-dim (with gripper)
+                # action_mean/action_std 可能是 5 维（只有 arm joints）或 6 维（包含 gripper）
+                # 需要将实际 gripper action 归一化后存入 history buffer
+                gripper_action_value = actions[:, 5:6]  # [num_envs, 1] - 实际执行的值 (-1.0 或 1.0)
+                
+                if action_mean is not None and action_std is not None:
+                    # 检查 action_mean/action_std 的维度
+                    if action_mean.shape[0] >= 6 and action_std.shape[0] >= 6:
+                        # 有 6 维，包含 gripper，进行归一化
+                        gripper_action_normalized = (gripper_action_value - action_mean[5]) / action_std[5]
+                        actions_normalized[:, 5] = gripper_action_normalized.squeeze(-1)
+                    else:
+                        # 只有 5 维（只有 arm joints），gripper 已经是 -1.0 或 1.0，直接使用
+                        # Note: For history buffer, we still store gripper even if not in normalization stats
+                        actions_normalized[:, 5] = gripper_action_value.squeeze(-1)
+                else:
+                    # 没有归一化统计信息，直接使用
+                    actions_normalized[:, 5] = gripper_action_value.squeeze(-1)
 
             # EMA smoothing for joints only (gripper excluded)
             # NOTE: With ema_alpha=1.0, this is effectively disabled (no smoothing)

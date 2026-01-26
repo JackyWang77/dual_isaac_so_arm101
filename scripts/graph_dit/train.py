@@ -226,9 +226,15 @@ class HDF5DemoDataset(Dataset):
                         actions_new.append(joint_pos_seq[-1])
                 actions = np.stack(actions_new, axis=0).astype(np.float32)  # [T, joint_pos_dim]
                 
+                # 🔥 MODIFIED: Only use first 5 joints (arm joints), exclude gripper (6th joint)
+                # Graph-DiT will output 5-dim actions, gripper is handled separately by gripper_model
+                if actions.shape[1] >= 6:
+                    actions = actions[:, :5]  # [T, 5] - only arm joints
+                    print(f"[HDF5DemoDataset] ✅ Using first 5 joints (arm only), excluding gripper")
+                
                 print(f"[HDF5DemoDataset] ✅ Replaced actions with joint_pos[t+5] for smoother actions")
                 print(f"[HDF5DemoDataset]    Original action_dim: {actions_full.shape[1] if len(actions_full.shape) > 1 else 1}")
-                print(f"[HDF5DemoDataset]    New action_dim (joint_pos): {jp_dim}")
+                print(f"[HDF5DemoDataset]    New action_dim (arm joints only): {actions.shape[1]}")
 
                 # Build action trajectory for each timestep: [T, pred_horizon, action_dim]
                 # ACTION CHUNKING: Each timestep predicts next pred_horizon actions
@@ -1047,7 +1053,6 @@ def train_graph_dit_policy(
         action_history_length=action_history_length,
         pred_horizon=pred_horizon,  # ACTION CHUNKING: predict this many future steps
         exec_horizon=exec_horizon,  # RHC: execute this many steps before re-planning
-        mode=mode,  # "flow_matching"
         device=device,
         obs_structure=obs_structure,  # CRITICAL: Pass dynamic obs_structure instead of hardcoded indices
         num_inference_steps=num_inference_steps,  # Flow matching inference steps (default: 30)
