@@ -28,6 +28,140 @@ TensorOrArray = Union[torch.Tensor, np.ndarray]
 
 
 # =========================================================
+# Unified History Buffer (for RL online interaction)
+# =========================================================
+class UnifiedHistoryBuffer:
+    """
+    Unified History Buffer manager for RL online interaction.
+    
+    Manages all temporal histories:
+    - Node history (EE + Object): [num_envs, H, 7]
+    - Action history: [num_envs, H, action_dim]
+    - Joint states history: [num_envs, H, joint_dim]
+    
+    Uses Ring Buffer implementation: O(1) update, no memory allocation.
+    """
+    
+    def __init__(
+        self,
+        num_envs: int,
+        history_length: int,
+        node_dim: int = 7,
+        action_dim: int = 6,
+        joint_dim: int = 6,
+        device: str = "cuda",
+        dtype: torch.dtype = torch.float32,
+    ):
+        self.num_envs = num_envs
+        self.history_length = history_length
+        self.node_dim = node_dim
+        self.action_dim = action_dim
+        self.joint_dim = joint_dim
+        self.device = device
+        self.dtype = dtype
+        
+        # Ring buffers: [num_envs, history_length, dim]
+        self.ee_node = torch.zeros(num_envs, history_length, node_dim, device=device, dtype=dtype)
+        self.obj_node = torch.zeros(num_envs, history_length, node_dim, device=device, dtype=dtype)
+        self.action = torch.zeros(num_envs, history_length, action_dim, device=device, dtype=dtype)
+        self.joint_states = torch.zeros(num_envs, history_length, joint_dim, device=device, dtype=dtype)
+        
+        # Ring buffer indices
+        self.write_idx = torch.zeros(num_envs, dtype=torch.long, device=device)
+        self.filled = torch.zeros(num_envs, dtype=torch.bool, device=device)
+    
+    def update(
+        self,
+        ee_node: torch.Tensor,       # [B, 7]
+        obj_node: torch.Tensor,      # [B, 7]
+        action: torch.Tensor,        # [B, action_dim]
+        joint_states: torch.Tensor,  # [B, joint_dim]
+    ):
+        """Update all buffers with new data (O(1), no memory allocation)"""
+        B = ee_node.shape[0]
+        batch_idx = torch.arange(B, device=self.device)
+        idx = self.write_idx[:B]
+        
+        # Write to current position
+        self.ee_node[batch_idx, idx] = ee_node
+        self.obj_node[batch_idx, idx] = obj_node
+        self.action[batch_idx, idx] = action
+        self.joint_states[batch_idx, idx] = joint_states
+        
+        # Update ring buffer state
+        self.write_idx[:B] = (self.write_idx[:B] + 1) % self.history_length
+        self.filled[:B] = self.filled[:B] | (self.write_idx[:B] == 0)
+    
+    def get_history(self, num_envs: int | None = None) -> dict:
+        """
+        Get all histories in chronological order (oldest to newest)
+        
+        Args:
+            num_envs: Number of environments to get history for (default: all)
+        
+        Returns:
+            dict with keys:
+            - ee_node_history: [B, H, 7]
+            - object_node_history: [B, H, 7]
+            - action_history: [B, H, action_dim]
+            - joint_states_history: [B, H, joint_dim]
+        """
+        B = num_envs if num_envs is not None else self.num_envs
+        H = self.history_length
+        
+        batch_idx = torch.arange(B, device=self.device)
+        
+        # Determine start index for chronological order
+        start = torch.where(
+            self.filled[:B], 
+            self.write_idx[:B], 
+            torch.zeros(B, dtype=torch.long, device=self.device)
+        )
+        
+        # Create reordering indices
+        base = torch.arange(H, device=self.device).unsqueeze(0)  # [1, H]
+        indices = (base + start.unsqueeze(1)) % H  # [B, H]
+        
+        # Gather in chronological order
+        return {
+            "ee_node_history": self.ee_node[batch_idx.unsqueeze(1), indices],       # [B, H, 7]
+            "object_node_history": self.obj_node[batch_idx.unsqueeze(1), indices],  # [B, H, 7]
+            "action_history": self.action[batch_idx.unsqueeze(1), indices],         # [B, H, action_dim]
+            "joint_states_history": self.joint_states[batch_idx.unsqueeze(1), indices],  # [B, H, joint_dim]
+        }
+    
+    def reset(self, env_ids: torch.Tensor | None = None):
+        """Reset buffers for specified envs (or all if None)"""
+        if env_ids is None:
+            self.ee_node.zero_()
+            self.obj_node.zero_()
+            self.action.zero_()
+            self.joint_states.zero_()
+            self.write_idx.zero_()
+            self.filled.zero_()
+        else:
+            if env_ids.dim() == 0:
+                env_ids = env_ids.unsqueeze(0)
+            self.ee_node[env_ids] = 0
+            self.obj_node[env_ids] = 0
+            self.action[env_ids] = 0
+            self.joint_states[env_ids] = 0
+            self.write_idx[env_ids] = 0
+            self.filled[env_ids] = False
+    
+    def to(self, device: str | torch.device):
+        """Move buffer to device"""
+        self.device = device if isinstance(device, str) else str(device)
+        self.ee_node = self.ee_node.to(device)
+        self.obj_node = self.obj_node.to(device)
+        self.action = self.action.to(device)
+        self.joint_states = self.joint_states.to(device)
+        self.write_idx = self.write_idx.to(device)
+        self.filled = self.filled.to(device)
+        return self
+
+
+# =========================================================
 # Utilities (unchanged)
 # =========================================================
 def to_tensor(x: Any, device: str) -> torch.Tensor:
@@ -327,7 +461,7 @@ class GraphDiTBackboneAdapter:
     
     Methods:
     - predict_base_trajectory(): Low-frequency, returns full trajectory
-    - extract_z_fast(): High-frequency, only runs Graph-Attention
+    - extract_z(): High-frequency, extracts z with temporal history support
     """
     def __init__(self, graph_dit_policy: nn.Module):
         self.backbone = graph_dit_policy
@@ -338,26 +472,30 @@ class GraphDiTBackboneAdapter:
         return self.backbone.predict(**kwargs)
 
     @torch.no_grad()
-    def extract_z_fast(
+    def extract_z(
         self, 
-        ee_node: torch.Tensor, 
-        obj_node: torch.Tensor
+        ee_node_history: torch.Tensor,   # [B, H, 7] or [B, 7]
+        obj_node_history: torch.Tensor,  # [B, H, 7] or [B, 7]
     ) -> torch.Tensor:
         """
-        High-frequency: only run Graph-Attention, return z_layers [B, K, z_dim]
+        High-frequency: extract z with temporal history support.
+        
+        Automatically detects temporal mode:
+        - Input [B, H, 7] with H > 1 → temporal mode (uses edge modulation)
+        - Input [B, 7] → single frame mode (simplified computation)
         
         Args:
-            ee_node: [B, 7] - EE position(3) + orientation(4)
-            obj_node: [B, 7] - Object position(3) + orientation(4)
+            ee_node_history: EE node history [B, H, 7] or current [B, 7]
+            obj_node_history: Object node history [B, H, 7] or current [B, 7]
         
         Returns:
             z_layers: [B, K, z_dim]
         """
-        if not hasattr(self.backbone, "extract_z_fast"):
+        if not hasattr(self.backbone, "extract_z"):
             raise NotImplementedError(
-                "GraphDiTPolicy must implement extract_z_fast(ee_node, obj_node) -> [B,K,z_dim]"
+                "GraphDiTPolicy must implement extract_z(ee_node_history, obj_node_history) -> [B,K,z_dim]"
             )
-        return self.backbone.extract_z_fast(ee_node, obj_node)
+        return self.backbone.extract_z(ee_node_history, obj_node_history)
     
     @property
     def node_stats(self) -> Dict[str, Optional[torch.Tensor]]:
@@ -395,6 +533,9 @@ class GraphDiTResidualRLPolicy(nn.Module):
         pred_horizon: int = 16,
         exec_horizon: int = 8,
         num_diffusion_steps: int = 2,
+        gripper_model=None,  # Optional: GripperPredictor model
+        gripper_input_mean=None,  # Optional: gripper input normalization mean
+        gripper_input_std=None,  # Optional: gripper input normalization std
     ):
         super().__init__()
         self.cfg = cfg
@@ -404,6 +545,14 @@ class GraphDiTResidualRLPolicy(nn.Module):
         self.pred_horizon = pred_horizon
         self.exec_horizon = exec_horizon
         self.num_diffusion_steps = num_diffusion_steps
+        
+        # Gripper model (optional, for generating gripper actions)
+        self.gripper_model = gripper_model
+        self.gripper_input_mean = gripper_input_mean
+        self.gripper_input_std = gripper_input_std
+        # Gripper state machine: 0=OPEN, 1=CLOSING, 2=CLOSED, 3=OPENING
+        # Will be initialized per environment in act() if needed
+        self._gripper_states = None
 
         # ============================================================
         # NEW: Z Adapter (trainable)
@@ -437,17 +586,21 @@ class GraphDiTResidualRLPolicy(nn.Module):
         actor_obs_dim = get_obs_dim_for_mode(cfg.actor_obs_mode)
         critic_obs_dim = get_obs_dim_for_mode(cfg.critic_obs_mode)
 
-        # Actor input dim: obs_selected + base_action + z_bar
-        actor_in_dim = actor_obs_dim + cfg.action_dim + cfg.z_dim
+        # Actor input dim: obs_selected + base_action (first 5 dims only) + z_bar
+        # Actor only outputs 5 dims (arm joints), gripper is excluded from RL fine-tuning
+        # Base action from Graph-DiT is 5D (arm only), but we need to handle 6D for compatibility
+        base_action_dim_for_actor = 5  # Only use first 5 dims (arm joints) for Actor input
+        actor_in_dim = actor_obs_dim + base_action_dim_for_actor + cfg.z_dim
         self.actor = ResidualGaussianActor(
             in_dim=actor_in_dim,
-            action_dim=cfg.action_dim,
+            action_dim=5,  # Only output 5 dims (arm joints), gripper excluded
             hidden=cfg.actor_hidden,
             act=cfg.activation,
             log_std_init=cfg.log_std_init,
             log_std_min=cfg.log_std_min,
             log_std_max=cfg.log_std_max,
         )
+        self.actor_action_dim = 5  # Store for later use
 
         # Critic (deep supervision on adapted z)
         self.critic = DeepValueCritic(
@@ -469,6 +622,12 @@ class GraphDiTResidualRLPolicy(nn.Module):
             )
         else:
             self.residual_action_mask = None
+        
+        # History length (should match Graph-DiT's action_history_length)
+        self.history_length = getattr(cfg, 'history_length', 10)
+        
+        # Unified history buffer (lazy initialization)
+        self.history_buffer: UnifiedHistoryBuffer | None = None
 
         # ============================================================
         # RHC buffers (for base_action, low-frequency)
@@ -649,26 +808,45 @@ class GraphDiTResidualRLPolicy(nn.Module):
     # -----------------------------
     def _get_z_layers_fast(self, obs: torch.Tensor) -> torch.Tensor:
         """
-        High-frequency z_layers extraction: called every step
+        High-frequency z_layers extraction: called every step with temporal history
         
         1. Extract current ee_node, obj_node from obs
-        2. Normalize
-        3. Call backbone.extract_z_fast() (frozen)
-        4. Pass through z_adapter (trainable)
+        2. Get history from buffer (BEFORE updating buffer)
+        3. Normalize history
+        4. Call backbone.extract_z() with history (frozen)
+        5. Pass through z_adapter (trainable)
         
         Returns:
             z_layers_adapted: [B, K, z_dim]
         """
-        # 1. Extract nodes
+        B = obs.shape[0]
+        
+        # 1. Extract current nodes
         ee_node, obj_node = self._extract_nodes_from_obs(obs)
         
-        # 2. Normalize
-        ee_node_norm, obj_node_norm = self._normalize_nodes(ee_node, obj_node)
+        # 2. Get history from buffer (BEFORE updating buffer)
+        if self.history_buffer is not None:
+            histories = self.history_buffer.get_history(B)
+            ee_node_history = histories["ee_node_history"]      # [B, H, 7]
+            obj_node_history = histories["object_node_history"]  # [B, H, 7]
+        else:
+            # Fallback: no history, use current only
+            ee_node_history = ee_node.unsqueeze(1)   # [B, 1, 7]
+            obj_node_history = obj_node.unsqueeze(1)  # [B, 1, 7]
         
-        # 3. Frozen z extraction
-        z_layers_frozen = self.backbone.extract_z_fast(ee_node_norm, obj_node_norm)  # [B, K, z_dim]
+        # 3. Normalize history
+        if self.norm_ee_node_mean is not None:
+            ee_node_history = (ee_node_history - self.norm_ee_node_mean) / (self.norm_ee_node_std + 1e-8)
+        if self.norm_object_node_mean is not None:
+            obj_node_history = (obj_node_history - self.norm_object_node_mean) / (self.norm_object_node_std + 1e-8)
         
-        # 4. Adapter (trainable)
+        # 4. Frozen z extraction with temporal history
+        z_layers_frozen = self.backbone.extract_z(
+            ee_node_history, 
+            obj_node_history
+        )  # [B, K, z_dim]
+        
+        # 5. Adapter (trainable)
         B, K, D = z_layers_frozen.shape
         z_flat = z_layers_frozen.reshape(B * K, D)
         z_adapted_flat = self.z_adapter(z_flat)
@@ -747,34 +925,32 @@ class GraphDiTResidualRLPolicy(nn.Module):
         base_actions = []
         for i in range(B):
             base_actions.append(self._base_action_buffers[i].pop(0))
-        base_action = torch.stack(base_actions, dim=0)  # [B, action_dim]
+        base_action_5d = torch.stack(base_actions, dim=0)  # [B, 5] - Graph-DiT outputs 5D (arm joints only)
 
         # Apply EMA smoothing to joints only (gripper excluded)
-        if self.joint_dim < base_action.shape[-1]:
-            joints = base_action[:, : self.joint_dim]  # [B, joint_dim]
-            gripper = base_action[:, self.joint_dim :]  # [B, action_dim - joint_dim]
+        # Graph-DiT outputs 5D, so base_action_5d is already [B, 5] (all arm joints)
+        joints = base_action_5d  # [B, 5] - all are arm joints
 
-            # Initialize EMA state if needed
-            if self._ema_smoothed_joints is None:
-                self._ema_smoothed_joints = joints.clone()
-            elif self._ema_smoothed_joints.shape[0] != B:
-                # Resize if batch size changed
-                old_smoothed = self._ema_smoothed_joints
-                self._ema_smoothed_joints = torch.zeros(
-                    B, self.joint_dim, device=joints.device, dtype=joints.dtype
-                )
-                if old_smoothed.shape[0] <= B:
-                    self._ema_smoothed_joints[: old_smoothed.shape[0]] = old_smoothed
-
-            # Apply EMA: smoothed = alpha * new + (1 - alpha) * old
-            self._ema_smoothed_joints = (
-                self.ema_alpha * joints + (1 - self.ema_alpha) * self._ema_smoothed_joints
+        # Initialize EMA state if needed
+        if self._ema_smoothed_joints is None:
+            self._ema_smoothed_joints = joints.clone()
+        elif self._ema_smoothed_joints.shape[0] != B:
+            # Resize if batch size changed
+            old_smoothed = self._ema_smoothed_joints
+            self._ema_smoothed_joints = torch.zeros(
+                B, self.joint_dim, device=joints.device, dtype=joints.dtype
             )
+            if old_smoothed.shape[0] <= B:
+                self._ema_smoothed_joints[: old_smoothed.shape[0]] = old_smoothed
 
-            # Concatenate smoothed joints with gripper
-            base_action = torch.cat([self._ema_smoothed_joints, gripper], dim=-1)
+        # Apply EMA: smoothed = alpha * new + (1 - alpha) * old
+        self._ema_smoothed_joints = (
+            self.ema_alpha * joints + (1 - self.ema_alpha) * self._ema_smoothed_joints
+        )
 
-        return base_action
+        # Graph-DiT outputs 5D, so we return 5D (gripper is handled separately or padded later)
+        # Return normalized 5D action (arm joints only)
+        return self._ema_smoothed_joints  # [B, 5] - smoothed arm joints
 
     # -----------------------------
     # Main act()
@@ -802,7 +978,33 @@ class GraphDiTResidualRLPolicy(nn.Module):
             obs_norm = obs
 
         # ============================================================
-        # 1. Base action (low-frequency, from buffer)
+        # 1. Extract current state and get histories
+        # ============================================================
+        B = obs.shape[0]
+        ee_node, obj_node = self._extract_nodes_from_obs(obs)
+        joint_states = obs[:, :self.cfg.robot_state_dim]
+        
+        # Get histories from buffer (for predict() call)
+        if self.history_buffer is not None:
+            histories = self.history_buffer.get_history(B)
+            # Use buffer histories if available, otherwise fallback to provided args
+            action_history = action_history if action_history is not None else histories["action_history"]
+            ee_node_history = ee_node_history if ee_node_history is not None else histories["ee_node_history"]
+            object_node_history = object_node_history if object_node_history is not None else histories["object_node_history"]
+            joint_states_history = joint_states_history if joint_states_history is not None else histories["joint_states_history"]
+        else:
+            # Fallback: use provided args or create empty history
+            if action_history is None:
+                action_history = torch.zeros(B, 1, self.cfg.action_dim, device=obs.device)
+            if ee_node_history is None:
+                ee_node_history = ee_node.unsqueeze(1)
+            if object_node_history is None:
+                object_node_history = obj_node.unsqueeze(1)
+            if joint_states_history is None:
+                joint_states_history = joint_states.unsqueeze(1)
+        
+        # ============================================================
+        # 2. Base action (low-frequency, from buffer)
         # ============================================================
         # get_base_action returns NORMALIZED actions (from Graph-DiT predict)
         a_base_norm = self.get_base_action(
@@ -816,36 +1018,111 @@ class GraphDiTResidualRLPolicy(nn.Module):
         )
         
         # Denormalize base_action for execution (but keep normalized version for Actor input)
+        # Graph-DiT outputs 5D (arm joints only), so a_base_norm is [B, 5]
+        # We need to expand to 6D for execution (add gripper = 0 or from separate model)
         if self.action_mean is not None and self.action_std is not None:
-            a_base = a_base_norm * self.action_std + self.action_mean
+            a_base_5d = a_base_norm * self.action_std[:5] + self.action_mean[:5]  # [B, 5]
         else:
-            a_base = a_base_norm
+            a_base_5d = a_base_norm  # [B, 5]
+        
+        # Expand to 6D: use gripper model if available, otherwise pad with 0
+        if self.gripper_model is not None:
+            # Extract gripper inputs from observation
+            # obs structure: joint_pos[0:6], joint_vel[6:12], object_position[12:15], ...
+            gripper_state = obs[:, 5:6]  # [B, 1] - gripper joint (6th joint, index 5)
+            ee_pos = obs[:, 19:22]  # [B, 3] - EE position
+            object_pos = obs[:, 12:15]  # [B, 3] - object position
+            
+            # Prepare gripper input: [B, 7] (1+3+3)
+            gripper_input = torch.cat([gripper_state, ee_pos, object_pos], dim=-1).float()
+            
+            # Normalize
+            if self.gripper_input_mean is not None and self.gripper_input_std is not None:
+                gripper_input_norm = (gripper_input - self.gripper_input_mean) / self.gripper_input_std
+            else:
+                gripper_input_norm = gripper_input
+            
+            # Initialize gripper state machine if needed
+            if self._gripper_states is None:
+                self._gripper_states = torch.zeros(B, dtype=torch.long, device=obs.device)
+            elif self._gripper_states.shape[0] != B:
+                # Resize if batch size changed
+                old_states = self._gripper_states
+                self._gripper_states = torch.zeros(B, dtype=torch.long, device=obs.device)
+                if old_states.shape[0] <= B:
+                    self._gripper_states[:old_states.shape[0]] = old_states
+            
+            # Predict gripper action
+            with torch.no_grad():
+                gripper_action, confidence, pred_class = self.gripper_model.predict(
+                    gripper_input_norm[:, 0:1],    # gripper_state [B, 1]
+                    gripper_input_norm[:, 1:4],    # ee_pos [B, 3]
+                    gripper_input_norm[:, 4:7]     # object_pos [B, 3]
+                )  # gripper_action: [B, 1], confidence: [B, 1], pred_class: [B, 1]
+            
+            # State machine logic (same as play.py)
+            for i in range(B):
+                curr_state = self._gripper_states[i].item()
+                pred = pred_class[i, 0].item()  # 0=KEEP_CURRENT, 1=TRIGGER_CLOSE, 2=TRIGGER_OPEN
+                
+                if curr_state == 0:  # OPEN
+                    if pred == 1:  # TRIGGER_CLOSE
+                        self._gripper_states[i] = 1  # CLOSING
+                elif curr_state == 1:  # CLOSING
+                    if pred == 2:  # TRIGGER_OPEN
+                        self._gripper_states[i] = 3  # OPENING
+                    elif gripper_state[i, 0].item() < -0.2:  # Closed threshold
+                        self._gripper_states[i] = 2  # CLOSED
+                elif curr_state == 2:  # CLOSED
+                    if pred == 2:  # TRIGGER_OPEN
+                        self._gripper_states[i] = 3  # OPENING
+                elif curr_state == 3:  # OPENING
+                    if pred == 1:  # TRIGGER_CLOSE
+                        self._gripper_states[i] = 1  # CLOSING
+                    elif gripper_state[i, 0].item() > 0.2:  # Open threshold
+                        self._gripper_states[i] = 0  # OPEN
+            
+            # Convert state to action: OPEN/OPENING -> 1.0, CLOSED/CLOSING -> -1.0
+            gripper_action_final = torch.where(
+                (self._gripper_states == 0) | (self._gripper_states == 3),
+                torch.tensor(1.0, device=obs.device, dtype=a_base_5d.dtype),
+                torch.tensor(-1.0, device=obs.device, dtype=a_base_5d.dtype)
+            ).unsqueeze(-1)  # [B, 1]
+        else:
+            # No gripper model: pad with 0
+            gripper_action_final = torch.zeros(B, 1, device=a_base_5d.device, dtype=a_base_5d.dtype)
+        
+        a_base = torch.cat([a_base_5d, gripper_action_final], dim=-1)  # [B, 6]
 
         # ============================================================
-        # 2. z_layers (high-frequency! called every step via extract_z_fast)
+        # 3. z_layers (high-frequency! called every step with temporal history)
         # ============================================================
         z_layers = self._get_z_layers_fast(obs)  # [B, K, z_dim], already passed through adapter
 
-        # 3. GateNet aggregation
+        # 4. GateNet aggregation
         z_bar, w = self.aggregate_latent(z_layers)
 
-        # 4. Actor: select obs based on actor_obs_mode
-        # CRITICAL: Actor input should be NORMALIZED (obs_norm, a_base_norm, z_bar)
+        # 5. Actor: select obs based on actor_obs_mode
+        # CRITICAL: Actor input should be NORMALIZED (obs_norm, a_base_norm (first 5 dims), z_bar)
         obs_actor = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
-        x = torch.cat([obs_actor, a_base_norm, z_bar], dim=-1)  # Use normalized a_base
+        # Only use first 5 dims of base_action for Actor input (arm joints only)
+        a_base_norm_5d = a_base_norm[:, :5]  # [B, 5] - only arm joints
+        x = torch.cat([obs_actor, a_base_norm_5d, z_bar], dim=-1)  # Use normalized a_base (5D)
         dist = self.actor.dist(x)
         
         if deterministic:
-            delta_norm = dist.mean  # Actor outputs NORMALIZED delta (mu, already tanh-bounded to [-1, 1])
+            delta_norm_5d = dist.mean  # Actor outputs NORMALIZED delta [B, 5] (arm joints only)
         else:
-            delta_norm = dist.rsample()  # Actor outputs NORMALIZED delta (sampled from Normal(mu, std))
+            delta_norm_5d = dist.rsample()  # Actor outputs NORMALIZED delta [B, 5] (sampled from Normal(mu, std))
             # CRITICAL: Clamp sampled delta_norm to [-1, 1] to ensure bounded residual
             # Even though mu is tanh-bounded, sampling can produce values outside [-1, 1] when std > 0
-            delta_norm = torch.clamp(delta_norm, -1.0, 1.0)
+            delta_norm_5d = torch.clamp(delta_norm_5d, -1.0, 1.0)
 
-        # Residual mask
-        if self.residual_action_mask is not None:
-            delta_norm = delta_norm * self.residual_action_mask
+        # Expand delta to 6D: [B, 5] -> [B, 6] (gripper delta = 0)
+        delta_norm = torch.zeros(B, a_base_norm.shape[-1], device=delta_norm_5d.device, dtype=delta_norm_5d.dtype)
+        delta_norm[:, :5] = delta_norm_5d  # Arm joints get residual
+        # Gripper (index 5) gets 0 residual (not fine-tuned by RL)
+        # Note: residual_action_mask will also ensure gripper is masked in update()
 
         # Denormalize delta for execution
         if self.action_mean is not None and self.action_std is not None:
@@ -853,16 +1130,40 @@ class GraphDiTResidualRLPolicy(nn.Module):
         else:
             delta = delta_norm
 
-        # 5. Final action (both a_base and delta are DENORMALIZED)
+        # Apply residual mask to ensure gripper (index 5) is not fine-tuned
+        if self.residual_action_mask is not None:
+            delta = delta * self.residual_action_mask  # Mask gripper residual to 0
+
+        # 6. Final action (both a_base and delta are DENORMALIZED)
         alpha = torch.clamp(self.alpha, 0.0, 0.3)  # Limit alpha to 30%
-        a = a_base + alpha * delta
+        a = a_base + alpha * delta  # [B, 6] - gripper comes from a_base only (no RL residual)
+        
+        # 7. Update history buffer (AFTER computing action)
+        if self.history_buffer is not None:
+            # Use normalized action for history (matches training data format)
+            # Graph-DiT outputs 5D, but history buffer expects 6D (with gripper)
+            # We need to pad with 0 for gripper, or use the final action 'a' which is 6D
+            # Actually, we should store the final action 'a' (6D) after normalization
+            # But for now, let's pad a_base_norm to 6D if needed
+            action_for_history = a_base_norm
+            if action_for_history.shape[-1] == 5:
+                # Pad with 0 for gripper (Graph-DiT doesn't output gripper)
+                gripper_pad = torch.zeros(B, 1, device=action_for_history.device, dtype=action_for_history.dtype)
+                action_for_history = torch.cat([action_for_history, gripper_pad], dim=-1)  # [B, 6]
+            self.history_buffer.update(
+                ee_node=ee_node,
+                obj_node=obj_node,
+                action=action_for_history,  # Store normalized action [B, 6]
+                joint_states=joint_states,
+            )
 
         # ============================================================
         # FIX: log_prob uses normalized delta (Actor's output space)
         # Actor distribution is defined in normalized space, so log_prob
         # must be computed in the same space
+        # Actor only outputs 5 dims, so use delta_norm_5d for log_prob
         # ============================================================
-        log_prob = dist.log_prob(delta_norm).sum(dim=-1)  # ✅ Use normalized delta
+        log_prob = dist.log_prob(delta_norm_5d).sum(dim=-1)  # ✅ Use normalized delta (5D only)
         entropy = dist.entropy().sum(dim=-1)
         # Critic: select obs based on critic_obs_mode
         obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
@@ -946,6 +1247,14 @@ class GraphDiTResidualRLPolicy(nn.Module):
             delta_norm = delta / (self.action_std + 1e-8)  # ✅ Actor outputs normalized delta
         else:
             delta_norm = delta
+
+        # ============================================================
+        # CRITICAL FIX: Clamp delta_norm to [-1, 1] to match act() behavior
+        # This prevents numerical issues when action - a_base is large (training instability)
+        # Without this, delta_norm can be >> 1 (e.g., 25.0), causing log_prob to be extremely small
+        # and leading to gradient explosion in early training
+        # ============================================================
+        delta_norm = torch.clamp(delta_norm, -1.0, 1.0)  # Match act() clamp behavior
 
         # ============================================================
         # FIX 4: log_prob uses normalized delta (Actor's output space)

@@ -147,10 +147,21 @@ echo ""
 echo "Starting training..."
 echo "========================================"
 
+# Check for gripper model (optional)
+GRIPPER_MODEL="${GRIPPER_MODEL:-}"
+if [ -n "$GRIPPER_MODEL" ] && [ -f "$GRIPPER_MODEL" ]; then
+    echo "  Gripper model:      $GRIPPER_MODEL"
+    GRIPPER_MODEL_ARG="--gripper-model $GRIPPER_MODEL"
+else
+    echo "  Gripper model:      Not provided (using Graph-DiT for gripper)"
+    GRIPPER_MODEL_ARG=""
+fi
+
 # Use isaaclab.sh to properly initialize Isaac Sim
 python scripts/graph_dit_rl/train_graph_dit_rl.py \
     --task "$TASK" \
     --pretrained_checkpoint "$PRETRAINED_CHECKPOINT" \
+    $GRIPPER_MODEL_ARG \
     --num_envs "$NUM_ENVS" \
     --max_iterations "$MAX_ITERATIONS" \
     --steps_per_env "$STEPS_PER_ENV" \

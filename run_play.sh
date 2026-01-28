@@ -4,7 +4,7 @@
 # play.py 会通过 AppLauncher 自动启动 Isaac Sim
 ./play_graph_dit_gripper.sh \
     --task SO-ARM101-Lift-Cube-Play-v0 \
-    --checkpoint ./logs/graph_dit/lift_joint_flow_matching/2026-01-26_17-01-33/best_model.pt \
+    --checkpoint ./logs/graph_dit/lift_joint_flow_matching/2026-01-27_18-18-08/best_model.pt \
     --gripper-model ./logs/gripper_model/gripper_model.pt \
     --num-envs 2 \
     --num-episodes 10

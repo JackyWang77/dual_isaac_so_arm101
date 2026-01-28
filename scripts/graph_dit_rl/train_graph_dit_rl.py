@@ -24,6 +24,7 @@ from isaaclab.app import AppLauncher
 parser = argparse.ArgumentParser(description="Train GraphDiT + Residual RL Policy")
 parser.add_argument("--task", type=str, default="SO-ARM101-Lift-Cube-v0")
 parser.add_argument("--pretrained_checkpoint", type=str, required=True)
+parser.add_argument("--gripper-model", type=str, default=None, help="Path to gripper model checkpoint (optional)")
 parser.add_argument("--num_envs", type=int, default=64)
 parser.add_argument("--max_iterations", type=int, default=500)
 parser.add_argument("--seed", type=int, default=42)
@@ -69,6 +70,17 @@ from SO_101.policies.graph_dit_residual_rl_policy import (
     GraphDiTResidualRLPolicy,
     compute_gae,
 )
+
+# Import gripper model (same directory structure as play.py)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+gripper_model_dir = os.path.join(os.path.dirname(current_dir), "graph_dit")
+sys.path.insert(0, gripper_model_dir)
+try:
+    from gripper_model import GripperPredictor
+    GRIPPER_MODEL_AVAILABLE = True
+except ImportError:
+    GRIPPER_MODEL_AVAILABLE = False
+    print("[Train] Warning: gripper_model not found, will use Graph-DiT for gripper")
 
 
 # ============================================================
@@ -216,6 +228,7 @@ class GraphDiTRLTrainer:
         lr: float = 3e-4,
         max_grad_norm: float = 1.0,
         action_history_length: int = 4,  # From Graph-DiT config
+        action_dim_env: int = 6,  # Environment action dim (usually 6, includes gripper)
     ):
         self.env = env
         self.policy = policy
@@ -293,8 +306,10 @@ class GraphDiTRLTrainer:
         graph_dit_joint_dim = 6  # Always 6 for GraphDiT compatibility
         
         # Use provided action_history_length (from Graph-DiT config)
-        # Use single tensor [num_envs, history_len, dim] for efficiency
-        self.action_history = torch.zeros(self.num_envs, action_history_length, cfg.action_dim, device=device)
+        # CRITICAL: action_history must use action_dim_env (6), not cfg.action_dim (5)
+        # because Graph-DiT expects 6D action history, and we store the actual executed actions (6D)
+        # cfg.action_dim=5 is only for Actor output (RL fine-tunes 5 dims), but executed actions are 6D
+        self.action_history = torch.zeros(self.num_envs, action_history_length, action_dim_env, device=device)
         self.ee_node_history = torch.zeros(self.num_envs, action_history_length, 7, device=device)
         self.object_node_history = torch.zeros(self.num_envs, action_history_length, 7, device=device)
         self.joint_state_history = torch.zeros(self.num_envs, action_history_length, graph_dit_joint_dim, device=device)
@@ -967,6 +982,53 @@ def main():
         print(f"[Main] ⚠️  WARNING: node_to_z not found in Graph-DiT!")
     print(f"[Main] GraphDiT loaded and frozen (except node_to_z)")
 
+    # Load gripper model (if provided)
+    gripper_model = None
+    gripper_input_mean = None
+    gripper_input_std = None
+    gripper_states = None  # State machine: 0=OPEN, 1=CLOSING, 2=CLOSED, 3=OPENING
+    
+    if args.gripper_model is not None and GRIPPER_MODEL_AVAILABLE:
+        gripper_model_path = args.gripper_model
+        if os.path.exists(gripper_model_path):
+            print(f"[Main] Loading gripper model from: {gripper_model_path}")
+            gripper_checkpoint = torch.load(gripper_model_path, map_location=device, weights_only=False)
+            
+            # Get model config
+            hidden_dims = gripper_checkpoint.get('hidden_dims', [128, 128, 64])
+            dropout = gripper_checkpoint.get('dropout', 0.1)
+            
+            # Load model
+            gripper_model = GripperPredictor(hidden_dims=hidden_dims, dropout=dropout).to(device)
+            gripper_model.load_state_dict(gripper_checkpoint['model_state_dict'])
+            gripper_model.eval()
+            
+            # Load normalization stats
+            input_mean = gripper_checkpoint['input_mean']
+            input_std = gripper_checkpoint['input_std']
+            
+            # Ensure numpy arrays
+            if isinstance(input_mean, torch.Tensor):
+                input_mean = input_mean.cpu().numpy()
+            if isinstance(input_std, torch.Tensor):
+                input_std = input_std.cpu().numpy()
+            
+            # Convert to torch tensors
+            gripper_input_mean = torch.from_numpy(input_mean).float().to(device)
+            gripper_input_std = torch.from_numpy(input_std).float().to(device)
+            
+            # Initialize gripper state machine (0=OPEN for all envs)
+            gripper_states = torch.zeros(args.num_envs, dtype=torch.long, device=device)
+            
+            print(f"[Main] Gripper model loaded successfully")
+            print(f"[Main] Gripper input_mean shape: {gripper_input_mean.shape}, input_std shape: {gripper_input_std.shape}")
+        else:
+            print(f"[Main] Warning: Gripper model path provided but file not found: {gripper_model_path}")
+    else:
+        if args.gripper_model is not None:
+            print(f"[Main] Warning: Gripper model path provided but gripper_model module not available")
+        print(f"[Main] Using Graph-DiT for all action dimensions (including gripper)")
+
     # Create backbone adapter
     backbone = GraphDiTBackboneAdapter(graph_dit)
 
@@ -1036,31 +1098,33 @@ def main():
             pass
         return 1
 
-    action_dim = get_action_dim(action_space)
+    action_dim_env = get_action_dim(action_space)  # Environment action dim (usually 6)
+    action_dim_rl = 5  # RL only fine-tunes arm joints (5 dims), gripper excluded
 
-    print(f"[Main] obs_dim: {obs_dim}, action_dim: {action_dim}")
-
-    # Allow gripper to have residual delta (RL can learn to fine-tune gripper timing)
-    # final_gripper = a_base_gripper + alpha * delta_gripper (continuous value)
-    # Then binarize the continuous value (compare with -0.2)
-    residual_action_mask = None  # No mask: allow all dimensions (including gripper) to have residual
-    print(f"[Main] residual_action_mask: None (all dimensions including gripper can have residual)")
+    print(f"[Main] obs_dim: {obs_dim}, action_dim_env: {action_dim_env}, action_dim_rl: {action_dim_rl}")
+    print(f"[Main] RL will only fine-tune first 5 dimensions (arm joints), gripper excluded")
 
     # Create policy config
     # CRITICAL: Get obs_structure from Graph-DiT config to ensure consistency
     obs_structure = getattr(graph_dit.cfg, "obs_structure", None)
     print(f"[Main] Graph-DiT obs_structure: {obs_structure}")
     
+    # Create residual action mask: [1, 1, 1, 1, 1, 0] (mask gripper, index 5)
+    # This ensures gripper residual is always 0, even if somehow computed
+    residual_action_mask = torch.ones(action_dim_env, device=device)  # [6]
+    residual_action_mask[5] = 0.0  # Mask gripper (index 5)
+    
     policy_cfg = GraphDiTResidualRLCfg(
         obs_dim=obs_dim,
-        action_dim=action_dim,
+        action_dim=action_dim_rl,  # RL only outputs 5 dims (arm joints)
         z_dim=graph_dit.cfg.z_dim,
         num_layers=graph_dit.cfg.num_layers,
         device=device,
         obs_structure=obs_structure,  # CRITICAL: Use same obs_structure as Graph-DiT
         robot_state_dim=6,  # 根据你的机器人调整
-        residual_action_mask=residual_action_mask,  # Exclude gripper from residual
+        residual_action_mask=residual_action_mask,  # Mask gripper (index 5) from residual
     )
+    print(f"[Main] residual_action_mask: {residual_action_mask.tolist()} (gripper masked)")
     print(f"[Main] Residual RL obs_structure: {policy_cfg.obs_structure}")
     
     # Verify obs_structure consistency
@@ -1069,12 +1133,15 @@ def main():
     else:
         print("[Main] ✅ obs_structure consistent between Graph-DiT and Residual RL")
 
-    # Create policy
+    # Create policy (with gripper model if available)
     policy = GraphDiTResidualRLPolicy(
         cfg=policy_cfg,
         backbone=backbone,
         pred_horizon=getattr(graph_dit.cfg, "pred_horizon", 16),
         exec_horizon=getattr(graph_dit.cfg, "exec_horizon", 8),
+        gripper_model=gripper_model,
+        gripper_input_mean=gripper_input_mean,
+        gripper_input_std=gripper_input_std,
     )
     policy.to(device)
 
@@ -1181,6 +1248,7 @@ def main():
         lr=args.lr,
         max_grad_norm=args.max_grad_norm,
         action_history_length=action_history_length,
+        action_dim_env=action_dim_env,  # Pass environment action dim (6) for history buffer
     )
     
     # Set normalization stats in trainer (same as Graph-DiT play.py)

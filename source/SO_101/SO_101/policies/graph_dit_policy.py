@@ -591,7 +591,7 @@ class GraphDiTPolicyCfg:
     """Joint states dimension (joint_pos + joint_vel). If None, joint states are not used."""
     
     # Action history
-    action_history_length: int = 4
+    action_history_length: int = 10
     """Number of historical actions to use for self-attention."""
     
     # Action Chunking (Receding Horizon Control)
@@ -706,7 +706,11 @@ class AdaptiveLayerNorm(nn.Module):
 
 
 class TemporalAggregator(nn.Module):
-    """可学习的时序聚合模块"""
+    """Learnable temporal aggregation module.
+    
+    Uses attention mechanism to aggregate temporal features across history dimension,
+    replacing hardcoded operations like mean or last-timestep selection.
+    """
     
     def __init__(self, hidden_dim: int, num_heads: int = 4):
         super().__init__()
@@ -717,10 +721,16 @@ class TemporalAggregator(nn.Module):
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
+        Aggregate temporal features using learnable attention.
+        
         Args:
-            x: [B, N, H, D]
+            x: Input tensor [B, N, H, D] where
+               B = batch size
+               N = number of nodes
+               H = history length (temporal dimension)
+               D = hidden dimension
         Returns:
-            [B, N, D]
+            Aggregated tensor [B, N, D] with temporal dimension collapsed
         """
         B, N, H, D = x.shape
         x_flat = x.view(B * N, H, D)  # [B*N, H, D]
@@ -751,14 +761,12 @@ class GraphAttentionWithEdgeBias(nn.Module):
         hidden_dim: int,
         num_heads: int,
         edge_dim: int = 128,
-        use_edge_modulation: bool = True,
         max_history: int = 20,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
         self.head_dim = hidden_dim // num_heads
-        self.use_edge_modulation = use_edge_modulation
         self.max_history = max_history
         
         assert hidden_dim % num_heads == 0, "hidden_dim must be divisible by num_heads"
@@ -770,45 +778,42 @@ class GraphAttentionWithEdgeBias(nn.Module):
         self.out_proj = nn.Linear(hidden_dim, hidden_dim)
         
         # ========== NEW: Temporal Components ==========
-        # 1. Temporal position encoding (让模型知道时间顺序)
+        # 1. Temporal position encoding
         self.temporal_pos_embedding = nn.Embedding(max_history, hidden_dim)
         
-        # 2. Temporal bias (基于时间差的注意力偏置)
+        # 2. Temporal bias
         self.temporal_bias_embedding = nn.Embedding(2 * max_history - 1, num_heads)
         
-        # 3. Learnable temporal aggregator (替代硬编码的 last)
-        # 使用主 attention 的 num_heads，保持一致性
+        # 3. Learnable temporal aggregator
         self.temporal_aggregator = TemporalAggregator(hidden_dim, num_heads)
         # ==============================================
         
-        # Edge feature to attention bias (baseline method - kept for backward compatibility)
+        # Edge feature to attention bias (for spatial bias)
         self.edge_to_bias = nn.Linear(edge_dim, num_heads)
         
-        # ========== IMPROVED: Temporal Edge Modulation ==========
-        if use_edge_modulation:
-            # Process ALL temporal edge features, not just the last one
-            # 1. Temporal edge encoder: process edge sequence
-            self.edge_temporal_encoder = nn.GRU(
-                input_size=edge_dim,
-                hidden_size=edge_dim,
-                num_layers=1,
-                batch_first=True,
-                bidirectional=False,
-            )
-            
-            # 2. Per-timestep modulation: each timestep gets its own gate/scale/shift
-            self.edge_to_gate = nn.Sequential(
-                nn.Linear(edge_dim, hidden_dim), nn.Sigmoid()
-            )
-            self.edge_to_scale = nn.Sequential(
-                nn.Linear(edge_dim, hidden_dim), nn.Tanh()
-            )
-            self.edge_to_shift = nn.Linear(edge_dim, hidden_dim)
-            
-            # 3. Global modulation: aggregated edge info for head scaling
-            self.edge_to_head_scale = nn.Sequential(
-                nn.Linear(edge_dim, num_heads), nn.Tanh()
-            )
+        # ========== Temporal Edge Modulation (always enabled) ==========
+        # Process ALL temporal edge features with GRU to capture dynamics
+        # 1. Temporal edge encoder: process edge sequence
+        self.edge_temporal_encoder = nn.GRU(
+            input_size=edge_dim,
+            hidden_size=edge_dim,
+            num_layers=1,
+            batch_first=True,
+            bidirectional=False,
+        )
+        
+        # 2. Per-timestep modulation: each timestep gets its own gate/scale/shift
+        self.edge_to_gate = nn.Sequential(
+            nn.Linear(edge_dim, hidden_dim), nn.Sigmoid()
+        )
+        self.edge_to_scale = nn.Sequential(
+            nn.Linear(edge_dim, hidden_dim), nn.Tanh()
+        )
+        self.edge_to_shift = nn.Linear(edge_dim, hidden_dim)
+        # 3. Global modulation: aggregated edge info for head scaling
+        self.edge_to_head_scale = nn.Sequential(
+            nn.Linear(edge_dim, num_heads), nn.Tanh()
+        )
         # ========================================================
 
         self.dropout = nn.Dropout(0.1)
@@ -816,54 +821,36 @@ class GraphAttentionWithEdgeBias(nn.Module):
     
     def forward(
         self, 
-        node_features: torch.Tensor, 
-        edge_features: torch.Tensor,
-        return_temporal: bool = False,
-    ):
+        node_features: torch.Tensor,   # [B, N, H, D] - must be 4D temporal
+        edge_features: torch.Tensor,    # [B, H, edge_dim] - must be 3D temporal
+    ) -> torch.Tensor:
         """
+        Simplified forward: only supports temporal mode.
+        
         Args:
-            node_features: [batch, num_nodes, history_length, hidden_dim] or [batch, num_nodes, hidden_dim]
-                          (2 nodes: EE, Object, with optional temporal history)
-            edge_features: [batch, edge_dim] or [batch, history_length, edge_dim]
-                          (distance + orientation_similarity, can be temporal)
-            return_temporal: 是否同时返回聚合前的完整时序输出
+            node_features: [batch, num_nodes, history_length, hidden_dim] - must be 4D
+            edge_features: [batch, history_length, edge_dim] - must be 3D temporal
+        
         Returns:
-            如果 return_temporal=False: [batch, num_nodes, hidden_dim]
-            如果 return_temporal=True: ([batch, num_nodes, hidden_dim], [batch, num_nodes, history_length, hidden_dim] or None)
+            node_features_new: [batch, num_nodes, history_length, hidden_dim]
         """
-        # Handle both temporal and non-temporal cases
+        # Validate input shapes
+        assert node_features.dim() == 4, f"node_features must be [B,N,H,D], got {node_features.shape}"
+        assert edge_features.dim() == 3, f"edge_features must be [B,H,edge_dim], got {edge_features.shape}"
+        
+        batch_size, num_nodes, history_length, hidden_dim = node_features.shape
+        assert edge_features.shape[1] == history_length, \
+            f"Edge history {edge_features.shape[1]} must match node history {history_length}"
+        
         device = node_features.device
-        if len(node_features.shape) == 4:
-            # Temporal: [batch, num_nodes, history_length, hidden_dim]
-            batch_size, num_nodes, history_length, hidden_dim = node_features.shape
-            temporal_mode = True
-        else:
-            # Non-temporal: [batch, num_nodes, hidden_dim]
-            batch_size, num_nodes, hidden_dim = node_features.shape
-            history_length = 1
-            temporal_mode = False
         
-        # Check if edge_features is temporal
-        edge_temporal = len(edge_features.shape) == 3  # [batch, history_length, edge_dim]
-        if edge_temporal:
-            edge_history_length = edge_features.shape[1]
-            if temporal_mode:
-                assert edge_history_length == history_length, \
-                    f"Edge history ({edge_history_length}) must match node history ({history_length})"
+        # ========== Add temporal position encoding ==========
+        time_indices = torch.arange(history_length, device=device)
+        temporal_pos = self.temporal_pos_embedding(time_indices)  # [H, D]
+        node_features = node_features + temporal_pos.view(1, 1, history_length, hidden_dim)
         
-        # ========== NEW: Add temporal position encoding ==========
-        if temporal_mode:
-            time_indices = torch.arange(history_length, device=device)
-            temporal_pos = self.temporal_pos_embedding(time_indices)  # [H, D]
-            # Add to node features: [B, N, H, D] + [1, 1, H, D]
-            node_features = node_features + temporal_pos.view(1, 1, history_length, hidden_dim)
-            
-            # Reshape to sequence
-            node_features_flat = node_features.view(batch_size, num_nodes * history_length, hidden_dim)
-        else:
-            node_features_flat = node_features
-        # =========================================================
-        
+        # Reshape to sequence for attention
+        node_features_flat = node_features.view(batch_size, num_nodes * history_length, hidden_dim)
         seq_len = node_features_flat.shape[1]
         
         # Project to Q, K, V
@@ -871,62 +858,30 @@ class GraphAttentionWithEdgeBias(nn.Module):
         K = self.k_proj(node_features_flat)
         V = self.v_proj(node_features_flat)
         
-        # ========== IMPROVED: Temporal Edge Modulation ==========
-        if self.use_edge_modulation:
-            if edge_temporal and temporal_mode:
-                # Process temporal edge features with GRU to capture dynamics
-                # edge_features: [B, H, edge_dim]
-                edge_encoded, edge_hidden = self.edge_temporal_encoder(edge_features)
-                # edge_encoded: [B, H, edge_dim] - contextualized edge features
-                # edge_hidden: [1, B, edge_dim] - final hidden state (summary)
-                
-                # Per-timestep modulation signals
-                # [B, H, edge_dim] -> [B, H, hidden_dim]
-                edge_gate_temporal = self.edge_to_gate(edge_encoded)  # [B, H, D]
-                edge_scale_temporal = self.edge_to_scale(edge_encoded)  # [B, H, D]
-                edge_shift_temporal = self.edge_to_shift(edge_encoded)  # [B, H, D]
-                
-                # Apply modulation to V per-timestep
-                # V shape: [B, N*H, D], need to apply different modulation per timestep
-                V_reshaped = V.view(batch_size, num_nodes, history_length, hidden_dim)
-                
-                # Expand modulation to both nodes (same edge for EE-Obj at each timestep)
-                # [B, H, D] -> [B, 1, H, D] -> broadcast to [B, N, H, D]
-                gate = edge_gate_temporal.unsqueeze(1)   # [B, 1, H, D]
-                scale = edge_scale_temporal.unsqueeze(1)  # [B, 1, H, D]
-                shift = edge_shift_temporal.unsqueeze(1)  # [B, 1, H, D]
-                
-                V_modulated = V_reshaped * (1.0 + scale) + shift
-                V_modulated = V_modulated * gate
-                V = V_modulated.view(batch_size, seq_len, hidden_dim)
-                
-                # Global head scale from final edge state
-                edge_summary = edge_hidden.squeeze(0)  # [B, edge_dim]
-                head_scale = self.edge_to_head_scale(edge_summary)  # [B, num_heads]
-                
-            elif not edge_temporal:
-                # Non-temporal edge: original behavior (apply same modulation everywhere)
-                edge_gate = self.edge_to_gate(edge_features)
-                edge_scale = self.edge_to_scale(edge_features)
-                edge_shift = self.edge_to_shift(edge_features)
-                
-                V = V * (1.0 + edge_scale.unsqueeze(1)) + edge_shift.unsqueeze(1)
-                V = V * edge_gate.unsqueeze(1)
-                
-                head_scale = self.edge_to_head_scale(edge_features)
-            else:
-                # edge_temporal but not temporal_mode: use last timestep
-                edge_last = edge_features[:, -1, :]
-                edge_gate = self.edge_to_gate(edge_last)
-                edge_scale = self.edge_to_scale(edge_last)
-                edge_shift = self.edge_to_shift(edge_last)
-                
-                V = V * (1.0 + edge_scale.unsqueeze(1)) + edge_shift.unsqueeze(1)
-                V = V * edge_gate.unsqueeze(1)
-                
-                head_scale = self.edge_to_head_scale(edge_last)
-        else:
-            head_scale = None
+        # ========== Temporal Edge Modulation (always enabled) ==========
+        # Process temporal edge features with GRU to capture dynamics
+        edge_encoded, edge_hidden = self.edge_temporal_encoder(edge_features)  # [B, H, edge_dim]
+        
+        # Per-timestep modulation signals
+        edge_gate_temporal = self.edge_to_gate(edge_encoded)   # [B, H, D]
+        edge_scale_temporal = self.edge_to_scale(edge_encoded)  # [B, H, D]
+        edge_shift_temporal = self.edge_to_shift(edge_encoded)  # [B, H, D]
+        
+        # Apply modulation to V per-timestep
+        V_reshaped = V.view(batch_size, num_nodes, history_length, hidden_dim)
+        
+        # Expand modulation to both nodes (same edge for EE-Obj at each timestep)
+        gate = edge_gate_temporal.unsqueeze(1)   # [B, 1, H, D]
+        scale = edge_scale_temporal.unsqueeze(1)  # [B, 1, H, D]
+        shift = edge_shift_temporal.unsqueeze(1)  # [B, 1, H, D]
+        
+        V_modulated = V_reshaped * (1.0 + scale) + shift
+        V_modulated = V_modulated * gate
+        V = V_modulated.view(batch_size, seq_len, hidden_dim)
+        
+        # Global head scale from final edge state
+        edge_summary = edge_hidden.squeeze(0)  # [B, edge_dim]
+        head_scale = self.edge_to_head_scale(edge_summary)  # [B, num_heads]
         # =========================================================
         
         # Reshape for multi-head attention
@@ -951,85 +906,47 @@ class GraphAttentionWithEdgeBias(nn.Module):
         # ========== Build combined attention bias (spatial + temporal) ==========
         attention_bias = self._build_attention_bias(
             batch_size, num_nodes, history_length, 
-            edge_features, edge_temporal, temporal_mode, device
+            edge_features, device
         )
         scores = scores + attention_bias
         # ========================================================================
-        
         
         # Apply softmax
         attn_weights = F.softmax(scores, dim=-1)
         attn_weights = self.dropout(attn_weights)
         
         # Apply attention to values
-        out = torch.matmul(attn_weights, V)  # [batch, heads, num_nodes, head_dim]
+        out = torch.matmul(attn_weights, V)  # [batch, heads, seq_len, head_dim]
         
         # Reshape and project output
-        out = out.transpose(
-            1, 2
-        ).contiguous()  # [batch, num_nodes (* history_length), heads, head_dim]
-        
-        # Reshape output
+        out = out.transpose(1, 2).contiguous()  # [batch, seq_len, heads, head_dim]
         out = out.view(batch_size, seq_len, self.hidden_dim)
         
-        # ========== NEW: Return full temporal (no aggregation in middle layers) ==========
-        if temporal_mode:
-            # Reshape to [B, N, H, D] - keep full temporal
-            out_temporal = out.view(batch_size, num_nodes, history_length, self.hidden_dim)
-            out_temporal = self.out_proj(out_temporal.view(batch_size * num_nodes * history_length, self.hidden_dim))
-            out_temporal = out_temporal.view(batch_size, num_nodes, history_length, self.hidden_dim)
-            
-            # Only aggregate if explicitly requested (for final layer or special cases)
-            if return_temporal:
-                out_aggregated = self.temporal_aggregator(out_temporal)  # [B, N, D]
-                return out_aggregated, out_temporal
-            # Default: return full temporal for layer-to-layer passing
-            return out_temporal
-        else:
-            out = out.view(batch_size, num_nodes, self.hidden_dim)
-            out = self.out_proj(out)
+        # Reshape to [B, N, H, D] and apply output projection
+        out_temporal = out.view(batch_size, num_nodes, history_length, self.hidden_dim)
+        out_temporal = self.out_proj(out_temporal.view(batch_size * num_nodes * history_length, self.hidden_dim))
+        out_temporal = out_temporal.view(batch_size, num_nodes, history_length, self.hidden_dim)
         
-            if return_temporal:
-                return out, None
-        return out
-        # =========================================================
+        # Always return full temporal [B, N, H, D] for layer-to-layer passing
+        return out_temporal
     
     def _build_attention_bias(
         self, batch_size, num_nodes, history_length, 
-        edge_features, edge_temporal, temporal_mode, device
+        edge_features: torch.Tensor,  # [B, H, edge_dim]
+        device: torch.device,
     ):
-        """Build combined spatial + temporal attention bias."""
-        
-        if temporal_mode:
-            seq_len = num_nodes * history_length
-        else:
-            seq_len = num_nodes
+        """Build combined spatial + temporal attention bias (temporal mode only)."""
+        seq_len = num_nodes * history_length
         
         attention_bias = torch.zeros(
             batch_size, self.num_heads, seq_len, seq_len, device=device
         )
         
-        if not temporal_mode:
-            # Non-temporal: simple spatial bias
-            if not edge_temporal:
-                edge_bias = self.edge_to_bias(edge_features)
-            else:
-                edge_bias = self.edge_to_bias(edge_features[:, -1, :])
-            attention_bias[:, :, 0, 1] = edge_bias
-            attention_bias[:, :, 1, 0] = edge_bias
-            return attention_bias
-        
-        # ===== Temporal mode: build spatial + temporal bias =====
-        
         # 1. Spatial bias: same-timestep cross-node connections
-        if edge_temporal:
-            edge_bias_temporal = self.edge_to_bias(
-                edge_features.view(-1, edge_features.shape[-1])
-            ).view(batch_size, history_length, self.num_heads)
-            edge_bias_per_timestep = edge_bias_temporal.permute(0, 2, 1)  # [B, heads, H]
-        else:
-            edge_bias = self.edge_to_bias(edge_features)
-            edge_bias_per_timestep = edge_bias.unsqueeze(-1).expand(-1, -1, history_length)
+        edge_bias_temporal = self.edge_to_bias(
+            edge_features.view(-1, edge_features.shape[-1])
+        ).view(batch_size, history_length, self.num_heads)
+        edge_bias_per_timestep = edge_bias_temporal.permute(0, 2, 1)  # [B, heads, H]
         
         t_indices = torch.arange(history_length, device=device)
         node0_indices = t_indices
@@ -1065,27 +982,19 @@ class GraphDiTUnit(nn.Module):
         hidden_dim: int,
         num_heads: int,
         edge_dim: int = 128,
-        use_edge_modulation: bool = True,
         joint_dim: int | None = None,
         max_history: int = 20,
-        cross_attn_use_temporal: bool = True,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_heads = num_heads
         self.joint_dim = joint_dim
         self.max_history = max_history
-        self.cross_attn_use_temporal = cross_attn_use_temporal
         self.joint_pos_dim: int | None = None
         self.joint_vel_dim: int | None = None
         
         # ========== NEW: Temporal position encoding for action sequence ==========
         self.action_temporal_pos = nn.Embedding(max_history + 1, hidden_dim)  # +1 for noisy_action
-        # =========================================================================
-        
-        # ========== NEW: Residual aggregator (与 graph_attention 内部对齐) ==========
-        self.node_residual_aggregator = TemporalAggregator(hidden_dim, num_heads)
-        # =========================================================================
         
         # Joint states encoder (if joint_dim is provided)
         # NOTE: Only using joint_pos (removed joint_vel to test if it's noise)
@@ -1129,11 +1038,10 @@ class GraphDiTUnit(nn.Module):
             nn.Dropout(0.1),
         )
         
-        # Step 2: Graph attention with edge features (IMPROVED)
+        # Step 2: Graph attention with edge features (always uses temporal edge modulation)
         self.graph_attention = GraphAttentionWithEdgeBias(
             hidden_dim, num_heads, edge_dim, 
-            use_edge_modulation=use_edge_modulation,
-            max_history=max_history,  # Pass max_history
+            max_history=max_history,
         )
         # Use AdaLN for node features as well
         self.node_norm1 = AdaptiveLayerNorm(hidden_dim, hidden_dim)
@@ -1164,20 +1072,23 @@ class GraphDiTUnit(nn.Module):
     def forward(
         self,
         action: torch.Tensor,
-        node_features: torch.Tensor,
-        edge_features: torch.Tensor,
+        node_features: torch.Tensor,  # [B, 2, H, D] - must be 4D temporal
+        edge_features: torch.Tensor,   # [B, H, edge_dim] - must be 3D temporal
         timestep_embed: torch.Tensor | None = None,
         joint_states_history: torch.Tensor | None = None,
     ):
         """
+        Simplified forward: only supports temporal mode.
+        
         Args:
-            action: Action sequence [batch, seq_len, hidden_dim] (should be action history)
-            node_features: Node features [batch, 2, hidden_dim] (EE, Object)
-            edge_features: Edge features [batch, edge_dim]
+            action: Action sequence [batch, seq_len, hidden_dim]
+            node_features: Node features [batch, 2, history_length, hidden_dim] - must be 4D
+            edge_features: Edge features [batch, history_length, edge_dim] - must be 3D temporal
             timestep_embed: Timestep embedding [batch, hidden_dim] (optional)
             joint_states_history: Joint states history [batch, history_length, joint_dim] (optional)
         Returns:
-            noise_pred: Predicted noise [batch, hidden_dim]
+            noise_pred: Predicted noise [batch, seq_len, hidden_dim]
+            node_features_new: [batch, 2, history_length, hidden_dim]
         """
         device = action.device
         dtype = action.dtype
@@ -1191,7 +1102,7 @@ class GraphDiTUnit(nn.Module):
         
         # Step 1: State-action sequence self-attention
         # Design (UPDATED):
-        #   - Self-attn uses joint positions + joint velocities + action history
+        #   - Self-attn uses joint positions + action history
         #   - Noisy action token is kept separate (not concatenated with joint states)
         if (
             joint_states_history is not None
@@ -1240,7 +1151,7 @@ class GraphDiTUnit(nn.Module):
                 history_length = trim_len
             
             # Concatenate joint pos + action history (NOT with noisy_action token)
-            # NOTE: joint_vel removed - only joint_pos + action
+            # NOTE: only joint_pos + action
             # [batch, history_length, hidden_dim * 2] -> [batch, history_length, hidden_dim]
             state_action_history = torch.cat(
                 [joint_pos_embed, action_history_embed], dim=-1
@@ -1286,24 +1197,22 @@ class GraphDiTUnit(nn.Module):
         a_new = self.action_ff(a_new) + action_residual  # [batch, seq_len, hidden_dim]
         
         # ==================== Step 2: Graph Attention ====================
-        # Ensure node_features is 4D for temporal processing
-        if len(node_features.shape) == 4:
-            # Temporal: [B, N, H, D] - keep full temporal
-            node_residual = node_features  # [B, N, H, D]
-            node_features_for_attn = node_features
-        else:
-            # Non-temporal: expand to temporal format [B, N, 1, D]
-            node_residual = node_features.unsqueeze(2)  # [B, N, 1, D]
-            node_features_for_attn = node_residual
+        # Validate input shapes
+        assert node_features.dim() == 4, f"node_features must be [B,N,H,D], got {node_features.shape}"
+        assert edge_features.dim() == 3, f"edge_features must be [B,H,edge_dim], got {edge_features.shape}"
         
-        # Use AdaLN for node features (supports 4D input)
+        B, N, H, D = node_features.shape
+        assert edge_features.shape[1] == H, f"Edge history {edge_features.shape[1]} must match node history {H}"
+        
+        node_residual = node_features  # [B, N, H, D]
+        
+        # Use AdaLN for node features
         cond = self._get_condition(condition_emb, batch_size, device, dtype)
-        node_features_for_attn = self.node_norm1(node_features_for_attn, cond)
+        node_features_for_attn = self.node_norm1(node_features, cond)
 
-        # Get full temporal output (no aggregation in middle layers)
+        # Graph attention (always returns [B, N, H, D])
         node_features_new = self.graph_attention(
-            node_features_for_attn, edge_features, 
-            return_temporal=False  # Return full temporal [B, N, H, D]
+            node_features_for_attn, edge_features
         )
         
         # Add residual (both are [B, N, H, D])
@@ -1329,12 +1238,8 @@ class GraphDiTUnit(nn.Module):
         
         # Build KV memory from full temporal node features
         # node_features_new is [B, N, H, D], flatten to [B, N*H, D]
-        if len(node_features_new.shape) == 4:
-            B, N, H, D = node_features_new.shape
-            kv_memory = node_features_new.view(B, N * H, D)
-        else:
-            # Fallback for non-temporal case: [B, N, D] -> [B, N, D]
-            kv_memory = node_features_new.view(batch_size, -1, D)
+        B, N, H, D = node_features_new.shape
+        kv_memory = node_features_new.view(B, N * H, D)
         
         noise_embed, _ = self.cross_attn(a_new_norm, kv_memory, kv_memory)
         noise_embed = noise_embed + cross_residual
@@ -1378,6 +1283,11 @@ class GraphDiTPolicy(nn.Module):
         # ------------------------------------------------------------
         # Handle backward compatibility: old checkpoints may not have z_dim
         z_dim = getattr(cfg, 'z_dim', 128)  # Default to 128 if not present
+        
+        # Learnable temporal aggregator for pooling node features
+        # This replaces hardcoded mean(dim=2) with learnable attention-based aggregation
+        self.node_temporal_aggregator = TemporalAggregator(cfg.hidden_dim, cfg.num_heads)
+        
         self.node_to_z = nn.Sequential(
             nn.Linear(cfg.hidden_dim * 2, cfg.hidden_dim),
             nn.LayerNorm(cfg.hidden_dim),
@@ -1460,10 +1370,8 @@ class GraphDiTPolicy(nn.Module):
                 cfg.hidden_dim,
                 cfg.num_heads,
                 cfg.graph_edge_dim,
-                use_edge_modulation=cfg.use_edge_modulation,
                 joint_dim=cfg.joint_dim,
-                max_history=max_history,  # Pass max_history
-                cross_attn_use_temporal=True,  # Use full temporal for cross-attention
+                max_history=max_history,
             )
             for _ in range(cfg.num_layers)
             ]
@@ -1676,9 +1584,8 @@ class GraphDiTPolicy(nn.Module):
         # Handle [B, 2, H, D] - aggregate temporal dimension first
         if node_features.dim() == 4:
             # Temporal: [B, 2, H, hidden_dim] -> aggregate to [B, 2, hidden_dim]
-            B, N, H, D = node_features.shape
-            # Use mean aggregation across temporal dimension
-            node_features = node_features.mean(dim=2)  # [B, 2, D]
+            # Use learnable temporal aggregator instead of hardcoded mean
+            node_features = self.node_temporal_aggregator(node_features)  # [B, 2, D]
         elif node_features.dim() == 3:
             # Non-temporal: [B, 2, hidden_dim]
             pass
@@ -1859,50 +1766,36 @@ class GraphDiTPolicy(nn.Module):
                 edge_delta = current_edge - prev_edge  # [batch, 2]
             else:
                 edge_delta = torch.zeros_like(current_edge)  # [batch, 2]
-            # Define edge_features_raw outside if/else to ensure it's always defined
-                edge_features_raw = torch.cat([current_edge, edge_delta], dim=-1)  # [batch, 4]
+            # edge_features_temporal_full is already computed: [batch, history_length, 4]
             
         else:
-            # Fallback: extract from current obs (backward compatibility)
+            # Fallback: extract from current obs and convert to H=1 temporal format
             ee_node, object_node = self._extract_node_features(obs)  # [batch, 7] each
             
-            # Compute edge features
-            current_edge = self._compute_edge_features(
-                ee_node, object_node
-            )  # [batch, 2]
+            # Convert to temporal format with H=1
+            ee_node_history = ee_node.unsqueeze(1)  # [batch, 1, 7]
+            object_node_history = object_node.unsqueeze(1)  # [batch, 1, 7]
+            history_length = 1
             
-            # Pad with zeros for delta (no history available)
+            # Embed nodes: [batch, 1, 7] → [batch, 1, hidden_dim]
+            ee_node_embed = self.node_embedding(ee_node).unsqueeze(1)  # [batch, 1, hidden_dim]
+            object_node_embed = self.node_embedding(object_node).unsqueeze(1)  # [batch, 1, hidden_dim]
+            
+            # Stack: [batch, 2, 1, hidden_dim]
+            node_features = torch.stack([ee_node_embed, object_node_embed], dim=1)
+            
+            # Compute edge with delta (H=1, so delta is zero)
+            current_edge = self._compute_edge_features(ee_node, object_node)  # [batch, 2]
             edge_delta = torch.zeros_like(current_edge)  # [batch, 2]
-            edge_features_raw = torch.cat(
-                [current_edge, edge_delta], dim=-1
-            )  # [batch, 4]
-            
-            # Embed nodes (single timestep)
-            ee_node_embed = self.node_embedding(ee_node)  # [batch, hidden_dim]
-            object_node_embed = self.node_embedding(object_node)  # [batch, hidden_dim]
-            # For compatibility: [batch, 2, 1, hidden_dim]
-            node_features = torch.stack(
-                [ee_node_embed, object_node_embed], dim=1
-            ).unsqueeze(
-                2
-            )  # [batch, 2, 1, hidden_dim]
+            edge_features_temporal_full = torch.cat([current_edge, edge_delta], dim=-1).unsqueeze(1)  # [batch, 1, 4]
         
-        # Embed edge features
-        # CRITICAL FIX: Support temporal edge features for proper per-timestep bias
-        if ee_node_history is not None and object_node_history is not None:
-            # Temporal mode: embed each timestep's edge features
-            # edge_features_temporal_full: [batch, history_length, 4]
-            edge_features_embed = self.edge_embedding(
-                edge_features_temporal_full.view(-1, edge_features_temporal_full.shape[-1])
-            )  # [batch * history_length, graph_edge_dim]
-            edge_features_embed = edge_features_embed.view(
-                batch_size, history_length, -1
-            )  # [batch, history_length, graph_edge_dim]
-        else:
-            # Non-temporal: single edge embedding
-            edge_features_embed = self.edge_embedding(
-                edge_features_raw
-            )  # [batch, graph_edge_dim]
+        # Embed temporal edge features: [batch, history_length, 4] → [batch, history_length, edge_dim]
+        edge_features_embed = self.edge_embedding(
+            edge_features_temporal_full.view(-1, edge_features_temporal_full.shape[-1])
+        )  # [batch * history_length, graph_edge_dim]
+        edge_features_embed = edge_features_embed.view(
+            batch_size, history_length, -1
+        )  # [batch, history_length, graph_edge_dim]
         
         # Extract joint states history (for state-action sequence self-attention)
         # IMPORTANT: Do NOT fabricate fake histories by repeating the current joint state.
@@ -2006,25 +1899,11 @@ class GraphDiTPolicy(nn.Module):
         condition_embed = None  # CRITICAL FIX: ensure always defined
         if timesteps is not None:
             timestep_embed = self._get_timestep_embed(timesteps)  # [batch, hidden_dim]
-            # Add timestep embedding to action
+            # Add timestep embedding to action (only injection point for timestep)
             action_embed = action_embed + timestep_embed.unsqueeze(
                 1
             )  # [batch, seq_len, hidden_dim] or [batch, 1, hidden_dim]
-            
-            # Add to node features (handle both temporal and non-temporal)
-            if len(node_features.shape) == 4:
-                # Temporal: [batch, 2, history_length, hidden_dim]
-                node_features = node_features + timestep_embed.unsqueeze(1).unsqueeze(
-                    1
-                )  # Broadcast to all timesteps
-            else:
-                # Non-temporal: [batch, 2, 1, hidden_dim] or [batch, 2, hidden_dim]
-                if len(node_features.shape) == 3:
-                    node_features = node_features + timestep_embed.unsqueeze(1)
-                else:
-                    node_features = node_features + timestep_embed.unsqueeze(
-                        1
-                    ).unsqueeze(1)
+            # Note: timestep info for nodes will be injected via AdaLN modulation
         
         # Add subtask condition if provided
         if subtask_condition is not None and hasattr(self, "subtask_encoder"):
@@ -2044,25 +1923,11 @@ class GraphDiTPolicy(nn.Module):
                     subtask_embed
                 )  # [batch, hidden_dim]
             
-            # Add condition to action and nodes
+            # Add condition to action (second injection point: subtask condition)
             action_embed = action_embed + condition_embed.unsqueeze(
                 1
             )  # [batch, seq_len, hidden_dim] or [batch, 1, hidden_dim]
-            
-            # Add to node features (handle both temporal and non-temporal)
-            if len(node_features.shape) == 4:
-                # Temporal: [batch, 2, history_length, hidden_dim]
-                node_features = node_features + condition_embed.unsqueeze(1).unsqueeze(
-                    1
-                )  # Broadcast to all timesteps
-            else:
-                # Non-temporal
-                if len(node_features.shape) == 3:
-                    node_features = node_features + condition_embed.unsqueeze(1)
-                else:
-                    node_features = node_features + condition_embed.unsqueeze(
-                        1
-                    ).unsqueeze(1)
+            # Note: condition info for nodes will be injected via AdaLN modulation
         
         # CRITICAL FIX: Use unified condition_embed for AdaLN (includes both timestep and subtask)
         # This ensures subtask information is properly injected through AdaLN modulation
@@ -2134,7 +1999,7 @@ class GraphDiTPolicy(nn.Module):
             return {
                 "noise_pred": noise_pred,  # [batch, pred_horizon, action_dim]
                 "node_features": node_features,
-                "edge_features": edge_features_raw,
+                "edge_features": edge_features_embed,  # [batch, history_length, edge_dim]
                 "action_embed": action_embed,
                 # NEW:
                 "z_layers": z_stack,              # [B, K, z_dim]
@@ -2142,6 +2007,108 @@ class GraphDiTPolicy(nn.Module):
             }
         else:
             return noise_pred  # [batch, pred_horizon, action_dim]
+    
+    def extract_z(
+        self,
+        ee_node_history: torch.Tensor,       # [B, H, 7] - must be 3D temporal
+        object_node_history: torch.Tensor,   # [B, H, 7] - must be 3D temporal
+    ) -> torch.Tensor:
+        """
+        Extract graph latent z from node histories (for RL high-frequency calls).
+        
+        Simplified: only supports temporal mode with history.
+        This method only runs Graph-Attention layers (no self-attention or cross-attention)
+        to extract scene understanding features efficiently.
+        
+        Args:
+            ee_node_history: EE node history [batch, history_length, 7] - must be 3D
+            object_node_history: Object node history [batch, history_length, 7] - must be 3D
+        
+        Returns:
+            z_layers: [batch, K, z_dim] - Graph latents from all layers
+        """
+        # Validate input shapes
+        assert ee_node_history.dim() == 3, f"ee_node_history must be [B,H,7], got {ee_node_history.shape}"
+        assert object_node_history.dim() == 3, f"object_node_history must be [B,H,7], got {object_node_history.shape}"
+        assert ee_node_history.shape[1] >= 1, "History length must be >= 1"
+        assert ee_node_history.shape[1] == object_node_history.shape[1], \
+            f"History lengths must match: {ee_node_history.shape[1]} vs {object_node_history.shape[1]}"
+        
+        self.eval()
+        
+        with torch.no_grad():
+            B, H, node_dim = ee_node_history.shape
+            
+            # 1. Embed nodes: [B, H, 7] → [B, H, hidden_dim]
+            ee_flat = ee_node_history.view(B * H, node_dim)
+            obj_flat = object_node_history.view(B * H, node_dim)
+            
+            ee_embed_flat = self.node_embedding(ee_flat)  # [B*H, hidden_dim]
+            obj_embed_flat = self.node_embedding(obj_flat)  # [B*H, hidden_dim]
+            
+            ee_embed = ee_embed_flat.view(B, H, self.cfg.hidden_dim)
+            obj_embed = obj_embed_flat.view(B, H, self.cfg.hidden_dim)
+            
+            # Stack to [B, 2, H, hidden_dim] (Graph-DiT expected format)
+            node_features = torch.stack([ee_embed, obj_embed], dim=1)  # [B, 2, H, hidden_dim]
+            
+            # 2. Compute temporal edge features with delta
+            edge_list = []
+            for t in range(H):
+                edge_t = self._compute_edge_features(
+                    ee_node_history[:, t, :],
+                    object_node_history[:, t, :]
+                )  # [B, 2]
+                if t > 0:
+                    edge_prev = self._compute_edge_features(
+                        ee_node_history[:, t-1, :],
+                        object_node_history[:, t-1, :]
+                    )
+                    delta = edge_t - edge_prev
+                else:
+                    delta = torch.zeros_like(edge_t)
+                edge_list.append(torch.cat([edge_t, delta], dim=-1))  # [B, 4]
+            
+            edge_temporal = torch.stack(edge_list, dim=1)  # [B, H, 4]
+            # Embed temporal edges: [B, H, 4] → [B, H, edge_dim]
+            edge_embed_flat = self.edge_embedding(edge_temporal.view(B * H, 4))
+            edge_features_embed = edge_embed_flat.view(B, H, self.cfg.graph_edge_dim)
+            
+            # 3. Run Graph-Attention layers only (no self-attention or cross-attention)
+            z_layers: list[torch.Tensor] = []
+            zero_condition = torch.zeros(
+                B, self.cfg.hidden_dim, 
+                device=node_features.device,
+                dtype=node_features.dtype
+            )
+            
+            for unit in self.graph_dit_units:
+                # Normalize
+                node_features_norm = unit.node_norm1(node_features, zero_condition)
+                
+                # Graph attention (always returns [B, 2, H, D])
+                node_features_new = unit.graph_attention(
+                    node_features_norm,
+                    edge_features_embed
+                )
+                
+                # Residual connection
+                node_features = node_features_new + node_features
+                
+                # FFN (simplified: flatten, apply, reshape)
+                B_curr, N, H_curr, D = node_features.shape
+                node_flat = node_features.view(B_curr * N * H_curr, D)
+                node_for_norm = node_flat.view(B_curr, N * H_curr, D)
+                node_features_norm2 = unit.node_norm2(node_for_norm, zero_condition)
+                node_flat = node_features_norm2.view(B_curr * N * H_curr, D)
+                node_flat = unit.node_ff(node_flat) + node_flat
+                node_features = node_flat.view(B_curr, N, H_curr, D)
+                
+                # Pool to z_k
+                z_k = self._pool_node_latent(node_features)  # [B, z_dim]
+                z_layers.append(z_k)
+            
+            return torch.stack(z_layers, dim=1)  # [B, K, z_dim]
     
     def extract_features(
         self,
@@ -2228,7 +2195,7 @@ class GraphDiTPolicy(nn.Module):
                 else:
                     edge_delta = torch.zeros_like(current_edge)
                 # Define edge_features_raw outside if/else to ensure it's always defined
-                    edge_features_raw = torch.cat([current_edge, edge_delta], dim=-1)
+                edge_features_raw = torch.cat([current_edge, edge_delta], dim=-1)
             else:
                 # Fallback: extract from current obs
                 ee_node, object_node = self._extract_node_features(obs)
@@ -2310,82 +2277,6 @@ class GraphDiTPolicy(nn.Module):
                 "z_layers": z_stack,                 # [B,K,z_dim]
                 "z_final": z_final,                  # [B,z_dim]
             }
-
-    def extract_z_fast(
-        self,
-        ee_node: torch.Tensor,      # [B, 7] 当前 EE
-        obj_node: torch.Tensor,     # [B, 7] 当前 Object
-    ) -> torch.Tensor:
-        """
-        轻量级 z 提取：只跑 Graph-Attention，不跑 Self-Attn/Cross-Attn
-        用于 RL 高频调用
-        
-        只运行 Graph-Attention 层，输出所有层的 z¹...zᴷ
-        
-        Args:
-            ee_node: [B, 7] - EE position(3) + orientation(4)
-            obj_node: [B, 7] - Object position(3) + orientation(4)
-        
-        Returns:
-            z_layers: [B, K, z_dim] - 所有层的 graph latent
-        """
-        with torch.no_grad():
-            # 1. Embed nodes
-            ee_embed = self.node_embedding(ee_node)      # [B, hidden]
-            obj_embed = self.node_embedding(obj_node)    # [B, hidden]
-            node_features = torch.stack([ee_embed, obj_embed], dim=1)  # [B, 2, hidden]
-            
-            # 2. Compute edge features
-            edge_raw = self._compute_edge_features(ee_node, obj_node)  # [B, 2]
-            edge_delta = torch.zeros_like(edge_raw)  # 简化，不用 delta
-            edge_features_raw = torch.cat([edge_raw, edge_delta], dim=-1)  # [B, 4]
-            edge_embed = self.edge_embedding(edge_features_raw)  # [B, graph_edge_dim]
-            
-            # 3. 遍历所有层，只跑 Graph-Attention，收集 z¹...zᴷ
-            z_layers: list[torch.Tensor] = []
-            
-            for unit in self.graph_dit_units:
-                # 准备 node_features 格式: [B, 2, 1, hidden] (temporal format for graph_attention)
-                node_features_for_attn = node_features.unsqueeze(2)  # [B, 2, 1, hidden]
-                
-                # 只运行 Graph-Attention（跳过 Self-Attn 和 Cross-Attn）
-                # 使用 zero condition (不需要 timestep/subtask condition)
-                zero_condition = torch.zeros(
-                    node_features_for_attn.shape[0],
-                    self.cfg.hidden_dim,
-                    device=node_features_for_attn.device,
-                    dtype=node_features_for_attn.dtype,
-                )
-                
-                # Apply normalization (简化版，只做 norm1)
-                node_features_for_attn = unit.node_norm1(
-                    node_features_for_attn, zero_condition
-                )
-                
-                # Run graph attention
-                node_features_new = unit.graph_attention(
-                    node_features_for_attn, edge_embed
-                )  # [B, 2, 1, hidden] or [B, 2, hidden]
-                
-                # Handle output shape: graph_attention may return [B, 2, 1, hidden] or [B, 2, hidden]
-                if len(node_features_new.shape) == 4:
-                    node_features_new = node_features_new.squeeze(2)  # [B, 2, hidden]
-                
-                # Add residual (简化版，不做 FF)
-                node_residual = node_features  # [B, 2, hidden]
-                node_features_new = node_features_new + node_residual
-                
-                # 更新 node_features 用于下一层
-                node_features = node_features_new  # [B, 2, hidden]
-                
-                # Pool to z_k
-                z_k = self._pool_node_latent(node_features)  # [B, z_dim]
-                z_layers.append(z_k)
-            
-            # Stack all layers: [B, K, z_dim]
-            z_stack = torch.stack(z_layers, dim=1)
-            
-        return z_stack  # [B, K, z_dim]
     
     def get_base_action(
         self,
