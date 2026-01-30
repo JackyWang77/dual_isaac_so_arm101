@@ -210,8 +210,9 @@ def play_graph_dit_policy(
                 else action_space.shape
             )
     else:
-        action_dim = 6  # Default fallback for reach task (joint states)
+        action_dim = 6  # Default fallback: env action dim (5 arm + 1 gripper)
     
+    # Policy outputs action_dim from config (typically 5 = arm only); env may expect 6 (arm + gripper)
     print(f"[Play] Obs dim: {obs_dim}, Action dim: {action_dim}")
     
     # Load policy and normalization stats
@@ -431,7 +432,7 @@ def play_graph_dit_policy(
     # ==========================================================================
     # EMA SMOOTHING for action smoothing (joints only, gripper excluded)
     # ==========================================================================
-    ema_alpha = 0.5  # EMA weight: higher = more responsive, lower = smoother
+    ema_alpha = 1  # EMA weight: higher = more responsive, lower = smoother
     ema_smoothed_joints = None  # Will be initialized on first action [num_envs, joint_dim]
     print(f"[Play] EMA smoothing enabled: alpha={ema_alpha} (joints only, gripper excluded)")
 

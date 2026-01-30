@@ -518,7 +518,7 @@ class GraphDiTPolicyCfg:
     """Observation dimension (input to policy). Note: obs should be dict or separable."""
     
     action_dim: int = MISSING
-    """Action dimension (output from policy)."""
+    """Action dimension (output from policy). Typically 5 (arm joints only); gripper is handled separately (e.g. gripper_model in play)."""
     
     # Observation structure indices (for backward compatibility with flattened obs)
     # CRITICAL: These should match the actual observation structure
@@ -588,7 +588,7 @@ class GraphDiTPolicyCfg:
     """Edge feature dimension: distance(1) + orientation_similarity(1) = 2"""
     
     joint_dim: int | None = None
-    """Joint states dimension (joint_pos + joint_vel). If None, joint states are not used."""
+    """Joint states dimension (input only). Typically 6 (5 arm + 1 gripper). Policy uses this as context; it does not predict gripper. If None, joint states are not used."""
     
     # Action history
     action_history_length: int = 10
@@ -1295,13 +1295,9 @@ class GraphDiTPolicy(nn.Module):
             nn.Linear(cfg.hidden_dim, z_dim),
         )
         
-        # Edge embedding: current(2) + delta(2) = 4 -> edge_dim
-        # CRITICAL FIX: Input is now [current_distance, current_alignment, delta_distance, delta_alignment]
-        # This includes velocity/trend information for better grasping behavior
+        # Edge embedding: [distance, orientation_similarity] -> edge_dim (no delta, avoid extra noise)
         self.edge_embedding = nn.Sequential(
-            nn.Linear(
-                cfg.edge_dim * 2, cfg.graph_edge_dim
-            ),  # 4 inputs (current + delta)
+            nn.Linear(cfg.edge_dim, cfg.graph_edge_dim),  # 2 inputs
             nn.LayerNorm(cfg.graph_edge_dim),
             nn.GELU(),
         )
@@ -1490,7 +1486,8 @@ class GraphDiTPolicy(nn.Module):
         Args:
             obs: [batch, obs_dim]
         Returns:
-            joint_states: [batch, joint_dim] - only joint_pos (no joint_vel)
+            joint_states: [batch, joint_dim] - only joint_pos (no joint_vel).
+                joint_dim is typically 6 (5 arm + 1 gripper); policy output is 5 (arm only).
         """
         # Use configurable indices if provided, otherwise use defaults
         if self.cfg.obs_structure is not None:
@@ -1498,10 +1495,10 @@ class GraphDiTPolicy(nn.Module):
             joint_pos = obs[:, obs_struct["joint_pos"][0] : obs_struct["joint_pos"][1]]
             # NOTE: joint_vel removed - only using joint_pos
         else:
-            # Default structure: [joint_pos(6), ...] (joint_vel removed)
+            # Default structure: [joint_pos(6), ...] (joint_vel removed). 6 = 5 arm + 1 gripper.
             joint_pos = obs[:, 0:6]  # [batch, 6]
         
-        # Only return joint_pos (no joint_vel)
+        # Only return joint_pos (no joint_vel). Input 6-dim; policy outputs 5-dim (arm only).
         joint_states = joint_pos  # [batch, joint_dim] where joint_dim = 6
         return joint_states
     
@@ -1741,32 +1738,8 @@ class GraphDiTPolicy(nn.Module):
             edge_features_temporal = edge_features_raw_all.view(
                 batch_size, history_length, 2
             )  # [batch, history_length, 2]
-            
-            # CRITICAL FIX: Compute edge features with delta for EACH timestep
-            # For each timestep t, include [distance_t, alignment_t, delta_distance_t, delta_alignment_t]
-            # where delta = edge_t - edge_{t-1} (or zero for first timestep)
-            edge_features_with_delta = []
-            for t in range(history_length):
-                edge_t = edge_features_temporal[:, t, :]  # [batch, 2]
-                if t > 0:
-                    edge_prev = edge_features_temporal[:, t-1, :]  # [batch, 2]
-                    edge_delta_t = edge_t - edge_prev  # [batch, 2]
-                else:
-                    edge_delta_t = torch.zeros_like(edge_t)  # [batch, 2]
-                edge_t_with_delta = torch.cat([edge_t, edge_delta_t], dim=-1)  # [batch, 4]
-                edge_features_with_delta.append(edge_t_with_delta)
-            
-            # Stack: [batch, history_length, 4]
-            edge_features_temporal_full = torch.stack(edge_features_with_delta, dim=1)
-            
-            # For backward compatibility: also compute current edge (last timestep) for other uses
-            current_edge = edge_features_temporal[:, -1, :]  # [batch, 2]
-            if history_length > 1:
-                prev_edge = edge_features_temporal[:, -2, :]  # [batch, 2]
-                edge_delta = current_edge - prev_edge  # [batch, 2]
-            else:
-                edge_delta = torch.zeros_like(current_edge)  # [batch, 2]
-            # edge_features_temporal_full is already computed: [batch, history_length, 4]
+            # Use raw edge only (distance, orientation_similarity), no delta
+            edge_features_temporal_full = edge_features_temporal  # [batch, history_length, 2]
             
         else:
             # Fallback: extract from current obs and convert to H=1 temporal format
@@ -1784,12 +1757,11 @@ class GraphDiTPolicy(nn.Module):
             # Stack: [batch, 2, 1, hidden_dim]
             node_features = torch.stack([ee_node_embed, object_node_embed], dim=1)
             
-            # Compute edge with delta (H=1, so delta is zero)
+            # Compute edge (no delta)
             current_edge = self._compute_edge_features(ee_node, object_node)  # [batch, 2]
-            edge_delta = torch.zeros_like(current_edge)  # [batch, 2]
-            edge_features_temporal_full = torch.cat([current_edge, edge_delta], dim=-1).unsqueeze(1)  # [batch, 1, 4]
+            edge_features_temporal_full = current_edge.unsqueeze(1)  # [batch, 1, 2]
         
-        # Embed temporal edge features: [batch, history_length, 4] → [batch, history_length, edge_dim]
+        # Embed temporal edge features: [batch, history_length, 2] → [batch, history_length, edge_dim]
         edge_features_embed = self.edge_embedding(
             edge_features_temporal_full.view(-1, edge_features_temporal_full.shape[-1])
         )  # [batch * history_length, graph_edge_dim]
@@ -2052,26 +2024,17 @@ class GraphDiTPolicy(nn.Module):
             # Stack to [B, 2, H, hidden_dim] (Graph-DiT expected format)
             node_features = torch.stack([ee_embed, obj_embed], dim=1)  # [B, 2, H, hidden_dim]
             
-            # 2. Compute temporal edge features with delta
+            # 2. Compute temporal edge features (no delta)
             edge_list = []
             for t in range(H):
                 edge_t = self._compute_edge_features(
                     ee_node_history[:, t, :],
                     object_node_history[:, t, :]
                 )  # [B, 2]
-                if t > 0:
-                    edge_prev = self._compute_edge_features(
-                        ee_node_history[:, t-1, :],
-                        object_node_history[:, t-1, :]
-                    )
-                    delta = edge_t - edge_prev
-                else:
-                    delta = torch.zeros_like(edge_t)
-                edge_list.append(torch.cat([edge_t, delta], dim=-1))  # [B, 4]
-            
-            edge_temporal = torch.stack(edge_list, dim=1)  # [B, H, 4]
-            # Embed temporal edges: [B, H, 4] → [B, H, edge_dim]
-            edge_embed_flat = self.edge_embedding(edge_temporal.view(B * H, 4))
+                edge_list.append(edge_t)
+            edge_temporal = torch.stack(edge_list, dim=1)  # [B, H, 2]
+            # Embed temporal edges: [B, H, 2] → [B, H, edge_dim]
+            edge_embed_flat = self.edge_embedding(edge_temporal.view(B * H, 2))
             edge_features_embed = edge_embed_flat.view(B, H, self.cfg.graph_edge_dim)
             
             # 3. Run Graph-Attention layers only (no self-attention or cross-attention)
@@ -2187,21 +2150,12 @@ class GraphDiTPolicy(nn.Module):
                     batch_size, history_length, 2
                 )
                 
-                # Include current edge + delta
-                current_edge = edge_features_temporal[:, -1, :]
-                if history_length > 1:
-                    prev_edge = edge_features_temporal[:, -2, :]
-                    edge_delta = current_edge - prev_edge
-                else:
-                    edge_delta = torch.zeros_like(current_edge)
-                # Define edge_features_raw outside if/else to ensure it's always defined
-                edge_features_raw = torch.cat([current_edge, edge_delta], dim=-1)
+                # Current edge only (no delta)
+                edge_features_raw = edge_features_temporal[:, -1, :]  # [batch, 2]
             else:
                 # Fallback: extract from current obs
                 ee_node, object_node = self._extract_node_features(obs)
-                current_edge = self._compute_edge_features(ee_node, object_node)
-                edge_delta = torch.zeros_like(current_edge)
-                edge_features_raw = torch.cat([current_edge, edge_delta], dim=-1)
+                edge_features_raw = self._compute_edge_features(ee_node, object_node)  # [batch, 2]
                 
                 ee_node_final = self.node_embedding(ee_node)
                 object_node_final = self.node_embedding(object_node)
