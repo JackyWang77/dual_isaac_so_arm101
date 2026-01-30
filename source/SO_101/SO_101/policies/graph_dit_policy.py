@@ -559,13 +559,12 @@ class GraphDiTPolicyCfg:
     diffusion_steps: int = 200
     """Number of diffusion steps."""
     
-    num_inference_steps: int = 30
+    num_inference_steps: int = 40
     """Number of inference steps for flow matching prediction.
     
     This controls how many ODE integration steps are used during inference.
     More steps = smoother, more accurate predictions but slower.
-    Default: 30 (good balance between quality and speed).
-    For faster inference, can use 10-20 steps. For higher quality, use 50-100 steps.
+    Default: 30.
     """
     
     num_subtasks: int = 1
@@ -733,12 +732,12 @@ class TemporalAggregator(nn.Module):
             Aggregated tensor [B, N, D] with temporal dimension collapsed
         """
         B, N, H, D = x.shape
-        x_flat = x.view(B * N, H, D)  # [B*N, H, D]
+        x_flat = x.reshape(B * N, H, D)  # [B*N, H, D] (reshape handles non-contiguous)
         query = self.query.expand(B * N, -1, -1)  # [B*N, 1, D]
         aggregated, _ = self.attn(query, x_flat, x_flat)  # [B*N, 1, D]
-        # aggregated is [B*N, 1, D], squeeze(1) -> [B*N, D], then view -> [B, N, D]
+        # aggregated is [B*N, 1, D], squeeze(1) -> [B*N, D], then reshape -> [B, N, D]
         aggregated = aggregated.squeeze(1)  # [B*N, D]
-        return aggregated.view(B, N, D)
+        return aggregated.reshape(B, N, D)
 
 
 class GraphAttentionWithEdgeBias(nn.Module):
@@ -2327,61 +2326,50 @@ class GraphDiTPolicy(nn.Module):
         num_diffusion_steps: int | None,
         deterministic: bool,
     ) -> torch.Tensor:
-        """Flow Matching prediction: ODE solving for action trajectory.
-        
+        """Flow Matching prediction: ODE solving for action trajectory (Euler, 1 NFE per step).
+
         With Action Chunking, returns [batch, pred_horizon, action_dim].
-        Flow Matching requires only 2-10 steps for fast inference.
         """
         self.eval()
-        # Flow Matching inference steps: use config default (30) if not specified
         num_steps = (
             num_diffusion_steps
             if num_diffusion_steps is not None
             else self.cfg.num_inference_steps
         )
-        
+
         with torch.no_grad():
             batch_size = obs.shape[0]
             device = obs.device
             pred_horizon = self.pred_horizon
-            
-            # Initialize with random noise TRAJECTORY [batch, pred_horizon, action_dim]
-            # Flow Matching: integrate from noise (t=0) to data (t=1)
+
             action_t = torch.randn(
                 batch_size, pred_horizon, self.cfg.action_dim, device=device
             )
-            t = torch.zeros(batch_size, device=device)  # Start from t=0 (noise)
-            
-            # ODE solving: Euler method (forward integration from t=0 to t=1)
-            dt = 1.0 / num_steps  # Step size (positive, going forward)
-            
+            t = torch.zeros(batch_size, device=device)
+            dt = 1.0 / num_steps
+
             for step in range(num_steps):
-                # Convert t (in [0, 1]) to timesteps (in [0, diffusion_steps-1])
                 timesteps = (
                     (t * (self.cfg.diffusion_steps - 1))
                     .long()
                     .clamp(0, self.cfg.diffusion_steps - 1)
                 )
-                
-                # Predict velocity field for entire trajectory
                 velocity = self.forward(
                     obs,
-                    noisy_action=action_t,  # [batch, pred_horizon, action_dim]
+                    noisy_action=action_t,
                     action_history=action_history,
                     ee_node_history=ee_node_history,
                     object_node_history=object_node_history,
                     joint_states_history=joint_states_history,
                     subtask_condition=subtask_condition,
                     timesteps=timesteps,
-                )  # [batch, pred_horizon, action_dim]
-                
-                # Euler forward step: x_{t+dt} = x_t + dt * v_t
+                )
                 action_t = action_t + dt * velocity
-                t = t + dt  # Move forward in time
-            
+                t = t + dt
+
             if not deterministic:
                 action_t = action_t + 0.05 * torch.randn_like(action_t)
-            
+
             return action_t  # [batch, pred_horizon, action_dim]
     
     def loss(

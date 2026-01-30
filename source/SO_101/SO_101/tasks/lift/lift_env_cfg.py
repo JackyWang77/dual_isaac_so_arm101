@@ -373,7 +373,7 @@ class LiftEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # general settings
         self.decimation = 2
-        self.episode_length_s = 5.0
+        self.episode_length_s = 3.0  # 3s (~150 steps at 50Hz); was 5.0, shortened for play
         self.viewer.eye = (2.5, 2.5, 1.5)
         # simulation settings
         self.sim.dt = 0.01  # 100Hz

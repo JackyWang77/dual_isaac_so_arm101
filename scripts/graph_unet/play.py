@@ -3,14 +3,14 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Playback script for trained Graph-DiT Policy.
+"""Playback script for trained Graph-Unet Policy.
 
-This script loads a trained Graph-DiT policy and runs it in an Isaac Lab environment.
+This script loads a trained Graph-Unet policy and runs it in an Isaac Lab environment.
 
 Usage:
-    ./isaaclab.sh -p scripts/graph_dit/play.py \
+    ./isaaclab.sh -p scripts/graph_unet/play.py \
         --task SO-ARM101-Pick-Place-DualArm-IK-Abs-v0 \
-        --checkpoint ./logs/graph_dit/best_model.pt \
+        --checkpoint ./logs/graph_unet/best_model.pt \
         --num_envs 64
 """
 
@@ -21,17 +21,22 @@ import argparse
 from isaaclab.app import AppLauncher
 
 # Create argument parser first
-parser = argparse.ArgumentParser(description="Play Graph-DiT Policy with Gripper Model")
+parser = argparse.ArgumentParser(description="Play Graph-Unet Policy with Gripper Model")
 parser.add_argument("--task", type=str, required=True, help="Task name")
-parser.add_argument("--checkpoint", type=str, required=True, help="Path to Graph-DiT checkpoint")
-parser.add_argument("--gripper-model", type=str, default=None, help="Path to gripper model checkpoint")
+parser.add_argument("--checkpoint", type=str, required=True, help="Path to Graph-Unet checkpoint")
 parser.add_argument("--num_envs", type=int, default=2, help="Number of environments")
 parser.add_argument("--num_episodes", type=int, default=10, help="Number of episodes to run")
 parser.add_argument(
     "--num_diffusion_steps", 
     type=int, 
     default=None, 
-    help="Number of flow matching inference steps (default: uses checkpoint config, typically 30). More steps = smoother but slower."
+    help="Number of flow matching inference steps (default: uses checkpoint config, typically 10). Fewer steps = less lag, more steps = smoother trajectory."
+)
+parser.add_argument(
+    "--episode_length_s",
+    type=float,
+    default=None,
+    help="Max episode length in seconds (default: use task config, e.g. 3.0 for lift). Shorter = faster reset.",
 )
 
 # Append AppLauncher CLI args (this will add --device automatically)
@@ -54,12 +59,7 @@ import numpy as np
 import SO_101.tasks  # noqa: F401  # Register environments
 import torch
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
-from SO_101.policies.graph_dit_policy import GraphDiTPolicy
-
-# Add current directory to path for gripper_model import
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, current_dir)
-from gripper_model import GripperPredictor
+from SO_101.policies.graph_unet_policy import GraphUnetPolicy
 
 # Try to import visualization utilities (if available)
 try:
@@ -70,16 +70,16 @@ except ImportError:
     print("[Play] DebugDraw not available, visualization will be disabled")
 
 
-def play_graph_dit_policy(
+def play_graph_unet_policy(
     task_name: str,
     checkpoint_path: str,
     num_envs: int = 64,
     num_episodes: int = 10,
     device: str = "cuda",
     num_diffusion_steps: int | None = None,
-    gripper_model_path: str | None = None,
+    episode_length_s: float | None = None,
 ):
-    """Play trained Graph-DiT policy.
+    """Play trained Graph-Unet policy.
     
     Args:
         task_name: Environment task name.
@@ -89,7 +89,7 @@ def play_graph_dit_policy(
         device: Device to run on.
     """
     
-    print(f"[Play] ===== Graph-DiT Policy Playback =====")
+    print(f"[Play] ===== Graph-Unet Policy Playback =====")
     print(f"[Play] Task: {task_name}")
     print(f"[Play] Checkpoint: {checkpoint_path}")
     print(f"[Play] Num envs: {num_envs}")
@@ -97,6 +97,9 @@ def play_graph_dit_policy(
     # Create environment
     print(f"\n[Play] Creating environment...")
     env_cfg = parse_env_cfg(task_name, device=device, num_envs=num_envs)
+    if episode_length_s is not None:
+        env_cfg.episode_length_s = episode_length_s
+        print(f"[Play] Override episode_length_s = {episode_length_s}")
     env = gym.make(task_name, cfg=env_cfg)
     
     # Get observation and action spaces
@@ -212,7 +215,7 @@ def play_graph_dit_policy(
     else:
         action_dim = 6  # Default fallback: env action dim (5 arm + 1 gripper)
     
-    # Policy and env both use action_dim=6 (5 arm + 1 gripper); same as Graph-Unet for fair comparison
+    # Policy outputs 6-dim (5 arm + 1 gripper); env gets gripper mapped to -1/1; buffer keeps raw
     print(f"[Play] Obs dim: {obs_dim}, Action dim: {action_dim}")
     
     # Load policy and normalization stats
@@ -221,81 +224,25 @@ def play_graph_dit_policy(
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     
     # Load policy
-    policy = GraphDiTPolicy.load(checkpoint_path, device=device)
+    policy = GraphUnetPolicy.load(checkpoint_path, device=device)
     policy.eval()
     
-    # Load gripper model (if provided)
-    gripper_model = None
-    gripper_input_mean = None
-    gripper_input_std = None
-    
-    if gripper_model_path is not None and os.path.exists(gripper_model_path):
-        print(f"[Play] Loading gripper model from: {gripper_model_path}")
-        gripper_checkpoint = torch.load(gripper_model_path, map_location=device, weights_only=False)
-        
-        # Get model config
-        hidden_dims = gripper_checkpoint.get('hidden_dims', [128, 128, 64])
-        dropout = gripper_checkpoint.get('dropout', 0.1)
-        
-        # Load model
-        gripper_model = GripperPredictor(hidden_dims=hidden_dims, dropout=dropout).to(device)
-        gripper_model.load_state_dict(gripper_checkpoint['model_state_dict'])
-        gripper_model.eval()
-        
-        # Load normalization stats (binary classification doesn't need target stats)
-        input_mean = gripper_checkpoint['input_mean']
-        input_std = gripper_checkpoint['input_std']
-        
-        # Ensure numpy arrays
-        if isinstance(input_mean, torch.Tensor):
-            input_mean = input_mean.cpu().numpy()
-        if isinstance(input_std, torch.Tensor):
-            input_std = input_std.cpu().numpy()
-        
-        # Ensure correct shape
-        # input_mean/std should be [1, 7] or [7] -> [1, 7]
-        # 🔥 MODIFIED: Gripper model input is now 7-dim: [gripper_state(1), ee_pos(3), object_pos(3)]
-        print(f"[Play] Raw input_mean shape: {input_mean.shape}, input_std shape: {input_std.shape}")
-        
-        if input_mean.ndim == 1:
-            input_mean = input_mean.reshape(1, -1)
-        elif input_mean.ndim == 0:
-            raise ValueError(f"input_mean has wrong shape: {input_mean.shape}, expected [1, 7] or [7]")
-        if input_std.ndim == 1:
-            input_std = input_std.reshape(1, -1)
-        elif input_std.ndim == 0:
-            raise ValueError(f"input_std has wrong shape: {input_std.shape}, expected [1, 7] or [7]")
-        
-        # Verify shapes
-        # 🔥 MODIFIED: Gripper model input is now 7-dim: [gripper_state(1), ee_pos(3), object_pos(3)]
-        assert input_mean.shape == (1, 7), f"input_mean shape mismatch: {input_mean.shape}, expected (1, 7)"
-        assert input_std.shape == (1, 7), f"input_std shape mismatch: {input_std.shape}, expected (1, 7)"
-        
-        # Convert to torch tensors
-        gripper_input_mean = torch.from_numpy(input_mean).float().to(device)
-        gripper_input_std = torch.from_numpy(input_std).float().to(device)
-        
-        print(f"[Play] Gripper model loaded successfully (Binary Classification)")
-        print(f"[Play] Gripper input_mean shape: {gripper_input_mean.shape}, input_std shape: {gripper_input_std.shape}")
-    else:
-        if gripper_model_path is not None:
-            print(f"[Play] Warning: Gripper model path provided but file not found: {gripper_model_path}")
-        print(f"[Play] Using Graph-DiT for all action dimensions (including gripper)")
+    # Policy outputs 6-dim (5 arm + 1 gripper); gripper mapped to -1/1 only for env.step
+    print(f"[Play] Using Graph-Unet for all action dimensions (including gripper)")
     
     # Determine mode and set default diffusion steps if not provided
     cfg = checkpoint.get("cfg", None)
     if cfg is not None:
         mode = getattr(cfg, "mode", "flow_matching")
         print(f"[Play] Policy mode: {mode.upper()}")
-        # Use num_inference_steps from checkpoint config if available (default: 40)
-        # This matches the training configuration
+        # Use num_inference_steps from checkpoint config if available (default: 10 for real-time)
         if num_diffusion_steps is None:
-            num_diffusion_steps = getattr(cfg, "num_inference_steps", 40)
+            num_diffusion_steps = getattr(cfg, "num_inference_steps", 10)
             print(f"[Play] Using inference steps from checkpoint config: {num_diffusion_steps}")
     else:
         # Fallback: use 30 as default (matches training default)
         if num_diffusion_steps is None:
-            num_diffusion_steps = 40  # Default for Flow Matching
+            num_diffusion_steps = 30  # Default for Flow Matching (fewer steps = smoother real-time, less lag)
             print(f"[Play] Using default inference steps: {num_diffusion_steps}")
     
     # Load normalization stats (if available)
@@ -454,10 +401,6 @@ def play_graph_dit_policy(
     action_buffers_normalized = [
         [] for _ in range(num_envs)
     ]
-    
-    # Initialize gripper state machine (0=OPEN, 1=CLOSING, 2=CLOSED)
-    gripper_states = torch.zeros(num_envs, dtype=torch.long, device=device)
-    gripper_close_steps = torch.zeros(num_envs, dtype=torch.long, device=device)  # Steps since close triggered  # Normalized versions for history
     
     step_count = 0
     
@@ -664,7 +607,7 @@ def play_graph_dit_policy(
             # Stack into batch format
             action_history_tensor = torch.stack(action_history_batch, dim=0).to(
                 device
-            )  # [num_envs, history_length, action_dim] - 6-dim (5 arm + 1 gripper); same as Graph-Unet
+            )  # [num_envs, history_length, action_dim] - 6-dim (5 arm + 1 gripper); buffer keeps raw (unmapped) action
             ee_node_history_tensor = torch.stack(ee_node_history_batch, dim=0).to(
                 device
             )  # [num_envs, history_length, 7]
@@ -717,7 +660,7 @@ def play_graph_dit_policy(
             )
 
             if needs_replan:
-                # Predict action trajectory: Graph-DiT outputs 6-dim (5 arm + 1 gripper); same as Graph-Unet
+                # Predict action trajectory: Graph-Unet outputs 6-dim (5 arm + 1 gripper); buffer keeps raw (unmapped)
                 # Output: [num_envs, pred_horizon, 6] (normalized)
                 action_trajectory_normalized = policy.predict(
                     obs_tensor_normalized,
@@ -730,7 +673,7 @@ def play_graph_dit_policy(
                     deterministic=True,
                 )  # [num_envs, pred_horizon, 6]
 
-                # Denormalize full 6-dim; buffer stores raw; env gets gripper mapped to -1/1 only at step
+                # Denormalize full 6-dim; buffer stores this raw; env gets gripper mapped to -1/1 only at step
                 if action_mean is not None and action_std is not None:
                     action_trajectory = (
                         action_trajectory_normalized * action_std.unsqueeze(0).unsqueeze(0)
@@ -760,13 +703,11 @@ def play_graph_dit_policy(
                     print(f"  EE-Object Distance:    {np.linalg.norm(current_ee_pos_debug - object_pos_debug):.3f}")
                     print(f"  =========================================\n")
 
-                # Fill buffers with raw 6-dim (normalized raw for policy input)
+                # Fill buffers with raw 6-dim (normalized raw for policy input; buffer = unmapped original)
                 for env_id in range(num_envs):
                     if len(action_buffers[env_id]) == 0:
                         for t in range(min(exec_horizon, pred_horizon)):
-                            action_buffers[env_id].append(
-                                action_trajectory[env_id, t, :].clone()
-                            )
+                            action_buffers[env_id].append(action_trajectory[env_id, t, :].clone())
                             action_buffers_normalized[env_id].append(
                                 action_trajectory_normalized[env_id, t, :].clone()
                             )
@@ -805,7 +746,6 @@ def play_graph_dit_policy(
                     ema_smoothed_joints = joints.clone()
                 else:
                     ema_smoothed_joints = ema_alpha * joints + (1 - ema_alpha) * ema_smoothed_joints
-                # Always update actions with smoothed joints (even if alpha=1.0, this is just joints)
                 actions = torch.cat([ema_smoothed_joints, gripper], dim=-1)  # [num_envs, 6] raw
 
             # Gripper mapping for Isaac Sim only: <= -0.2 -> -1, > -0.2 -> 1; buffer keeps raw (actions_normalized)
@@ -877,11 +817,6 @@ def play_graph_dit_policy(
                         episode_count += 1
                         current_episode_rewards[i] = 0.0
                         
-                        # Reset gripper state to OPEN
-                        if gripper_model is not None:
-                            gripper_states[i] = 0
-                            gripper_close_steps[i] = 0
-                        
                         # Reset history buffers for this environment
                         action_history_buffers[i].zero_()
                         ee_node_history_buffers[i].zero_()
@@ -936,14 +871,14 @@ def play_graph_dit_policy(
 def main():
     """Main playback function."""
     # Use args_cli that was already parsed at the top of the file (before AppLauncher)
-    play_graph_dit_policy(
+    play_graph_unet_policy(
         task_name=args_cli.task,
         checkpoint_path=args_cli.checkpoint,
         num_envs=args_cli.num_envs,
         num_episodes=args_cli.num_episodes,
         device=args_cli.device,
         num_diffusion_steps=args_cli.num_diffusion_steps,
-        gripper_model_path=getattr(args_cli, "gripper_model", None),
+        episode_length_s=getattr(args_cli, "episode_length_s", None),
     )
 
 
