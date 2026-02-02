@@ -93,7 +93,16 @@ def compute_deviations(policy, probe, sigmas, device, num_diffusion_steps=15, nu
     """对一组 sigma，在 obs 上加噪声，跑 predict，算输出相对 base（无噪声）的 L2 偏离；可多次 trial 取平均。"""
     policy.eval()
     obs = probe["obs"]  # [1, obs_dim]
-    action_history = probe.get("action_history_5") or probe.get("action_history_6")
+    action_dim = getattr(policy.cfg, "action_dim", 6)
+    if action_dim == 5:
+        action_history = probe.get("action_history_5")
+    else:
+        action_history = probe.get("action_history_6")
+    if action_history is None:
+        raise ValueError(
+            f"probe must have 'action_history_{action_dim}' for policy with action_dim={action_dim}. "
+            "Check that get_probe_batch returns the expected keys."
+        )
 
     with torch.no_grad():
         base_action = policy.predict(
@@ -196,8 +205,6 @@ def main():
 
     print("[Input Sensitivity] 取 probe 样本 (6-dim dataset)...")
     probe = get_probe_batch(dataset_path, obs_keys, cfg_unet, device, batch_size=1)
-    probe_dit = {**probe, "action_history_5": probe["action_history_5"], "action_history_6": None}
-    probe_unet = {**probe, "action_history_5": None, "action_history_6": probe["action_history_6"]}
 
     sigmas = np.linspace(0, 0.1, 50)
     num_steps = int(os.environ.get("NUM_INFERENCE_STEPS", "15"))
@@ -205,9 +212,9 @@ def main():
 
     print(f"[Input Sensitivity] 扫描噪声等级 0 ~ 0.1, {len(sigmas)} 点, 每点 {num_trials} 次取平均, 推理步数 {num_steps}...")
     print("  DiT ...")
-    diffs_dit = compute_deviations(policy_dit, probe_dit, sigmas, device, num_diffusion_steps=num_steps, num_trials=num_trials)
+    diffs_dit = compute_deviations(policy_dit, probe, sigmas, device, num_diffusion_steps=num_steps, num_trials=num_trials)
     print("  Unet ...")
-    diffs_unet = compute_deviations(policy_unet, probe_unet, sigmas, device, num_diffusion_steps=num_steps, num_trials=num_trials)
+    diffs_unet = compute_deviations(policy_unet, probe, sigmas, device, num_diffusion_steps=num_steps, num_trials=num_trials)
 
     try:
         import matplotlib
@@ -223,17 +230,52 @@ def main():
         print("未安装 matplotlib，已保存 input_sensitivity.npz")
         return
 
-    plt.figure(figsize=(8, 5))
-    plt.plot(sigmas, diffs_dit, label="Graph-DiT (Transformer)", color="red", linewidth=2)
-    plt.plot(sigmas, diffs_unet, label="Graph-U-Net (CNN)", color="green", linewidth=2)
-    plt.xlabel("Input Noise Level (Sensor Jitter)", fontsize=12)
-    plt.ylabel("Output Action Deviation (Robot Jitter)", fontsize=12)
-    plt.title("Why DiT Jitters: Input Sensitivity Analysis", fontsize=14)
-    plt.legend(fontsize=11)
-    plt.grid(True, alpha=0.3)
+    # Light smoothing (window=5) to reduce jaggedness while preserving trend
+    def _smooth(y, w=5):
+        if len(y) < w:
+            return y
+        kernel = np.ones(w) / w
+        return np.convolve(y, kernel, mode="same")
+
+    diffs_dit_smooth = _smooth(diffs_dit)
+    diffs_unet_smooth = _smooth(diffs_unet)
+
+    # Refined color palette
+    color_dit = "#6366f1"   # indigo
+    color_unet = "#0d9488"  # teal
+
+    fig, ax = plt.subplots(figsize=(9, 5.5), facecolor="#fafafa")
+    ax.set_facecolor("#ffffff")
+    ax.plot(
+        sigmas, diffs_dit_smooth,
+        label="Graph-DiT (Transformer)",
+        color=color_dit,
+        linewidth=2.5,
+        alpha=0.9,
+    )
+    ax.plot(
+        sigmas, diffs_unet_smooth,
+        label="Graph-U-Net (CNN)",
+        color=color_unet,
+        linewidth=2.5,
+        alpha=0.9,
+    )
+    # Subtle fill under curves
+    ax.fill_between(sigmas, diffs_dit_smooth, alpha=0.08, color=color_dit)
+    ax.fill_between(sigmas, diffs_unet_smooth, alpha=0.08, color=color_unet)
+
+    ax.set_xlabel("Input Noise Level (Sensor Jitter)", fontsize=13, color="#374151")
+    ax.set_ylabel("Output Action Deviation (Robot Jitter)", fontsize=13, color="#374151")
+    ax.set_title("Why DiT Jitters: Input Sensitivity Analysis", fontsize=15, fontweight=600, color="#111827", pad=14)
+    ax.legend(fontsize=12, framealpha=0.95, edgecolor="#e5e7eb", loc="upper right")
+    ax.grid(True, alpha=0.25, color="#9ca3af", linestyle="-")
+    ax.set_xlim(0, 0.1)
+    ax.tick_params(colors="#6b7280", labelsize=11)
+    for spine in ax.spines.values():
+        spine.set_color("#e5e7eb")
     plt.tight_layout()
     out_path = os.path.join(REPO_ROOT, "input_sensitivity.png")
-    plt.savefig(out_path, dpi=120)
+    plt.savefig(out_path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
     plt.close()
     print(f"已保存: {out_path}")
 

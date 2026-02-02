@@ -1,10 +1,10 @@
 #!/bin/bash
 # Play/Test trained Residual RL Policy (Graph-DiT + PPO fine-tuned)
-# This script plays a model trained with train_graph_dit_rl.py
+# This script plays a model trained with train_graph_rl.py
 #
 # Usage:
 #   ./play_graph_dit_rl.sh <checkpoint_path> [pretrained_checkpoint] [task]
-#   ./play_graph_dit_rl.sh ./logs/gr_dit/SO-ARM101-Lift-Cube-v0/2026-01-20_14-43-40/policy_iter_300.pt
+#   ./play_graph_dit_rl.sh ./logs/gr_dit/.../policy_iter_300.pt
 
 set -e
 
@@ -86,7 +86,7 @@ echo "  Headless: ${HEADLESS:-false}"
 echo ""
 
 # Run the play script
-python scripts/graph_dit_rl/play_graph_dit_rl.py \
+python scripts/graph_dit_rl/play_graph_rl.py \
     --task "$TASK" \
     --checkpoint "$CHECKPOINT" \
     --pretrained_checkpoint "$PRETRAINED_CHECKPOINT" \

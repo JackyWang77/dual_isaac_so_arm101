@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Playback script for trained GraphDiT + Residual RL Policy.
+Playback script for trained Graph-Unet + Residual RL Policy (residual RL is Unet-only).
 
 Usage:
-    ./isaaclab.sh -p scripts/graph_dit_rl/play_graph_dit_rl.py \
+    ./isaaclab.sh -p scripts/graph_dit_rl/play_graph_rl.py \
         --task SO-ARM101-Lift-Cube-v0 \
         --checkpoint ./logs/graph_dit_rl/policy_final.pt \
         --pretrained_checkpoint ./logs/graph_dit/best_model.pt \
@@ -15,7 +15,7 @@ from isaaclab.app import AppLauncher
 # CLI args for AppLauncher (parse early to get headless flag)
 import sys
 import argparse
-parser_launcher = argparse.ArgumentParser(description="Play GraphDiT + Residual RL Policy")
+parser_launcher = argparse.ArgumentParser(description="Play Graph-Unet + Residual RL Policy")
 AppLauncher.add_app_launcher_args(parser_launcher)
 args_launcher, _ = parser_launcher.parse_known_args()
 
@@ -32,14 +32,14 @@ import gymnasium as gym
 import SO_101.tasks  # noqa: F401  # Register environments
 import torch
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
-from SO_101.policies.graph_dit_policy import GraphDiTPolicy
-from SO_101.policies.graph_dit_residual_rl_policy import (
-    GraphDiTBackboneAdapter,
-    GraphDiTResidualRLPolicy,
+from SO_101.policies.graph_unet_policy import GraphUnetPolicy
+from SO_101.policies.graph_unet_residual_rl_policy import (
+    GraphUnetBackboneAdapter,
+    GraphUnetResidualRLPolicy,
 )
 
 
-def play_graph_dit_rl_policy(
+def play_graph_rl_policy(
     task_name: str,
     checkpoint_path: str,
     pretrained_checkpoint: str,
@@ -48,42 +48,41 @@ def play_graph_dit_rl_policy(
     device: str = "cuda",
     deterministic: bool = True,
 ):
-    """Play trained GraphDiT + Residual RL policy.
+    """Play trained Graph-Unet + Residual RL policy (residual RL is Unet-only).
 
     Args:
         task_name: Environment task name.
         checkpoint_path: Path to trained RL policy checkpoint.
-        pretrained_checkpoint: Path to pretrained GraphDiT checkpoint (for backbone).
+        pretrained_checkpoint: Path to pretrained Graph-Unet checkpoint.
         num_envs: Number of parallel environments.
         num_episodes: Number of episodes to run.
         device: Device to run on.
         deterministic: If True, use deterministic actions.
     """
-
-    print(f"[Play] ===== GraphDiT + Residual RL Policy Playback =====")
+    print(f"[Play] ===== Residual RL Policy Playback (Graph-Unet) =====")
     print(f"[Play] Task: {task_name}")
     print(f"[Play] RL Checkpoint: {checkpoint_path}")
-    print(f"[Play] GraphDiT Checkpoint: {pretrained_checkpoint}")
+    print(f"[Play] Graph-Unet Checkpoint: {pretrained_checkpoint}")
     print(f"[Play] Num envs: {num_envs}")
 
-    # Load pretrained GraphDiT backbone
-    print(f"\n[Play] Loading pretrained GraphDiT: {pretrained_checkpoint}")
-    graph_dit = GraphDiTPolicy.load(pretrained_checkpoint, device=device)
-    graph_dit.eval()
-    for p in graph_dit.parameters():
+    # Load pretrained Graph-Unet
+    print(f"\n[Play] Loading pretrained Graph-Unet: {pretrained_checkpoint}")
+    backbone_policy = GraphUnetPolicy.load(pretrained_checkpoint, device=device)
+    backbone_policy.eval()
+    for p in backbone_policy.parameters():
         p.requires_grad = False
-    print(f"[Play] GraphDiT loaded and frozen")
+    print(f"[Play] Graph-Unet loaded and frozen")
 
     # Create backbone adapter
-    backbone = GraphDiTBackboneAdapter(graph_dit)
+    backbone_adapter = GraphUnetBackboneAdapter(backbone_policy)
 
     # Load RL policy
     print(f"\n[Play] Loading RL policy: {checkpoint_path}")
-    policy = GraphDiTResidualRLPolicy.load(checkpoint_path, backbone=backbone, device=device)
+    policy = GraphUnetResidualRLPolicy.load(checkpoint_path, backbone=backbone_adapter, device=device)
     policy.eval()
     print(f"[Play] RL policy loaded")
 
-    # Load normalization stats from GraphDiT checkpoint (same as train_graph_dit_rl.py)
+    # Load normalization stats from Graph-Unet checkpoint (same as train script)
     checkpoint = torch.load(pretrained_checkpoint, map_location=device, weights_only=False)
     
     # Load obs stats
@@ -139,7 +138,7 @@ def play_graph_dit_rl_policy(
             joint_std = joint_stats["std"].squeeze().to(device)
         print(f"[Play] Loaded joint normalization stats")
     
-    # Set normalization stats in policy (same as train_graph_dit_rl.py)
+    # Set normalization stats in policy (same as train_graph_rl.py)
     policy.set_normalization_stats(
         ee_node_mean=ee_node_mean,
         ee_node_std=ee_node_std,
@@ -166,10 +165,10 @@ def play_graph_dit_rl_policy(
     policy.init_env_buffers(num_envs)
 
     # History buffers for Graph-DiT (optimized: single tensor per history type)
-    action_history_length = getattr(graph_dit.cfg, 'action_history_length', 4)
+    action_history_length = getattr(backbone_policy.cfg, "action_history_length", 4)
     # NOTE: GraphDiT expects 6 dimensions for joint states (was trained with 6)
     # The residual RL config's joint_dim=5 is only for EMA smoothing, not for joint state extraction
-    graph_dit_joint_dim = 6  # Always 6 for GraphDiT compatibility
+    graph_dit_joint_dim = 6  # Backbone (Unet) expects 6 for joint states
     action_dim = policy.cfg.action_dim if hasattr(policy, 'cfg') and hasattr(policy.cfg, 'action_dim') else 6
     
     # Use single tensor [num_envs, history_len, dim] for efficiency
@@ -194,7 +193,7 @@ def play_graph_dit_rl_policy(
     step_count = 0
     try:
         while simulation_app.is_running() and completed_episodes < num_episodes:
-            # CRITICAL: Normalize observations (same as train_graph_dit_rl.py)
+            # CRITICAL: Normalize observations (same as train_graph_rl.py)
             if obs_mean is not None and obs_std is not None:
                 obs_norm = (obs - obs_mean) / obs_std
             else:
@@ -205,7 +204,7 @@ def play_graph_dit_rl_policy(
             # NOTE: GraphDiT expects 6 dimensions (was trained with 6), regardless of residual RL config
             joint_states_current = obs[:, :6]  # [B, 6] - always 6 for GraphDiT compatibility
             
-            # CRITICAL: Normalize node and joint histories (same as train_graph_dit_rl.py)
+            # CRITICAL: Normalize node and joint histories (same as train_graph_rl.py)
             # History tensors are already in batch format [num_envs, history_len, dim]
             action_history_norm = action_history  # [B, H, action_dim] - already normalized (stored as normalized)
             
@@ -243,7 +242,7 @@ def play_graph_dit_rl_policy(
                         torch.tensor(env.action_space.high, device=action.device, dtype=action.dtype)
                     )
             
-            # DEBUG: Print all joints and gripper base action, residual, and final action (same as train_graph_dit_rl.py)
+            # DEBUG: Print all joints and gripper base action, residual, and final action (same as train_graph_rl.py)
             action_dim = action.shape[-1]
             if action_dim >= 6:
                 a_base = policy_info.get("a_base", None)  # [B, action_dim] - denormalized base action
@@ -407,45 +406,32 @@ def test_dit_only(
     num_steps: int = 200,
     device: str = "cuda",
 ):
-    """Test Graph-DiT base_action only, without residual RL.
-    
-    This function tests if the Graph-DiT backbone can produce reasonable
-    base actions on its own, without any residual corrections.
-    
-    Args:
-        task_name: Environment task name.
-        pretrained_checkpoint: Path to pretrained GraphDiT checkpoint.
-        num_envs: Number of parallel environments.
-        num_steps: Number of steps to run.
-        device: Device to run on.
-    """
-    print(f"\n[Test DiT Only] ===== Testing Graph-DiT Base Action Only =====")
-    print(f"[Test DiT Only] Task: {task_name}")
-    print(f"[Test DiT Only] GraphDiT Checkpoint: {pretrained_checkpoint}")
-    print(f"[Test DiT Only] Num envs: {num_envs}")
-    print(f"[Test DiT Only] Num steps: {num_steps}")
-    
-    # Load pretrained GraphDiT backbone
-    print(f"\n[Test DiT Only] Loading pretrained GraphDiT: {pretrained_checkpoint}")
-    graph_dit = GraphDiTPolicy.load(pretrained_checkpoint, device=device)
-    graph_dit.eval()
-    for p in graph_dit.parameters():
+    """Test Graph-Unet base_action only, without residual RL (residual RL is Unet-only)."""
+    print(f"\n[Test Unet Only] ===== Testing Graph-Unet Base Action Only =====")
+    print(f"[Test Unet Only] Task: {task_name}")
+    print(f"[Test Unet Only] Graph-Unet Checkpoint: {pretrained_checkpoint}")
+    print(f"[Test Unet Only] Num envs: {num_envs}")
+    print(f"[Test Unet Only] Num steps: {num_steps}")
+
+    print(f"\n[Test Unet Only] Loading pretrained Graph-Unet: {pretrained_checkpoint}")
+    backbone_policy = GraphUnetPolicy.load(pretrained_checkpoint, device=device)
+    backbone_policy.eval()
+    for p in backbone_policy.parameters():
         p.requires_grad = False
-    print(f"[Test DiT Only] GraphDiT loaded and frozen")
-    
-    # Create backbone adapter
-    backbone = GraphDiTBackboneAdapter(graph_dit)
+    print(f"[Test Unet Only] Graph-Unet loaded and frozen")
+
+    backbone = GraphUnetBackboneAdapter(backbone_policy)
     
     # Create environment first to get obs/action dims
-    print(f"\n[Test DiT Only] Creating environment...")
+    print(f"\n[Test Unet Only] Creating environment...")
     env_cfg = parse_env_cfg(task_name, device=device, num_envs=num_envs)
     env = gym.make(task_name, cfg=env_cfg)
     
     # Get observation and action spaces
     obs_space = env.observation_space
     action_space = env.action_space
-    print(f"[Test DiT Only] Observation space: {obs_space}")
-    print(f"[Test DiT Only] Action space: {action_space}")
+    print(f"[Test Unet Only] Observation space: {obs_space}")
+    print(f"[Test Unet Only] Action space: {action_space}")
     
     # Get dimensions (handle Dict observation space and vectorized action space)
     if isinstance(obs_space, gym.spaces.Dict):
@@ -487,23 +473,23 @@ def test_dit_only(
     else:
         action_dim = 6  # Default fallback
     
-    print(f"[Test DiT Only] Extracted obs_dim: {obs_dim}, action_dim: {action_dim}")
-    
+    print(f"[Test Unet Only] Extracted obs_dim: {obs_dim}, action_dim: {action_dim}")
+
     # Create a minimal policy just to use its helper methods
-    print(f"\n[Test DiT Only] Creating minimal policy for helper methods...")
-    from SO_101.policies.graph_dit_residual_rl_policy import GraphDiTResidualRLCfg
-    cfg = GraphDiTResidualRLCfg(
+    print(f"\n[Test Unet Only] Creating minimal policy for helper methods...")
+    from SO_101.policies.graph_unet_residual_rl_policy import GraphUnetResidualRLCfg
+    cfg = GraphUnetResidualRLCfg(
         obs_dim=obs_dim,
         action_dim=action_dim,
-        z_dim=graph_dit.cfg.z_dim,
-        num_layers=graph_dit.cfg.num_layers,
-        obs_structure=getattr(graph_dit.cfg, "obs_structure", None),
+        z_dim=backbone_policy.cfg.z_dim,
+        num_layers=backbone_policy.cfg.num_layers,
+        obs_structure=getattr(backbone_policy.cfg, "obs_structure", None),
         robot_state_dim=6,
     )
-    policy = GraphDiTResidualRLPolicy(cfg, backbone=backbone)
+    policy = GraphUnetResidualRLPolicy(cfg, backbone=backbone)
     policy.eval()
-    
-    # Load normalization stats from GraphDiT checkpoint
+
+    # Load normalization stats from Graph-Unet checkpoint
     checkpoint = torch.load(pretrained_checkpoint, map_location=device, weights_only=False)
     if "node_stats" in checkpoint:
         node_stats = checkpoint["node_stats"]
@@ -513,12 +499,12 @@ def test_dit_only(
             object_node_mean=node_stats.get("object_mean"),
             object_node_std=node_stats.get("object_std"),
         )
-        print(f"[Test DiT Only] Loaded normalization stats")
-    
+        print(f"[Test Unet Only] Loaded normalization stats")
+
     # Initialize history buffers (same as in trainer)
-    action_history_length = getattr(graph_dit.cfg, 'action_history_length', 16)
-    action_dim = 6  # Assuming 6D action space
-    graph_dit_joint_dim = 6  # GraphDiT expects 6 dimensions for joint states
+    action_history_length = getattr(backbone_policy.cfg, "action_history_length", 16)
+    action_dim = 6
+    graph_dit_joint_dim = 6  # Backbone expects 6 for joint states
     
     # Use single tensor [num_envs, history_len, dim] for efficiency
     action_history = torch.zeros(num_envs, action_history_length, action_dim, device=device)
@@ -535,8 +521,8 @@ def test_dit_only(
     episode_lengths = torch.zeros(num_envs, device=device)
     completed_episodes = 0
     
-    print(f"\n[Test DiT Only] Starting test (DiT base_action only, no residual)...")
-    print(f"[Test DiT Only] Press Ctrl+C to stop\n")
+    print(f"\n[Test Unet Only] Starting test (Unet base_action only, no residual)...")
+    print(f"[Test Unet Only] Press Ctrl+C to stop\n")
     
     # Main loop
     step_count = 0
@@ -626,7 +612,7 @@ def test_dit_only(
                 for i in done_envs.tolist():
                     completed_episodes += 1
                     print(
-                        f"[Test DiT Only] Episode {completed_episodes:3d} | "
+                        f"[Test Unet Only] Episode {completed_episodes:3d} | "
                         f"Reward: {episode_rewards[i].item():7.2f} | "
                         f"Length: {episode_lengths[i].item():4.0f}"
                     )
@@ -646,13 +632,13 @@ def test_dit_only(
             time.sleep(0.05)
             
     except KeyboardInterrupt:
-        print("\n[Test DiT Only] Interrupted by user")
+        print("\n[Test Unet Only] Interrupted by user")
     
-    print(f"\n[Test DiT Only] Test complete!")
-    print(f"[Test DiT Only] Total steps: {step_count}")
-    print(f"[Test DiT Only] Completed episodes: {completed_episodes}")
+    print(f"\n[Test Unet Only] Test complete!")
+    print(f"[Test Unet Only] Total steps: {step_count}")
+    print(f"[Test Unet Only] Completed episodes: {completed_episodes}")
     if completed_episodes > 0:
-        print(f"[Test DiT Only] Average reward: {episode_rewards.sum().item() / completed_episodes:.2f}")
+        print(f"[Test Unet Only] Average reward: {episode_rewards.sum().item() / completed_episodes:.2f}")
     
     # Cleanup
     env.close()
@@ -669,11 +655,12 @@ def _process_obs(obs, device: str) -> torch.Tensor:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Play GraphDiT + Residual RL Policy")
+    parser = argparse.ArgumentParser(description="Play Graph-Unet + Residual RL Policy")
     parser.add_argument("--task", type=str, required=True, help="Task name")
     parser.add_argument("--checkpoint", type=str, default=None, help="RL policy checkpoint path (required if not testing DiT only)")
     parser.add_argument(
-        "--pretrained_checkpoint", type=str, required=True, help="GraphDiT checkpoint path"
+        "--pretrained_checkpoint", type=str, required=True,
+        help="Pretrained Graph-Unet checkpoint (residual RL is Unet-only)",
     )
     parser.add_argument("--num_envs", type=int, default=64, help="Number of environments")
     parser.add_argument("--num_episodes", type=int, default=10, help="Number of episodes")
@@ -683,8 +670,8 @@ def main():
         "--deterministic", action="store_true", help="Use deterministic actions"
     )
     parser.add_argument(
-        "--test_dit_only", action="store_true", 
-        help="Test Graph-DiT base_action only (no residual RL). Requires --pretrained_checkpoint only."
+        "--test_dit_only", action="store_true",
+        help="Test Graph-Unet base_action only (no residual RL). Requires --pretrained_checkpoint only."
     )
 
     args = parser.parse_args()
@@ -703,7 +690,7 @@ def main():
         if args.checkpoint is None:
             parser.error("--checkpoint is required when not using --test_dit_only")
         
-        play_graph_dit_rl_policy(
+        play_graph_rl_policy(
             task_name=args.task,
             checkpoint_path=args.checkpoint,
             pretrained_checkpoint=args.pretrained_checkpoint,

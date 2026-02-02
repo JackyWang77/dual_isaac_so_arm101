@@ -8,7 +8,7 @@ Train GraphDiT + Residual RL Policy (OUR METHOD)
 - Advantage-weighted regression 更新
 
 Usage:
-    python scripts/graph_dit_rl/train_graph_dit_rl.py \
+    python scripts/graph_dit_rl/train_graph_rl.py \
         --task SO-ARM101-Lift-Cube-v0 \
         --pretrained_checkpoint ./logs/graph_dit/best_model.pt \
         --num_envs 64 \
@@ -23,13 +23,13 @@ from isaaclab.app import AppLauncher
 # CLI args
 parser = argparse.ArgumentParser(description="Train GraphDiT + Residual RL Policy")
 parser.add_argument("--task", type=str, default="SO-ARM101-Lift-Cube-v0")
-parser.add_argument("--pretrained_checkpoint", type=str, required=True)
-parser.add_argument("--gripper-model", type=str, default=None, help="Path to gripper model checkpoint (optional)")
+parser.add_argument("--pretrained_checkpoint", type=str, required=True,
+                    help="Pretrained Graph-Unet checkpoint (residual RL is Unet-only)")
 parser.add_argument("--num_envs", type=int, default=64)
 parser.add_argument("--max_iterations", type=int, default=500)
 parser.add_argument("--seed", type=int, default=42)
 # Note: --device is added by AppLauncher, don't add it manually
-parser.add_argument("--log_dir", type=str, default="./logs/graph_dit_rl")
+parser.add_argument("--log_dir", type=str, default="./logs/graph_unet_rl", help="Log directory for residual RL (Unet)")
 parser.add_argument("--save_interval", type=int, default=50)
 
 # Rollout config
@@ -38,6 +38,7 @@ parser.add_argument("--num_epochs", type=int, default=5, help="Epochs per iterat
 parser.add_argument("--mini_batch_size", type=int, default=64)
 parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
 parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradient norm")
+parser.add_argument("--c_delta_reg", type=float, default=2.0, help="Delta (residual) regularization weight; higher = smoother, RL 'don't move unless reward'")
 
 # AppLauncher
 AppLauncher.add_app_launcher_args(parser)
@@ -63,25 +64,13 @@ from torch.utils.tensorboard import SummaryWriter
 
 import SO_101.tasks  # noqa: F401 Register envs
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
-from SO_101.policies.graph_dit_policy import GraphDiTPolicy
-from SO_101.policies.graph_dit_residual_rl_policy import (
-    GraphDiTBackboneAdapter,
-    GraphDiTResidualRLCfg,
-    GraphDiTResidualRLPolicy,
+from SO_101.policies.graph_unet_policy import GraphUnetPolicy
+from SO_101.policies.graph_unet_residual_rl_policy import (
+    GraphUnetBackboneAdapter,
+    GraphUnetResidualRLCfg,
+    GraphUnetResidualRLPolicy,
     compute_gae,
 )
-
-# Import gripper model (same directory structure as play.py)
-current_dir = os.path.dirname(os.path.abspath(__file__))
-gripper_model_dir = os.path.join(os.path.dirname(current_dir), "graph_dit")
-sys.path.insert(0, gripper_model_dir)
-try:
-    from gripper_model import GripperPredictor
-    GRIPPER_MODEL_AVAILABLE = True
-except ImportError:
-    GRIPPER_MODEL_AVAILABLE = False
-    print("[Train] Warning: gripper_model not found, will use Graph-DiT for gripper")
-
 
 # ============================================================
 # Rollout Buffer
@@ -117,6 +106,7 @@ class RolloutBuffer:
         self.actions = torch.zeros(T, N, action_dim, device=device)
         self.rewards = torch.zeros(T, N, device=device)
         self.dones = torch.zeros(T, N, device=device)
+        self.timeouts = torch.zeros(T, N, device=device)  # Truncated (timeout) for GAE bootstrap
         self.values = torch.zeros(T, N, device=device)
         self.log_probs = torch.zeros(T, N, device=device)
 
@@ -135,6 +125,7 @@ class RolloutBuffer:
         action: torch.Tensor,
         reward: torch.Tensor,
         done: torch.Tensor,
+        truncated: torch.Tensor,  # Timeout only; for GAE bootstrap (nonterminal=1 when truncated)
         info: Dict[str, torch.Tensor],
     ):
         """添加一步数据"""
@@ -152,6 +143,7 @@ class RolloutBuffer:
         self.actions[t] = action
         self.rewards[t] = reward
         self.dones[t] = done
+        self.timeouts[t] = truncated
         self.values[t] = info["v_bar"]
         self.log_probs[t] = info["log_prob"]
         self.a_base[t] = info["a_base"]
@@ -162,9 +154,9 @@ class RolloutBuffer:
         self.ptr += 1
 
     def compute_returns(self, last_value: torch.Tensor, gamma: float, lam: float):
-        """计算 GAE advantages 和 returns"""
+        """计算 GAE advantages 和 returns（truncated 时 bootstrap next_value）"""
         self.advantages, self.returns = compute_gae(
-            self.rewards, self.dones, self.values, last_value, gamma, lam
+            self.rewards, self.dones, self.values, last_value, gamma, lam, timeouts=self.timeouts
         )
 
     def get_batches(self, mini_batch_size: int, num_epochs: int):
@@ -217,8 +209,8 @@ class GraphDiTRLTrainer:
     def __init__(
         self,
         env,
-        policy: GraphDiTResidualRLPolicy,
-        cfg: GraphDiTResidualRLCfg,
+        policy: GraphUnetResidualRLPolicy,
+        cfg: GraphUnetResidualRLCfg,
         device: str = "cuda",
         log_dir: str = "./logs",
         # Training params
@@ -486,21 +478,19 @@ class GraphDiTRLTrainer:
                                 if action_dim >= 6:
                                     print(f"    Gripper (5): mean={delta_norm_mean[5].item():7.4f}, std={delta_norm_std[5].item():7.4f}")
                 
-                # CRITICAL: Binarize gripper action (same as play.py)
-                # Action is already: a_base + alpha * delta (continuous value for all dimensions including gripper)
-                # Isaac Sim expects gripper: > -0.2 -> 1.0 (open), <= -0.2 -> -1.0 (close)
-                # This allows RL to learn fine-tuning of gripper timing, especially when base policy
-                # outputs values near -0.2 threshold
+                # Gripper for sim only: binarize denormalized gripper (< -0.2 -> -1, else -> 1).
+                # Buffer stores original denormalized action (no mapping), same idea as play.
+                action_for_sim = action.clone()
                 if action_dim >= 6:
-                    gripper_continuous = action[:, 5]  # [num_envs] - continuous value: a_base_gripper + alpha * delta_gripper
-                    action[:, 5] = torch.where(
+                    gripper_continuous = action_for_sim[:, 5]
+                    action_for_sim[:, 5] = torch.where(
                         gripper_continuous > -0.2,
                         torch.tensor(1.0, device=action.device, dtype=action.dtype),
                         torch.tensor(-1.0, device=action.device, dtype=action.dtype)
                     )
 
-            # Step env
-            next_obs, reward, terminated, truncated, env_info = self.env.step(action)
+            # Step env with binarized gripper; buffer gets original denormalized action below
+            next_obs, reward, terminated, truncated, env_info = self.env.step(action_for_sim)
             done = terminated | truncated
 
             # Process
@@ -515,7 +505,7 @@ class GraphDiTRLTrainer:
                 # Isaac Lab stores computed rewards in rew_manager.reward_buf
                 if hasattr(rew_manager, 'reward_buf'):
                     reward_buf = rew_manager.reward_buf
-                    for reward_name in ['grasp_behavior', 'object_grasped', 'task_complete', 'gripper_smooth']:
+                    for reward_name in ['reaching_object', 'lifting_object', 'grasp_behavior', 'object_grasped', 'task_complete', 'gripper_smooth']:
                         if reward_name in reward_buf:
                             reward_value = reward_buf[reward_name]
                             if isinstance(reward_value, torch.Tensor):
@@ -525,8 +515,8 @@ class GraphDiTRLTrainer:
                                 # Store reward value for this timestep
                                 reward_terms_dict[reward_name].append(reward_value.clone().to(self.device))
 
-            # Store (obs is raw, obs_norm is normalized)
-            self.buffer.add(obs, obs_norm, action, reward, done, info)
+            # Store (obs is raw, obs_norm is normalized; truncated for GAE bootstrap)
+            self.buffer.add(obs, obs_norm, action, reward, done, truncated, info)
 
             # Track episode stats
             ep_rewards += reward
@@ -661,6 +651,9 @@ class GraphDiTRLTrainer:
         total_actor_loss = 0
         total_critic_loss = 0
         total_gate_entropy = 0
+        total_loss_delta_reg = 0
+        total_loss_critic_bar = 0
+        total_entropy = 0
         num_updates = 0
 
         for batch in self.buffer.get_batches(self.mini_batch_size, self.num_epochs):
@@ -681,13 +674,20 @@ class GraphDiTRLTrainer:
             total_actor_loss += losses["loss_actor"].item()
             total_critic_loss += losses["loss_critic_layers"].item()
             total_gate_entropy += losses["gate_entropy"].item()
+            total_loss_delta_reg += losses["loss_delta_reg"].item()
+            total_loss_critic_bar += losses["loss_critic_bar"].item()
+            total_entropy += losses["entropy"].item()
             num_updates += 1
 
+        n = num_updates
         return {
-            "loss_total": total_loss / num_updates,
-            "loss_actor": total_actor_loss / num_updates,
-            "loss_critic": total_critic_loss / num_updates,
-            "gate_entropy": total_gate_entropy / num_updates,
+            "loss_total": total_loss / n,
+            "loss_actor": total_actor_loss / n,
+            "loss_critic": total_critic_loss / n,
+            "loss_critic_bar": total_loss_critic_bar / n,
+            "gate_entropy": total_gate_entropy / n,
+            "loss_delta_reg": total_loss_delta_reg / n,
+            "entropy": total_entropy / n,
             "alpha": self.policy.alpha.item(),
         }
 
@@ -728,66 +728,66 @@ class GraphDiTRLTrainer:
         return obs.to(self.device).float()
 
     def _log(self, iteration: int, rollout_stats: Dict, update_stats: Dict):
-        """记录日志"""
-        # TensorBoard (only numeric values)
-        # Filter out unwanted metrics
-        excluded_keys = {
-            "num_episodes",
-            "rollout_done_pct",
-            "rollout_early_done_pct",
-            "rollout_nonzero_reward_pct",
-            "rollout_reward_max",
-            "rollout_reward_mean",
-            "rollout_reward_min",
-            "rollout_reward_sum",
-        }
-        
-        for k, v in rollout_stats.items():
-            # Skip excluded keys and non-numeric values (like 'warning' string)
-            if k in excluded_keys:
-                continue
-            if isinstance(v, (int, float)) or (hasattr(v, 'item') and hasattr(v, 'dtype')):
+        """记录日志：TensorBoard 保留重要指标便于分析，控制台打印简要信息"""
+        # ---- TensorBoard: 重要分析指标（main/ 下便于一起看） ----
+        def _scalar(tag: str, value, step: int):
+            if isinstance(value, (int, float)):
+                self.writer.add_scalar(tag, value, step)
+            elif hasattr(value, "item"):
                 try:
-                    if hasattr(v, 'item'):
-                        v = v.item()
-                    self.writer.add_scalar(f"rollout/{k}", v, self.total_steps)
+                    self.writer.add_scalar(tag, value.item(), step)
                 except (ValueError, TypeError):
-                    pass  # Skip if cannot convert to float
-        
-        for k, v in update_stats.items():
-            # Skip non-numeric values
-            if isinstance(v, (int, float)) or (hasattr(v, 'item') and hasattr(v, 'dtype')):
-                try:
-                    if hasattr(v, 'item'):
-                        v = v.item()
-                    self.writer.add_scalar(f"train/{k}", v, self.total_steps)
-                except (ValueError, TypeError):
-                    pass  # Skip if cannot convert to float
-        
-        self.writer.add_scalar("train/total_steps", self.total_steps, iteration)
+                    pass
 
-        # Console
+        step = self.total_steps
+        # Reward
+        _scalar("main/ep_reward_mean", rollout_stats.get("ep_reward_mean", 0), step)
+        _scalar("main/ep_reward_max", rollout_stats.get("ep_reward_max", 0), step)
+        _scalar("main/ep_reward_min", rollout_stats.get("ep_reward_min", 0), step)
+        _scalar("main/ep_length_mean", rollout_stats.get("ep_length_mean", 0), step)
+        _scalar("main/reward_reaching_object_mean", rollout_stats.get("reward_reaching_object_mean", 0), step)
+        _scalar("main/reward_lifting_object_mean", rollout_stats.get("reward_lifting_object_mean", 0), step)
+        # Loss
+        _scalar("main/loss_total", update_stats.get("loss_total", 0), step)
+        _scalar("main/loss_actor", update_stats.get("loss_actor", 0), step)
+        _scalar("main/loss_critic", update_stats.get("loss_critic", 0), step)
+        _scalar("main/loss_delta_reg", update_stats.get("loss_delta_reg", 0), step)
+        _scalar("main/entropy", update_stats.get("entropy", 0), step)
+        _scalar("main/alpha", update_stats.get("alpha", 0), step)
+
+        # ---- TensorBoard: 完整 rollout / train 明细（按原 key 记录） ----
+        for k, v in rollout_stats.items():
+            if k == "warning":
+                continue
+            if not (isinstance(v, (int, float)) or (hasattr(v, "item") and hasattr(v, "dtype"))):
+                continue
+            try:
+                val = v.item() if hasattr(v, "item") else v
+                self.writer.add_scalar(f"rollout/{k}", val, step)
+            except (ValueError, TypeError):
+                pass
+        for k, v in update_stats.items():
+            if isinstance(v, (int, float)) or (hasattr(v, "item") and hasattr(v, "dtype")):
+                try:
+                    val = v.item() if hasattr(v, "item") else v
+                    self.writer.add_scalar(f"train/{k}", val, step)
+                except (ValueError, TypeError):
+                    pass
+        self.writer.add_scalar("train/iteration", iteration, step)
+
+        # ---- Console ----
         ep_reward = rollout_stats.get("ep_reward_mean", 0)
-        
-        # Get individual reward terms for display
-        reward_grasp = rollout_stats.get("reward_grasp_behavior_mean", 0)
-        reward_grasped = rollout_stats.get("reward_object_grasped_mean", 0)
-        reward_success = rollout_stats.get("reward_task_complete_mean", 0)
-        reward_gripper_smooth = rollout_stats.get("reward_gripper_smooth_mean", 0)
-        
+        reward_reach = rollout_stats.get("reward_reaching_object_mean", 0)
+        reward_lift = rollout_stats.get("reward_lifting_object_mean", 0)
         warning = rollout_stats.get("warning", "")
         if warning:
             print(f"[Iter {iteration:4d}] ⚠️  {warning}")
-        
         print(
             f"[Iter {iteration:4d}] "
             f"steps={self.total_steps:7d} | "
             f"ep_reward={ep_reward:7.2f} | "
-            f"grasp={reward_grasp:6.3f} | "
-            f"grasped={reward_grasped:6.3f} | "
-            f"success={reward_success:6.3f} | "
-            f"gripper_smooth={reward_gripper_smooth:6.3f} | "
-            f"loss={update_stats['loss_total']:7.4f} | "
+            f"reach={reward_reach:6.3f} lift={reward_lift:6.3f} | "
+            f"loss={update_stats['loss_total']:7.4f} delta_reg={update_stats.get('loss_delta_reg', 0):.4f} | "
             f"alpha={update_stats['alpha']:.3f}"
         )
 
@@ -964,73 +964,27 @@ def main():
     # Get device from AppLauncher (or use default)
     device = getattr(args, "device", "cuda")
 
-    # Load pretrained GraphDiT
-    print(f"\n[Main] Loading pretrained GraphDiT: {args.pretrained_checkpoint}")
-    graph_dit = GraphDiTPolicy.load(args.pretrained_checkpoint, device=device)
-    graph_dit.eval()
-    for p in graph_dit.parameters():
+    # Load pretrained Graph-Unet (residual RL is Unet-only)
+    print(f"\n[Main] Loading pretrained Graph-Unet: {args.pretrained_checkpoint}")
+    backbone_policy = GraphUnetPolicy.load(args.pretrained_checkpoint, device=device)
+    backbone_policy.eval()
+    for p in backbone_policy.parameters():
         p.requires_grad = False
-    # CRITICAL: Make node_to_z trainable (it was never trained in Graph-DiT training)
-    # because it's not in the gradient path of noise_pred loss
-    if hasattr(graph_dit, 'node_to_z'):
-        for p in graph_dit.node_to_z.parameters():
+    if hasattr(backbone_policy, "node_to_z"):
+        for p in backbone_policy.node_to_z.parameters():
             p.requires_grad = True
-        n2z_trainable = sum(1 for p in graph_dit.node_to_z.parameters() if p.requires_grad)
-        n2z_total = len(list(graph_dit.node_to_z.parameters()))
-        print(f"[Main] node_to_z made trainable: {n2z_trainable}/{n2z_total} params trainable (was not trained in Graph-DiT)")
+        n2z_trainable = sum(1 for p in backbone_policy.node_to_z.parameters() if p.requires_grad)
+        n2z_total = len(list(backbone_policy.node_to_z.parameters()))
+        print(f"[Main] node_to_z made trainable: {n2z_trainable}/{n2z_total} params trainable")
     else:
-        print(f"[Main] ⚠️  WARNING: node_to_z not found in Graph-DiT!")
-    print(f"[Main] GraphDiT loaded and frozen (except node_to_z)")
+        print(f"[Main] ⚠️  WARNING: node_to_z not found in backbone!")
+    print(f"[Main] Graph-Unet loaded and frozen (except node_to_z)")
 
-    # Load gripper model (if provided)
-    gripper_model = None
-    gripper_input_mean = None
-    gripper_input_std = None
-    gripper_states = None  # State machine: 0=OPEN, 1=CLOSING, 2=CLOSED, 3=OPENING
-    
-    if args.gripper_model is not None and GRIPPER_MODEL_AVAILABLE:
-        gripper_model_path = args.gripper_model
-        if os.path.exists(gripper_model_path):
-            print(f"[Main] Loading gripper model from: {gripper_model_path}")
-            gripper_checkpoint = torch.load(gripper_model_path, map_location=device, weights_only=False)
-            
-            # Get model config
-            hidden_dims = gripper_checkpoint.get('hidden_dims', [128, 128, 64])
-            dropout = gripper_checkpoint.get('dropout', 0.1)
-            
-            # Load model
-            gripper_model = GripperPredictor(hidden_dims=hidden_dims, dropout=dropout).to(device)
-            gripper_model.load_state_dict(gripper_checkpoint['model_state_dict'])
-            gripper_model.eval()
-            
-            # Load normalization stats
-            input_mean = gripper_checkpoint['input_mean']
-            input_std = gripper_checkpoint['input_std']
-            
-            # Ensure numpy arrays
-            if isinstance(input_mean, torch.Tensor):
-                input_mean = input_mean.cpu().numpy()
-            if isinstance(input_std, torch.Tensor):
-                input_std = input_std.cpu().numpy()
-            
-            # Convert to torch tensors
-            gripper_input_mean = torch.from_numpy(input_mean).float().to(device)
-            gripper_input_std = torch.from_numpy(input_std).float().to(device)
-            
-            # Initialize gripper state machine (0=OPEN for all envs)
-            gripper_states = torch.zeros(args.num_envs, dtype=torch.long, device=device)
-            
-            print(f"[Main] Gripper model loaded successfully")
-            print(f"[Main] Gripper input_mean shape: {gripper_input_mean.shape}, input_std shape: {gripper_input_std.shape}")
-        else:
-            print(f"[Main] Warning: Gripper model path provided but file not found: {gripper_model_path}")
-    else:
-        if args.gripper_model is not None:
-            print(f"[Main] Warning: Gripper model path provided but gripper_model module not available")
-        print(f"[Main] Using Graph-DiT for all action dimensions (including gripper)")
+    # Gripper comes from backbone (6th dim); no separate gripper model
+    print(f"[Main] Using backbone for all 6 action dimensions (including gripper)")
 
     # Create backbone adapter
-    backbone = GraphDiTBackboneAdapter(graph_dit)
+    backbone = GraphUnetBackboneAdapter(backbone_policy)
 
     # Create environment
     print(f"\n[Main] Creating environment: {args.task}")
@@ -1099,49 +1053,43 @@ def main():
         return 1
 
     action_dim_env = get_action_dim(action_space)  # Environment action dim (usually 6)
-    action_dim_rl = 5  # RL only fine-tunes arm joints (5 dims), gripper excluded
+    action_dim_rl = 6  # RL outputs 6D (arm + gripper); per-channel alpha: arm low, gripper full
 
     print(f"[Main] obs_dim: {obs_dim}, action_dim_env: {action_dim_env}, action_dim_rl: {action_dim_rl}")
-    print(f"[Main] RL will only fine-tune first 5 dimensions (arm joints), gripper excluded")
+    print(f"[Main] RL outputs 6D; arm uses alpha_learned, gripper uses 1.0 (full override)")
 
     # Create policy config
-    # CRITICAL: Get obs_structure from Graph-DiT config to ensure consistency
-    obs_structure = getattr(graph_dit.cfg, "obs_structure", None)
-    print(f"[Main] Graph-DiT obs_structure: {obs_structure}")
-    
-    # Create residual action mask: [1, 1, 1, 1, 1, 0] (mask gripper, index 5)
-    # This ensures gripper residual is always 0, even if somehow computed
-    residual_action_mask = torch.ones(action_dim_env, device=device)  # [6]
-    residual_action_mask[5] = 0.0  # Mask gripper (index 5)
-    
-    policy_cfg = GraphDiTResidualRLCfg(
-        obs_dim=obs_dim,
-        action_dim=action_dim_rl,  # RL only outputs 5 dims (arm joints)
-        z_dim=graph_dit.cfg.z_dim,
-        num_layers=graph_dit.cfg.num_layers,
-        device=device,
-        obs_structure=obs_structure,  # CRITICAL: Use same obs_structure as Graph-DiT
-        robot_state_dim=6,  # 根据你的机器人调整
-        residual_action_mask=residual_action_mask,  # Mask gripper (index 5) from residual
-    )
-    print(f"[Main] residual_action_mask: {residual_action_mask.tolist()} (gripper masked)")
-    print(f"[Main] Residual RL obs_structure: {policy_cfg.obs_structure}")
-    
-    # Verify obs_structure consistency
-    if getattr(graph_dit.cfg, "obs_structure", None) != policy_cfg.obs_structure:
-        print("[Main] ⚠️  WARNING: obs_structure MISMATCH between Graph-DiT and Residual RL!")
-    else:
-        print("[Main] ✅ obs_structure consistent between Graph-DiT and Residual RL")
+    obs_structure = getattr(backbone_policy.cfg, "obs_structure", None)
+    print(f"[Main] Backbone obs_structure: {obs_structure}")
 
-    # Create policy (with gripper model if available)
-    policy = GraphDiTResidualRLPolicy(
+    # No mask: RL controls all 6 dims; per-channel alpha in policy (arm low, gripper full)
+    residual_action_mask = torch.ones(action_dim_env, device=device)
+
+    policy_cfg = GraphUnetResidualRLCfg(
+        obs_dim=obs_dim,
+        action_dim=action_dim_rl,
+        z_dim=backbone_policy.cfg.z_dim,
+        num_layers=backbone_policy.cfg.num_layers,
+        device=device,
+        obs_structure=obs_structure,
+        robot_state_dim=6,
+        residual_action_mask=residual_action_mask,
+        c_delta_reg=args.c_delta_reg,
+    )
+    print(f"[Main] residual_action_mask: {residual_action_mask.tolist()} (all 1s, no mask)")
+    print(f"[Main] Residual RL obs_structure: {policy_cfg.obs_structure}")
+
+    if getattr(backbone_policy.cfg, "obs_structure", None) != policy_cfg.obs_structure:
+        print("[Main] ⚠️  WARNING: obs_structure MISMATCH between backbone and Residual RL!")
+    else:
+        print("[Main] ✅ obs_structure consistent")
+
+    # Create policy (gripper from backbone 6th dim only)
+    policy = GraphUnetResidualRLPolicy(
         cfg=policy_cfg,
         backbone=backbone,
-        pred_horizon=getattr(graph_dit.cfg, "pred_horizon", 16),
-        exec_horizon=getattr(graph_dit.cfg, "exec_horizon", 8),
-        gripper_model=gripper_model,
-        gripper_input_mean=gripper_input_mean,
-        gripper_input_std=gripper_input_std,
+        pred_horizon=getattr(backbone_policy.cfg, "pred_horizon", 16),
+        exec_horizon=getattr(backbone_policy.cfg, "exec_horizon", 8),
     )
     policy.to(device)
 
@@ -1224,7 +1172,6 @@ def main():
             action_std = action_stats["std"].squeeze().to(device)
         print(f"[Main] Loaded action normalization stats")
 
-    # Create log dir
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     log_dir = os.path.join(args.log_dir, args.task, timestamp)
 
@@ -1232,8 +1179,8 @@ def main():
     num_envs = env_cfg.scene.num_envs if hasattr(env_cfg, "scene") and hasattr(env_cfg.scene, "num_envs") else args.num_envs
     print(f"[Main] Using num_envs: {num_envs}")
 
-    # Get action_history_length from Graph-DiT config
-    action_history_length = getattr(graph_dit.cfg, 'action_history_length', 4)
+    # Get action_history_length from backbone config
+    action_history_length = getattr(backbone_policy.cfg, "action_history_length", 4)
     
     # Create trainer
     trainer = GraphDiTRLTrainer(
@@ -1282,10 +1229,10 @@ def main():
     
     # 1. obs_structure 检查
     print(f"\n[1] obs_structure:")
-    graph_dit_obs_struct = getattr(graph_dit.cfg, 'obs_structure', None)
-    print(f"    Graph-DiT: {graph_dit_obs_struct}")
+    backbone_obs_struct = getattr(backbone_policy.cfg, "obs_structure", None)
+    print(f"    Backbone: {backbone_obs_struct}")
     print(f"    Residual RL: {policy_cfg.obs_structure}")
-    if graph_dit_obs_struct != policy_cfg.obs_structure:
+    if backbone_obs_struct != policy_cfg.obs_structure:
         print("    ⚠️  WARNING: obs_structure MISMATCH!")
     else:
         print("    ✅ obs_structure consistent")
@@ -1301,9 +1248,9 @@ def main():
     
     # 3. node_to_z 检查
     print(f"\n[3] node_to_z:")
-    if hasattr(graph_dit, 'node_to_z'):
-        n2z_trainable = sum(1 for p in graph_dit.node_to_z.parameters() if p.requires_grad)
-        n2z_total = len(list(graph_dit.node_to_z.parameters()))
+    if hasattr(backbone_policy, "node_to_z"):
+        n2z_trainable = sum(1 for p in backbone_policy.node_to_z.parameters() if p.requires_grad)
+        n2z_total = len(list(backbone_policy.node_to_z.parameters()))
         print(f"    Trainable params: {n2z_trainable}/{n2z_total}")
         if n2z_trainable == 0:
             print("    ⚠️  WARNING: node_to_z has NO trainable params!")

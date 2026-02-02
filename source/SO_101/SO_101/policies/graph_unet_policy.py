@@ -231,3 +231,87 @@ class GraphUnetPolicy(GraphDiTPolicy):
         if return_dict:
             return {"noise_pred": noise_pred}
         return noise_pred
+
+    # ============================================================
+    # RL: extract z and features (U-Net has no layer-wise z, single z repeated)
+    # ============================================================
+
+    def extract_z(
+        self,
+        ee_node_history: torch.Tensor,
+        object_node_history: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Extract graph latent z for RL (high-frequency).
+
+        U-Net has no layer-wise structure; single z is expanded to [B, K, z_dim]
+        for compatibility with RL interface.
+
+        Args:
+            ee_node_history: [B, H, 7] - EE node history
+            object_node_history: [B, H, 7] - Object node history
+
+        Returns:
+            z_layers: [B, K, z_dim] - same z repeated K times
+        """
+        self.eval()
+        with torch.no_grad():
+            B, H, node_dim = ee_node_history.shape
+            ee_flat = ee_node_history.reshape(B * H, node_dim)
+            obj_flat = object_node_history.reshape(B * H, node_dim)
+            ee_embed = self.node_embedding(ee_flat).view(B, H, -1)
+            obj_embed = self.node_embedding(obj_flat).view(B, H, -1)
+            node_features = torch.stack([ee_embed, obj_embed], dim=1)
+            z = self._pool_node_latent(node_features)
+            K = getattr(self.cfg, "num_layers", 6)
+            z_layers = z.unsqueeze(1).expand(-1, K, -1).contiguous()
+            return z_layers
+
+    def extract_features(
+        self,
+        obs: torch.Tensor,
+        action_history: torch.Tensor | None = None,
+        ee_node_history: torch.Tensor | None = None,
+        object_node_history: torch.Tensor | None = None,
+        joint_states_history: torch.Tensor | None = None,
+        subtask_condition: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """
+        Extract features for RL (U-Net version).
+        Uses graph encoder only; no transformer layers.
+        """
+        self.eval()
+        with torch.no_grad():
+            if ee_node_history is not None and object_node_history is not None:
+                B, H, node_dim = ee_node_history.shape
+                ee_flat = ee_node_history.reshape(B * H, node_dim)
+                obj_flat = object_node_history.reshape(B * H, node_dim)
+                ee_embed = self.node_embedding(ee_flat).view(B, H, -1)
+                obj_embed = self.node_embedding(obj_flat).view(B, H, -1)
+                node_features = torch.stack([ee_embed, obj_embed], dim=1)
+            else:
+                ee_node, object_node = self._extract_node_features(obs)
+                ee_embed = self.node_embedding(ee_node)
+                obj_embed = self.node_embedding(object_node)
+                node_features = torch.stack([ee_embed, obj_embed], dim=1).unsqueeze(2)
+
+            z = self._pool_node_latent(node_features)
+            K = getattr(self.cfg, "num_layers", 6)
+            z_layers = z.unsqueeze(1).expand(-1, K, -1).contiguous()
+
+            if ee_node_history is not None:
+                current_ee = ee_node_history[:, -1, :]
+                current_obj = object_node_history[:, -1, :]
+            else:
+                current_ee, current_obj = self._extract_node_features(obs)
+            edge_raw = self._compute_edge_features(current_ee, current_obj)
+            edge_embed = self.edge_embedding(edge_raw)
+
+            nf = node_features.mean(dim=2) if node_features.dim() == 4 else node_features
+            return {
+                "graph_embedding": z,
+                "z_layers": z_layers,
+                "z_final": z,
+                "node_features": nf,
+                "edge_features": edge_embed,
+            }

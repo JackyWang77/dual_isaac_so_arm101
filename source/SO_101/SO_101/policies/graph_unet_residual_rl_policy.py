@@ -4,13 +4,13 @@
 # SPDX-License-Identifier: BSD-3-Clause
 
 """
-GraphDiT + Residual RL Policy (OUR METHOD) - High-Frequency Z Version
+Graph-Unet + Residual RL Policy (OUR METHOD) - High-Frequency Z Version
 
 Key improvements:
-1) base_action: Low-frequency (obtain trajectory from DiT every exec_horizon steps)
-2) z_layers: High-frequency (call extract_z_fast every step, only run Graph-Attention)
-3) z_adapter: Trainable (transform frozen z to RL-friendly z)
-4) GateNet + DeepValueCritic: Unchanged
+1) base_action: Low-frequency (obtain trajectory from Unet every exec_horizon steps)
+2) z: High-frequency (call extract_z every step, only run graph backbone)
+3) Residual head: Trainable (frozen backbone z + RL head)
+4) DeepValueCritic: Single head (z_bar)
 """
 
 from __future__ import annotations
@@ -223,7 +223,7 @@ def mlp(in_dim: int, hidden: Tuple[int, ...], out_dim: int, act: str = "silu") -
 
 
 # =========================================================
-# GAE (unchanged)
+# GAE (with timeout bootstrap: truncated -> nonterminal=1)
 # =========================================================
 @torch.no_grad()
 def compute_gae(
@@ -233,13 +233,22 @@ def compute_gae(
     last_value: torch.Tensor,
     gamma: float = 0.99,
     lam: float = 0.95,
+    timeouts: Optional[torch.Tensor] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    If timeouts is provided: done=1 & timeout=1 (truncated) -> nonterminal=1 (bootstrap next_value).
+    Terminated (real done) -> nonterminal=0; truncated (timeout) -> nonterminal=1; running -> nonterminal=1.
+    """
     T, N = rewards.shape
     adv = torch.zeros_like(rewards)
     last_gae = torch.zeros(N, device=rewards.device)
 
     for t in reversed(range(T)):
-        nonterminal = 1.0 - dones[t].float()
+        if timeouts is not None:
+            # done=1 & timeout=1 (truncated) -> nonterminal=1 (bootstrap); done=1 & timeout=0 (terminated) -> nonterminal=0
+            nonterminal = (1.0 - dones[t].float() + timeouts[t].float()).clamp(0.0, 1.0)
+        else:
+            nonterminal = 1.0 - dones[t].float()
         next_value = last_value if t == T - 1 else values[t + 1]
         delta = rewards[t] + gamma * nonterminal * next_value - values[t]
         last_gae = delta + gamma * lam * nonterminal * last_gae
@@ -253,7 +262,7 @@ def compute_gae(
 # Config (added obs_structure related configuration)
 # =========================================================
 @dataclass
-class GraphDiTResidualRLCfg:
+class GraphUnetResidualRLCfg:
     # dims
     obs_dim: int
     action_dim: int
@@ -277,13 +286,12 @@ class GraphDiTResidualRLCfg:
     # actor input: [obs_selected, a_base, z_bar]
     actor_hidden: Tuple[int, ...] = (256, 256)
     critic_hidden: Tuple[int, ...] = (256, 256)
-    gate_hidden: Tuple[int, ...] = (256,)
-    
-    # NEW: z_adapter hidden dims
+
+    # z_adapter hidden dims
     z_adapter_hidden: Tuple[int, ...] = (256,)
 
-    # residual distribution
-    log_std_init: float = -0.7
+    # residual distribution (log_std_init small = less exploration at start)
+    log_std_init: float = -2.0
     log_std_min: float = -10.0
     log_std_max: float = 1.0
 
@@ -298,10 +306,11 @@ class GraphDiTResidualRLCfg:
     beta: float = 1.0
     weight_clip_max: float = 20.0
 
-    # losses
+    # losses (residual RL is U-Net only: no gate, bar head only)
     cV: float = 1.0
     cEnt: float = 0.0
-    cGate: float = 0.02
+    cGate: float = 0.0  # Unused (no gate)
+    c_delta_reg: float = 2.0  # Delta (residual) regularization: higher = smoother, RL "don't move unless reward"
 
     # gae
     gamma: float = 0.99
@@ -373,23 +382,36 @@ class ResidualGaussianActor(nn.Module):
 
 
 class DeepValueCritic(nn.Module):
-    def __init__(self, K: int, z_dim: int, obs_dim: int, hidden: Tuple[int, ...], act: str):
+    def __init__(
+        self,
+        K: int,
+        z_dim: int,
+        obs_dim: int,
+        hidden: Tuple[int, ...],
+        act: str,
+        use_layer_heads: bool = True,
+    ):
         super().__init__()
         self.K = K
         self.z_dim = z_dim
+        self.use_layer_heads = use_layer_heads
 
-        # Layer heads: only use z^k (keep deep supervision simple)
-        self.trunk = mlp(z_dim, hidden, hidden[-1], act=act)
-        self.layer_heads = nn.ModuleList([nn.Linear(hidden[-1], 1) for _ in range(K)])
+        if use_layer_heads:
+            self.trunk = mlp(z_dim, hidden, hidden[-1], act=act)
+            self.layer_heads = nn.ModuleList([nn.Linear(hidden[-1], 1) for _ in range(K)])
+        else:
+            self.trunk = None
+            self.layer_heads = None
 
-        # Bar head: use z_bar + obs (more accurate baseline)
         self.bar_trunk = mlp(z_dim + obs_dim, hidden, hidden[-1], act=act)
         self.bar_head = nn.Linear(hidden[-1], 1)
 
     def forward_layers(self, z_layers: torch.Tensor) -> torch.Tensor:
+        if not self.use_layer_heads:
+            B = z_layers.shape[0]
+            return torch.zeros(B, self.K, device=z_layers.device, dtype=z_layers.dtype)
         B, K, D = z_layers.shape
         assert K == self.K and D == self.z_dim
-
         Vs = []
         for k in range(K):
             zk = z_layers[:, k, :]
@@ -455,16 +477,16 @@ class ZAdapter(nn.Module):
 # =========================================================
 # Backbone Adapter (modified: added extract_z_fast)
 # =========================================================
-class GraphDiTBackboneAdapter:
+class GraphUnetBackboneAdapter:
     """
-    Adapter interface for GraphDiT backbone.
-    
+    Adapter interface for Graph-Unet (or compatible) backbone.
+
     Methods:
     - predict_base_trajectory(): Low-frequency, returns full trajectory
     - extract_z(): High-frequency, extracts z with temporal history support
     """
-    def __init__(self, graph_dit_policy: nn.Module):
-        self.backbone = graph_dit_policy
+    def __init__(self, backbone_policy: nn.Module):
+        self.backbone = backbone_policy
 
     @torch.no_grad()
     def predict_base_trajectory(self, **kwargs) -> torch.Tensor:
@@ -493,7 +515,7 @@ class GraphDiTBackboneAdapter:
         """
         if not hasattr(self.backbone, "extract_z"):
             raise NotImplementedError(
-                "GraphDiTPolicy must implement extract_z(ee_node_history, obj_node_history) -> [B,K,z_dim]"
+                "Backbone policy must implement extract_z(ee_node_history, obj_node_history) -> [B,z_dim]"
             )
         return self.backbone.extract_z(ee_node_history, obj_node_history)
     
@@ -508,34 +530,30 @@ class GraphDiTBackboneAdapter:
 
 
 # =========================================================
-# OUR POLICY: GraphDiT + Residual RL Head (high-frequency z version)
+# OUR POLICY: Graph-Unet + Residual RL Head (high-frequency z version)
 # =========================================================
-class GraphDiTResidualRLPolicy(nn.Module):
+class GraphUnetResidualRLPolicy(nn.Module):
     """
     Online inference:
         1. base_action_t = pop from RHC buffer (low-frequency, updated every exec_horizon steps)
-        2. z_layers_t = extract_z_fast(ee_node, obj_node) (high-frequency, updated every step!)
-        3. z_adapted = ZAdapter(z_layers) (trainable)
-        4. z_bar_t = GateNet(z_adapted)
-        5. delta_a_t ~ Actor(obs, base_action, z_bar)
-        6. a_t = base + alpha * delta
-    
+        2. z_t = backbone.extract_z(...) (high-frequency, updated every step!)
+        3. z_bar_t = z (single latent for Unet)
+        4. delta_a_t ~ Actor(obs, base_action, z_bar)
+        5. a_t = base + alpha * delta
+
     Key improvements:
     - z updated every step (high-frequency), reflects current EE-Object relationship
-    - base_action updated at low-frequency, leverages DiT's trajectory planning capability
-    - ZAdapter allows frozen z to be fine-tuned by RL gradients
+    - base_action updated at low-frequency, leverages Unet's trajectory planning capability
+    - Residual head allows frozen backbone to be fine-tuned by RL gradients
     """
 
     def __init__(
         self,
-        cfg: GraphDiTResidualRLCfg,
-        backbone: GraphDiTBackboneAdapter,
+        cfg: GraphUnetResidualRLCfg,
+        backbone: GraphUnetBackboneAdapter,
         pred_horizon: int = 16,
         exec_horizon: int = 8,
         num_diffusion_steps: int = 2,
-        gripper_model=None,  # Optional: GripperPredictor model
-        gripper_input_mean=None,  # Optional: gripper input normalization mean
-        gripper_input_std=None,  # Optional: gripper input normalization std
     ):
         super().__init__()
         self.cfg = cfg
@@ -545,14 +563,6 @@ class GraphDiTResidualRLPolicy(nn.Module):
         self.pred_horizon = pred_horizon
         self.exec_horizon = exec_horizon
         self.num_diffusion_steps = num_diffusion_steps
-        
-        # Gripper model (optional, for generating gripper actions)
-        self.gripper_model = gripper_model
-        self.gripper_input_mean = gripper_input_mean
-        self.gripper_input_std = gripper_input_std
-        # Gripper state machine: 0=OPEN, 1=CLOSING, 2=CLOSED, 3=OPENING
-        # Will be initialized per environment in act() if needed
-        self._gripper_states = None
 
         # ============================================================
         # NEW: Z Adapter (trainable)
@@ -563,13 +573,8 @@ class GraphDiTResidualRLPolicy(nn.Module):
             act=cfg.activation,
         )
 
-        # Gate (softmax aggregation of adapted z)
-        self.gate = LayerWiseGateNet(
-            K=cfg.num_layers,
-            z_dim=cfg.z_dim,
-            hidden=cfg.gate_hidden,
-            act=cfg.activation,
-        )
+        # Residual RL is U-Net only: single z, no gate
+        self.gate = None
 
         # Compute actual obs dim for Actor/Critic (based on obs_mode)
         def get_obs_dim_for_mode(mode: str) -> int:
@@ -586,29 +591,29 @@ class GraphDiTResidualRLPolicy(nn.Module):
         actor_obs_dim = get_obs_dim_for_mode(cfg.actor_obs_mode)
         critic_obs_dim = get_obs_dim_for_mode(cfg.critic_obs_mode)
 
-        # Actor input dim: obs_selected + base_action (first 5 dims only) + z_bar
-        # Actor only outputs 5 dims (arm joints), gripper is excluded from RL fine-tuning
-        # Base action from Graph-DiT is 5D (arm only), but we need to handle 6D for compatibility
-        base_action_dim_for_actor = 5  # Only use first 5 dims (arm joints) for Actor input
+        # Actor input dim: obs_selected + base_action (6 dims) + z_bar
+        # Actor outputs 6 dims (arm + gripper); Zero Init so initial delta ≈ 0 (safe start)
+        base_action_dim_for_actor = 6
         actor_in_dim = actor_obs_dim + base_action_dim_for_actor + cfg.z_dim
         self.actor = ResidualGaussianActor(
             in_dim=actor_in_dim,
-            action_dim=5,  # Only output 5 dims (arm joints), gripper excluded
+            action_dim=6,  # Full 6D: arm + gripper (RL controls gripper with per-channel alpha)
             hidden=cfg.actor_hidden,
             act=cfg.activation,
             log_std_init=cfg.log_std_init,
             log_std_min=cfg.log_std_min,
             log_std_max=cfg.log_std_max,
         )
-        self.actor_action_dim = 5  # Store for later use
+        self.actor_action_dim = 6
 
-        # Critic (deep supervision on adapted z)
+        # Critic: bar head only (U-Net single z)
         self.critic = DeepValueCritic(
             K=cfg.num_layers,
             z_dim=cfg.z_dim,
-            obs_dim=critic_obs_dim,  # Use selected obs dim
+            obs_dim=critic_obs_dim,
             hidden=cfg.critic_hidden,
             act=cfg.activation,
+            use_layer_heads=False,
         )
 
         # Residual scaling
@@ -656,7 +661,6 @@ class GraphDiTResidualRLPolicy(nn.Module):
 
         # Init
         if cfg.orthogonal_init:
-            orthogonal_init(self.gate, gain=np.sqrt(2))
             orthogonal_init(self.actor, gain=np.sqrt(2))
             orthogonal_init(self.critic, gain=np.sqrt(2))
             # CRITICAL: Zero initialize Actor's mu layer (last layer)
@@ -744,7 +748,7 @@ class GraphDiTResidualRLPolicy(nn.Module):
         else:
             # Default structure: [joint_pos(6), joint_vel(6), obj_pos(3), obj_ori(4), ee_pos(3), ee_ori(4), ...]
             # WARNING: This default assumes joint_pos(6) + joint_vel(6) = 12 before object_position
-            # This matches graph_dit_policy.py default: object_position = obs[:, 12:15]
+            # This matches graph_unet_policy default: object_position = obs[:, 12:15]
             # If obs_structure is None, both should use the same default indices
             # CRITICAL: Always pass obs_structure from Graph-DiT config to avoid inconsistency!
             import warnings
@@ -857,16 +861,13 @@ class GraphDiTResidualRLPolicy(nn.Module):
     # -----------------------------
     # Latent aggregation
     # -----------------------------
-    def aggregate_latent(self, z_layers: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def aggregate_latent(self, z_layers: torch.Tensor) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
-        z_layers: [B, K, z_dim]
-        returns:
-            z_bar: [B, z_dim]
-            w:     [B, K]
+        U-Net only: single z (all layers same), no gate.
+        z_layers: [B, K, z_dim] -> z_bar: [B, z_dim], w: None
         """
-        w = self.gate(z_layers)                                 # [B, K]
-        z_bar = torch.sum(w.unsqueeze(-1) * z_layers, dim=1)    # [B, z_dim]
-        return z_bar, w
+        z_bar = z_layers[:, -1, :]
+        return z_bar, None
 
     # -----------------------------
     # Base action (low-frequency, RHC)
@@ -1017,82 +1018,22 @@ class GraphDiTResidualRLPolicy(nn.Module):
             deterministic=True,
         )
         
-        # Denormalize base_action for execution (but keep normalized version for Actor input)
-        # Graph-DiT outputs 5D (arm joints only), so a_base_norm is [B, 5]
-        # We need to expand to 6D for execution (add gripper = 0 or from separate model)
+        # Denormalize base_action for execution (arm 5D; gripper from backbone 6th dim or fallback)
+        a_base_norm_5d = a_base_norm[:, :5]  # [B, 5] - arm only
         if self.action_mean is not None and self.action_std is not None:
-            a_base_5d = a_base_norm * self.action_std[:5] + self.action_mean[:5]  # [B, 5]
+            a_base_5d = a_base_norm_5d * self.action_std[:5] + self.action_mean[:5]  # [B, 5]
         else:
-            a_base_5d = a_base_norm  # [B, 5]
+            a_base_5d = a_base_norm_5d  # [B, 5]
         
-        # Expand to 6D: use gripper model if available, otherwise pad with 0
-        if self.gripper_model is not None:
-            # Extract gripper inputs from observation
-            # obs structure: joint_pos[0:6], joint_vel[6:12], object_position[12:15], ...
-            gripper_state = obs[:, 5:6]  # [B, 1] - gripper joint (6th joint, index 5)
-            ee_pos = obs[:, 19:22]  # [B, 3] - EE position
-            object_pos = obs[:, 12:15]  # [B, 3] - object position
-            
-            # Prepare gripper input: [B, 7] (1+3+3)
-            gripper_input = torch.cat([gripper_state, ee_pos, object_pos], dim=-1).float()
-            
-            # Normalize
-            if self.gripper_input_mean is not None and self.gripper_input_std is not None:
-                gripper_input_norm = (gripper_input - self.gripper_input_mean) / self.gripper_input_std
+        # Gripper: backbone outputs 6D → use 6th dim (denormalized); 5D → pad 0
+        if a_base_norm.shape[-1] >= 6:
+            if self.action_mean is not None and self.action_std is not None:
+                a_base_gripper = a_base_norm[:, 5:6] * self.action_std[5:6] + self.action_mean[5:6]  # [B, 1]
             else:
-                gripper_input_norm = gripper_input
-            
-            # Initialize gripper state machine if needed
-            if self._gripper_states is None:
-                self._gripper_states = torch.zeros(B, dtype=torch.long, device=obs.device)
-            elif self._gripper_states.shape[0] != B:
-                # Resize if batch size changed
-                old_states = self._gripper_states
-                self._gripper_states = torch.zeros(B, dtype=torch.long, device=obs.device)
-                if old_states.shape[0] <= B:
-                    self._gripper_states[:old_states.shape[0]] = old_states
-            
-            # Predict gripper action
-            with torch.no_grad():
-                gripper_action, confidence, pred_class = self.gripper_model.predict(
-                    gripper_input_norm[:, 0:1],    # gripper_state [B, 1]
-                    gripper_input_norm[:, 1:4],    # ee_pos [B, 3]
-                    gripper_input_norm[:, 4:7]     # object_pos [B, 3]
-                )  # gripper_action: [B, 1], confidence: [B, 1], pred_class: [B, 1]
-            
-            # State machine logic (same as play.py)
-            for i in range(B):
-                curr_state = self._gripper_states[i].item()
-                pred = pred_class[i, 0].item()  # 0=KEEP_CURRENT, 1=TRIGGER_CLOSE, 2=TRIGGER_OPEN
-                
-                if curr_state == 0:  # OPEN
-                    if pred == 1:  # TRIGGER_CLOSE
-                        self._gripper_states[i] = 1  # CLOSING
-                elif curr_state == 1:  # CLOSING
-                    if pred == 2:  # TRIGGER_OPEN
-                        self._gripper_states[i] = 3  # OPENING
-                    elif gripper_state[i, 0].item() < -0.2:  # Closed threshold
-                        self._gripper_states[i] = 2  # CLOSED
-                elif curr_state == 2:  # CLOSED
-                    if pred == 2:  # TRIGGER_OPEN
-                        self._gripper_states[i] = 3  # OPENING
-                elif curr_state == 3:  # OPENING
-                    if pred == 1:  # TRIGGER_CLOSE
-                        self._gripper_states[i] = 1  # CLOSING
-                    elif gripper_state[i, 0].item() > 0.2:  # Open threshold
-                        self._gripper_states[i] = 0  # OPEN
-            
-            # Convert state to action: OPEN/OPENING -> 1.0, CLOSED/CLOSING -> -1.0
-            gripper_action_final = torch.where(
-                (self._gripper_states == 0) | (self._gripper_states == 3),
-                torch.tensor(1.0, device=obs.device, dtype=a_base_5d.dtype),
-                torch.tensor(-1.0, device=obs.device, dtype=a_base_5d.dtype)
-            ).unsqueeze(-1)  # [B, 1]
+                a_base_gripper = a_base_norm[:, 5:6]  # [B, 1]
         else:
-            # No gripper model: pad with 0
-            gripper_action_final = torch.zeros(B, 1, device=a_base_5d.device, dtype=a_base_5d.dtype)
-        
-        a_base = torch.cat([a_base_5d, gripper_action_final], dim=-1)  # [B, 6]
+            a_base_gripper = torch.zeros(B, 1, device=a_base_5d.device, dtype=a_base_5d.dtype)
+        a_base = torch.cat([a_base_5d, a_base_gripper], dim=-1)  # [B, 6]
 
         # ============================================================
         # 3. z_layers (high-frequency! called every step with temporal history)
@@ -1103,40 +1044,43 @@ class GraphDiTResidualRLPolicy(nn.Module):
         z_bar, w = self.aggregate_latent(z_layers)
 
         # 5. Actor: select obs based on actor_obs_mode
-        # CRITICAL: Actor input should be NORMALIZED (obs_norm, a_base_norm (first 5 dims), z_bar)
+        # Actor input: NORMALIZED (obs_norm, a_base_norm full 6D including gripper, z_bar)
         obs_actor = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
-        # Only use first 5 dims of base_action for Actor input (arm joints only)
-        a_base_norm_5d = a_base_norm[:, :5]  # [B, 5] - only arm joints
-        x = torch.cat([obs_actor, a_base_norm_5d, z_bar], dim=-1)  # Use normalized a_base (5D)
+        # FIX: Expand a_base_norm to 6D for Actor input (backbone may return 5D arm-only)
+        if a_base_norm.shape[-1] == 5:
+            gripper_pad = torch.zeros(B, 1, device=a_base_norm.device, dtype=a_base_norm.dtype)
+            a_base_norm_6d = torch.cat([a_base_norm, gripper_pad], dim=-1)  # [B, 6]
+        else:
+            a_base_norm_6d = a_base_norm
+        x = torch.cat([obs_actor, a_base_norm_6d, z_bar], dim=-1)  # [B, obs_dim + 6 + z_dim]
         dist = self.actor.dist(x)
         
+        # Actor outputs 6D delta (arm + gripper)
         if deterministic:
-            delta_norm_5d = dist.mean  # Actor outputs NORMALIZED delta [B, 5] (arm joints only)
+            delta_norm = dist.mean  # [B, 6]
         else:
-            delta_norm_5d = dist.rsample()  # Actor outputs NORMALIZED delta [B, 5] (sampled from Normal(mu, std))
-            # CRITICAL: Clamp sampled delta_norm to [-1, 1] to ensure bounded residual
-            # Even though mu is tanh-bounded, sampling can produce values outside [-1, 1] when std > 0
-            delta_norm_5d = torch.clamp(delta_norm_5d, -1.0, 1.0)
+            delta_norm = dist.rsample()  # [B, 6]
+            delta_norm = torch.clamp(delta_norm, -1.0, 1.0)
 
-        # Expand delta to 6D: [B, 5] -> [B, 6] (gripper delta = 0)
-        delta_norm = torch.zeros(B, a_base_norm.shape[-1], device=delta_norm_5d.device, dtype=delta_norm_5d.dtype)
-        delta_norm[:, :5] = delta_norm_5d  # Arm joints get residual
-        # Gripper (index 5) gets 0 residual (not fine-tuned by RL)
-        # Note: residual_action_mask will also ensure gripper is masked in update()
+        delta_norm = torch.clamp(delta_norm, -1.0, 1.0)
 
         # Denormalize delta for execution
         if self.action_mean is not None and self.action_std is not None:
-            delta = delta_norm * self.action_std  # Only scale, no shift (delta is residual)
+            delta = delta_norm * self.action_std
         else:
             delta = delta_norm
 
-        # Apply residual mask to ensure gripper (index 5) is not fine-tuned
+        # Optional mask (if all 1s, no effect; if gripper was masked, would zero it)
         if self.residual_action_mask is not None:
-            delta = delta * self.residual_action_mask  # Mask gripper residual to 0
+            delta = delta * self.residual_action_mask
 
-        # 6. Final action (both a_base and delta are DENORMALIZED)
-        alpha = torch.clamp(self.alpha, 0.0, 0.3)  # Limit alpha to 30%
-        a = a_base + alpha * delta  # [B, 6] - gripper comes from a_base only (no RL residual)
+        # Per-channel alpha: Arm (0-4) low authority, Gripper (5) full authority
+        alpha_learned = torch.clamp(self.alpha, 0.0, 0.3)
+        alpha_vec = torch.ones_like(delta, device=delta.device, dtype=delta.dtype) * alpha_learned
+        alpha_vec[:, 5] = 1.0  # Gripper: full override
+
+        a = a_base + alpha_vec * delta  # [B, 6]
+        alpha = alpha_learned  # for info
         
         # 7. Update history buffer (AFTER computing action)
         if self.history_buffer is not None:
@@ -1157,30 +1101,29 @@ class GraphDiTResidualRLPolicy(nn.Module):
                 joint_states=joint_states,
             )
 
-        # ============================================================
-        # FIX: log_prob uses normalized delta (Actor's output space)
-        # Actor distribution is defined in normalized space, so log_prob
-        # must be computed in the same space
-        # Actor only outputs 5 dims, so use delta_norm_5d for log_prob
-        # ============================================================
-        log_prob = dist.log_prob(delta_norm_5d).sum(dim=-1)  # ✅ Use normalized delta (5D only)
+        # Log prob / entropy over full 6D (Actor outputs 6D)
+        log_prob = dist.log_prob(delta_norm).sum(dim=-1)
         entropy = dist.entropy().sum(dim=-1)
         # Critic: select obs based on critic_obs_mode
         obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
         v_bar = self.critic.forward_bar(z_bar, obs_critic)
 
+        # gate_w: U-Net has no gate; use uniform placeholder for buffer compatibility
+        K = self.cfg.num_layers
+        gate_w = torch.ones(B, K, device=z_bar.device, dtype=z_bar.dtype) / K
+
         info = {
-            "obs": obs,  # Raw obs (for recomputing z_layers during training to get gradients)
+            "obs": obs,
             "obs_norm": obs_norm,
-            "a_base": a_base,  # Denormalized (for execution)
-            "a_base_norm": a_base_norm,  # Normalized (for history storage)
-            "delta": delta,  # Denormalized (for execution)
-            "delta_norm": delta_norm,  # Normalized (for training)
+            "a_base": a_base,
+            "a_base_norm": a_base_norm,
+            "delta": delta,
+            "delta_norm": delta_norm,
             "log_prob": log_prob,
             "entropy": entropy,
-            "z_layers": z_layers,  # Note: z_layers during rollout have no gradients (due to @torch.no_grad)
+            "z_layers": z_layers,
             "z_bar": z_bar,
-            "gate_w": w,
+            "gate_w": gate_w,  # [B, K]; placeholder when no gate (U-Net)
             "v_bar": v_bar,
             "alpha": alpha.detach(),
         }
@@ -1228,42 +1171,38 @@ class GraphDiTResidualRLPolicy(nn.Module):
 
         # ============================================================
         # FIX 2: Actor input uses normalized values (consistent with act())
+        # Pad a_base_norm to 6D if needed (rollout may store 5D from backbone)
         # ============================================================
         obs_actor = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
-        x = torch.cat([obs_actor, a_base_norm, z_bar_new], dim=-1)  # ✅ Use normalized a_base_norm
+        B_loss = obs_norm.shape[0]
+        if a_base_norm.shape[-1] == 5:
+            gripper_pad = torch.zeros(B_loss, 1, device=a_base_norm.device, dtype=a_base_norm.dtype)
+            a_base_norm_6d = torch.cat([a_base_norm, gripper_pad], dim=-1)
+        else:
+            a_base_norm_6d = a_base_norm
+        x = torch.cat([obs_actor, a_base_norm_6d, z_bar_new], dim=-1)
         dist = self.actor.dist(x)
 
         # Recover delta in denormalized space
-        alpha = torch.clamp(self.alpha, 0.0, 0.3)  # Limit alpha to 30%
-        delta = (action - a_base) / (alpha + 1e-8)  # Denormalized delta
+        # Recover delta with per-channel alpha (same as act(): arm=alpha_learned, gripper=1.0)
+        alpha_learned = torch.clamp(self.alpha, 0.0, 0.3)
+        B_loss = obs_norm.shape[0]
+        alpha_vec = torch.ones(B_loss, 6, device=action.device, dtype=action.dtype) * alpha_learned
+        alpha_vec[:, 5] = 1.0
+        delta = (action - a_base) / (alpha_vec + 1e-8)
 
         if self.residual_action_mask is not None:
             delta = delta * self.residual_action_mask
 
-        # ============================================================
-        # FIX 3: Normalize delta to match Actor output space (normalized)
-        # ============================================================
         if self.action_mean is not None and self.action_std is not None:
-            delta_norm = delta / (self.action_std + 1e-8)  # ✅ Actor outputs normalized delta
+            delta_norm = delta / (self.action_std + 1e-8)
         else:
             delta_norm = delta
-
-        # ============================================================
-        # CRITICAL FIX: Clamp delta_norm to [-1, 1] to match act() behavior
-        # This prevents numerical issues when action - a_base is large (training instability)
-        # Without this, delta_norm can be >> 1 (e.g., 25.0), causing log_prob to be extremely small
-        # and leading to gradient explosion in early training
-        # ============================================================
-        delta_norm = torch.clamp(delta_norm, -1.0, 1.0)  # Match act() clamp behavior
-
-        # ============================================================
-        # FIX 4: log_prob uses normalized delta (Actor's output space)
-        # ============================================================
-        log_prob = dist.log_prob(delta_norm).sum(dim=-1)  # ✅ Use normalized delta
+        delta_norm = torch.clamp(delta_norm, -1.0, 1.0)
+        log_prob = dist.log_prob(delta_norm).sum(dim=-1)
         entropy = dist.entropy().sum(dim=-1)
-
-        # Delta regularization: encourage small residuals (in normalized space)
-        loss_delta_reg = (delta_norm ** 2).mean()  # ✅ Use normalized delta
+        loss_delta_reg = (delta_norm ** 2).mean()
+        alpha = alpha_learned  # for return dict
 
         # AWR weights
         w_adv = torch.exp(adv / max(self.cfg.beta, 1e-8))
@@ -1273,24 +1212,17 @@ class GraphDiTResidualRLPolicy(nn.Module):
         # Actor loss
         loss_actor = -(w_adv.detach() * log_prob).mean()
 
-        # Deep critic supervision
-        V_layers = self.critic.forward_layers(z_layers)
-        K = V_layers.shape[1]
-        omega = torch.arange(1, K + 1, device=V_layers.device, dtype=torch.float32)
-        omega = omega / omega.sum()
-        
-        returns_expand = returns.unsqueeze(-1).expand_as(V_layers)
-        loss_v_layers = ((V_layers - returns_expand) ** 2)
-        loss_critic = (loss_v_layers * omega.view(1, -1)).mean()
+        # Critic: bar head only (no layer heads)
+        loss_critic = torch.tensor(0.0, device=obs.device)
 
         # Baseline head: select obs based on critic_obs_mode
         obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
         V_bar = self.critic.forward_bar(z_bar_new, obs_critic)
         loss_v_bar = F.mse_loss(V_bar, returns)
 
-        # Gate entropy
-        gate_entropy = -(w * torch.log(w + 1e-8)).sum(dim=-1).mean()
-        loss_gate = -gate_entropy
+        # No gate (U-Net only)
+        gate_entropy = torch.tensor(0.0, device=obs.device)
+        loss_gate = torch.tensor(0.0, device=obs.device)
 
         # Total
         loss_total = (
@@ -1298,7 +1230,7 @@ class GraphDiTResidualRLPolicy(nn.Module):
             + self.cfg.cV * (loss_critic + 0.5 * loss_v_bar)
             + self.cfg.cGate * loss_gate
             - self.cfg.cEnt * entropy.mean()
-            + 0.1 * loss_delta_reg  # Delta regularization: encourage small residuals
+            + self.cfg.c_delta_reg * loss_delta_reg  # Delta regularization: encourage small residuals (smoother)
         )
 
         return {
@@ -1324,30 +1256,30 @@ class GraphDiTResidualRLPolicy(nn.Module):
         # node_to_z is in backbone.backbone.node_to_z, not in policy.parameters()
         node_to_z_state_dict = {}
         if hasattr(self, 'backbone') and hasattr(self.backbone, 'backbone'):
-            graph_dit = self.backbone.backbone
-            if hasattr(graph_dit, 'node_to_z'):
-                # Extract node_to_z weights from Graph-DiT
-                for name, param in graph_dit.node_to_z.named_parameters():
+            backbone_model = self.backbone.backbone
+            if hasattr(backbone_model, 'node_to_z'):
+                # Extract node_to_z weights from backbone (if present, e.g. Graph-DiT)
+                for name, param in backbone_model.node_to_z.named_parameters():
                     node_to_z_state_dict[f"backbone.backbone.node_to_z.{name}"] = param.data.clone()
                 if len(node_to_z_state_dict) > 0:
-                    print(f"[GraphDiTResidualRLPolicy] Saving {len(node_to_z_state_dict)} node_to_z parameters")
-                    print(f"[GraphDiTResidualRLPolicy] node_to_z_state_dict keys: {list(node_to_z_state_dict.keys())[:3]}...")
+                    print(f"[GraphUnetResidualRLPolicy] Saving {len(node_to_z_state_dict)} node_to_z parameters")
+                    print(f"[GraphUnetResidualRLPolicy] node_to_z_state_dict keys: {list(node_to_z_state_dict.keys())[:3]}...")
                 else:
-                    print("[GraphDiTResidualRLPolicy] ⚠️  WARNING: node_to_z_state_dict is EMPTY!")
+                    print("[GraphUnetResidualRLPolicy] ⚠️  WARNING: node_to_z_state_dict is EMPTY!")
             else:
-                print("[GraphDiTResidualRLPolicy] ⚠️  WARNING: graph_dit has no node_to_z attribute!")
+                print("[GraphUnetResidualRLPolicy] ⚠️  WARNING: backbone has no node_to_z attribute!")
         else:
-            print("[GraphDiTResidualRLPolicy] ⚠️  WARNING: Cannot access backbone.backbone!")
+            print("[GraphUnetResidualRLPolicy] ⚠️  WARNING: Cannot access backbone.backbone!")
         
         torch.save({
             "policy_state_dict": policy_state_dict,
             "node_to_z_state_dict": node_to_z_state_dict if len(node_to_z_state_dict) > 0 else None,
             "cfg": self.cfg,
         }, path)
-        print(f"[GraphDiTResidualRLPolicy] Saved to: {path}")
+        print(f"[GraphUnetResidualRLPolicy] Saved to: {path}")
     
     @classmethod
-    def load(cls, path: str, backbone: GraphDiTBackboneAdapter, device: str = "cuda"):
+    def load(cls, path: str, backbone: GraphUnetBackboneAdapter, device: str = "cuda"):
         """Load policy including trainable node_to_z from backbone"""
         checkpoint = torch.load(path, map_location=device, weights_only=False)
         cfg = checkpoint["cfg"]
@@ -1360,9 +1292,9 @@ class GraphDiTResidualRLPolicy(nn.Module):
         node_to_z_state_dict = checkpoint.get("node_to_z_state_dict", None)
         if node_to_z_state_dict is not None and len(node_to_z_state_dict) > 0:
             if hasattr(backbone, 'backbone'):
-                graph_dit = backbone.backbone
-                if hasattr(graph_dit, 'node_to_z'):
-                    # Load node_to_z weights into Graph-DiT
+                backbone_model = backbone.backbone
+                if hasattr(backbone_model, 'node_to_z'):
+                    # Load node_to_z weights into backbone (if present)
                     node_to_z_dict = {}
                     for key, value in node_to_z_state_dict.items():
                         # Remove "backbone.backbone." prefix
@@ -1370,20 +1302,20 @@ class GraphDiTResidualRLPolicy(nn.Module):
                             param_name = key[len("backbone.backbone.node_to_z."):]
                             node_to_z_dict[param_name] = value
                     
-                    missing_keys, unexpected_keys = graph_dit.node_to_z.load_state_dict(node_to_z_dict, strict=False)
+                    missing_keys, unexpected_keys = backbone_model.node_to_z.load_state_dict(node_to_z_dict, strict=False)
                     if missing_keys:
-                        print(f"[GraphDiTResidualRLPolicy] Warning: Missing node_to_z keys: {missing_keys}")
+                        print(f"[GraphUnetResidualRLPolicy] Warning: Missing node_to_z keys: {missing_keys}")
                     if unexpected_keys:
-                        print(f"[GraphDiTResidualRLPolicy] Warning: Unexpected node_to_z keys: {unexpected_keys}")
-                    print(f"[GraphDiTResidualRLPolicy] Loaded {len(node_to_z_dict)} node_to_z parameters from checkpoint")
+                        print(f"[GraphUnetResidualRLPolicy] Warning: Unexpected node_to_z keys: {unexpected_keys}")
+                    print(f"[GraphUnetResidualRLPolicy] Loaded {len(node_to_z_dict)} node_to_z parameters from checkpoint")
                 else:
-                    print("[GraphDiTResidualRLPolicy] Warning: node_to_z_state_dict found but graph_dit has no node_to_z")
+                    print("[GraphUnetResidualRLPolicy] Warning: node_to_z_state_dict found but backbone has no node_to_z")
             else:
-                print("[GraphDiTResidualRLPolicy] Warning: node_to_z_state_dict found but backbone has no backbone")
+                print("[GraphUnetResidualRLPolicy] Warning: node_to_z_state_dict found but backbone has no backbone")
         else:
-            print("[GraphDiTResidualRLPolicy] No node_to_z_state_dict in checkpoint (using original Graph-DiT node_to_z)")
+            print("[GraphUnetResidualRLPolicy] No node_to_z_state_dict in checkpoint (using original backbone node_to_z)")
         
         policy.to(device)
         
-        print(f"[GraphDiTResidualRLPolicy] Loaded from: {path}")
+        print(f"[GraphUnetResidualRLPolicy] Loaded from: {path}")
         return policy

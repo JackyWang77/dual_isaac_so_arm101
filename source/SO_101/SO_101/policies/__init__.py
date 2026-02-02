@@ -9,10 +9,10 @@ from .graph_dit_policy import (ActionHistoryBuffer, GraphDiTPolicy,
                                GraphDiTPolicyCfg, JointStateHistoryBuffer,
                                NodeHistoryBuffer)
 from .graph_unet_policy import GraphUnetPolicy
-from .graph_dit_residual_rl_policy import (
-    GraphDiTResidualRLPolicy,
-    GraphDiTResidualRLCfg,
-    GraphDiTBackboneAdapter,
+from .graph_unet_residual_rl_policy import (
+    GraphUnetResidualRLPolicy,
+    GraphUnetResidualRLCfg,
+    GraphUnetBackboneAdapter,
     compute_gae,
 )
 
@@ -20,8 +20,8 @@ __all__ = [
     "GraphDiTPolicy",
     "GraphDiTPolicyCfg",
     "GraphUnetPolicy",
-    "GraphDiTResidualRLPolicy",
-    "GraphDiTResidualRLCfg",
-    "GraphDiTBackboneAdapter",
+    "GraphUnetResidualRLPolicy",
+    "GraphUnetResidualRLCfg",
+    "GraphUnetBackboneAdapter",
     "compute_gae",
 ]

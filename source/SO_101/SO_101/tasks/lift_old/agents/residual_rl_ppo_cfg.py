@@ -7,10 +7,10 @@
 
 DEPRECATED: This file is kept for backward compatibility but the old
 ResidualRLPolicy and ResidualActorCritic have been replaced by
-GraphDiTResidualRLPolicy (independent training framework).
+GraphUnetResidualRLPolicy (independent training framework).
 
 This configuration is no longer functional and should not be used.
-Please use the new GraphDiTResidualRLPolicy instead.
+Please use the new GraphUnetResidualRLPolicy instead.
 """
 
 import os
@@ -39,8 +39,8 @@ def _create_residual_rl_cfg():
     """DEPRECATED: This function is no longer functional."""
     raise NotImplementedError(
         "ResidualRLPolicyCfg has been removed. "
-        "Please use GraphDiTResidualRLPolicy instead. "
-        "See: SO_101.policies.graph_dit_residual_rl_policy"
+        "Please use GraphUnetResidualRLPolicy instead. "
+        "See: SO_101.policies.graph_unet_residual_rl_policy"
     )
 
 
@@ -64,8 +64,8 @@ class LiftResidualRLRunnerCfg(RslRlOnPolicyRunnerCfg):
         raise NotImplementedError(
             "LiftResidualRLRunnerCfg is deprecated. "
             "The old ResidualRLPolicy and ResidualActorCritic have been removed. "
-            "Please use GraphDiTResidualRLPolicy instead. "
-            "See: SO_101.policies.graph_dit_residual_rl_policy"
+            "Please use GraphUnetResidualRLPolicy instead. "
+            "See: SO_101.policies.graph_unet_residual_rl_policy"
         )
 
     # PPO algorithm configuration (tuned for residual learning)

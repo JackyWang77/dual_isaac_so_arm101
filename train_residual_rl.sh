@@ -1,22 +1,16 @@
 #!/bin/bash
 # ============================================================
-# Train GR-DiT: Graph Residual Diffusion Transformer
+# Train Residual RL (Graph-Unet only)
 # ============================================================
 #
-# This script trains a GR-DiT policy using our method:
-#   - GraphDiT backbone (frozen): base action + layer-wise graph latents z¹...zᴷ
-#   - GateNet (trainable): softmax aggregation → z_bar
+# Residual RL is Unet-only:
+#   - Graph-Unet backbone (frozen): base action + single z
 #   - Z Adapter (trainable): frozen z → RL-friendly z
-#   - Residual Actor (trainable): delta_a ~ π(δa | obs, a_base, z_bar)
-#   - Deep Value Critic (trainable): V^k(z^k) for deep supervision
-#
-# Key innovation:
-#   - High-frequency z: extract_z_fast() every step (real-time scene understanding)
-#   - Low-frequency base action: DiT trajectory every exec_horizon steps
-#   - Advantage-weighted regression (NOT PPO)
+#   - Residual Actor (trainable): δa ~ π(δa | obs, a_base, z_bar)
+#   - Value Critic (trainable): bar head only
 #
 # Usage:
-#   ./train_gr_dit.sh <pretrained_dit_checkpoint> [options]
+#   ./train_residual_rl.sh <pretrained_unet_checkpoint> [options]
 #
 # ============================================================
 
@@ -42,36 +36,17 @@ TASK="${TASK:-SO-ARM101-Lift-Cube-v0}"
 # ============================================================
 if [ -z "$PRETRAINED_CHECKPOINT" ]; then
     echo "╔════════════════════════════════════════════════════════════════╗"
-    echo "║                    GR-DiT Training Script                      ║"
+    echo "║              Residual RL Training (Graph-Unet only)           ║"
     echo "╚════════════════════════════════════════════════════════════════╝"
     echo ""
-    echo "❌ Error: Missing required argument: pretrained_dit_checkpoint"
+    echo "❌ Error: Missing required argument: pretrained_unet_checkpoint"
     echo ""
     echo "Usage:"
-    echo "  $0 <pretrained_dit_checkpoint> [num_envs] [max_iter] [steps_per_env] [mini_batch] [epochs] [seed] [headless]"
-    echo ""
-    echo "Arguments:"
-    echo "  pretrained_dit_checkpoint  Path to pre-trained GraphDiT checkpoint (required)"
-    echo "  num_envs                   Number of parallel environments (default: 64)"
-    echo "  max_iterations             Maximum training iterations (default: 500)"
-    echo "  steps_per_env              Rollout steps per env per iteration (default: 24)"
-    echo "  mini_batch_size            Mini-batch size for updates (default: 64)"
-    echo "  num_epochs                 Epochs per iteration (default: 5)"
-    echo "  seed                       Random seed (default: 42)"
-    echo "  headless                   Enable headless mode: true/false (default: false, enables visualization)"
-    echo ""
-    echo "Environment Variables:"
-    echo "  TASK                       Task name (default: SO-ARM101-Lift-Cube-v0)"
+    echo "  $0 <pretrained_unet_checkpoint> [num_envs] [max_iter] [steps_per_env] [mini_batch] [epochs] [seed] [headless]"
     echo ""
     echo "Examples:"
-    echo "  # Basic usage"
-    echo "  $0 ./logs/graph_dit/best_model.pt"
-    echo ""
-    echo "  # Custom settings"
-    echo "  $0 ./logs/graph_dit/best_model.pt 128 1000 32 128 8 123"
-    echo ""
-    echo "  # Different task"
-    echo "  TASK=SO-ARM101-Pick-Place-v0 $0 ./logs/graph_dit/best_model.pt"
+    echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt"
+    echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 64 500 130 64 5 42 false"
     echo ""
     exit 1
 fi
@@ -99,24 +74,17 @@ fi
 # ============================================================
 echo ""
 echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║              GR-DiT: Graph Residual DiT Training               ║"
+echo "║              Residual RL (Graph-Unet only)                     ║"
 echo "╠════════════════════════════════════════════════════════════════╣"
-echo "║ Architecture:                                                  ║"
-echo "║   GraphDiT (frozen) → base action + z_layers [z¹...zᴷ]        ║"
+echo "║   Graph-Unet (frozen) → base action + single z                 ║"
 echo "║   Z Adapter (trainable) → RL-friendly z                        ║"
-echo "║   GateNet (trainable) → softmax aggregation → z_bar            ║"
 echo "║   Residual Actor (trainable) → δa ~ π(δa | obs, a_base, z_bar) ║"
-echo "║   Deep Value Critic (trainable) → V^k(z^k) supervision         ║"
-echo "╠════════════════════════════════════════════════════════════════╣"
-echo "║ Key Innovation:                                                ║"
-echo "║   • High-freq z: extract_z_fast() every step                   ║"
-echo "║   • Low-freq base: DiT trajectory every exec_horizon steps     ║"
-echo "║   • Loss: Advantage-weighted regression (NOT PPO)              ║"
+echo "║   Value Critic (trainable) → bar head only                     ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
 echo "Configuration:"
 echo "  Task:                 $TASK"
-echo "  Pretrained DiT:       $PRETRAINED_CHECKPOINT"
+echo "  Pretrained Graph-Unet: $PRETRAINED_CHECKPOINT"
 echo "  Num envs:             $NUM_ENVS"
 echo "  Max iterations:       $MAX_ITERATIONS"
 echo "  Steps per env:        $STEPS_PER_ENV"
@@ -153,12 +121,12 @@ if [ -n "$GRIPPER_MODEL" ] && [ -f "$GRIPPER_MODEL" ]; then
     echo "  Gripper model:      $GRIPPER_MODEL"
     GRIPPER_MODEL_ARG="--gripper-model $GRIPPER_MODEL"
 else
-    echo "  Gripper model:      Not provided (using Graph-DiT for gripper)"
+    echo "  Gripper model:      Not provided (using Graph-Unet for gripper)"
     GRIPPER_MODEL_ARG=""
 fi
 
 # Use isaaclab.sh to properly initialize Isaac Sim
-python scripts/graph_dit_rl/train_graph_dit_rl.py \
+python scripts/graph_dit_rl/train_graph_rl.py \
     --task "$TASK" \
     --pretrained_checkpoint "$PRETRAINED_CHECKPOINT" \
     $GRIPPER_MODEL_ARG \
@@ -168,7 +136,7 @@ python scripts/graph_dit_rl/train_graph_dit_rl.py \
     --mini_batch_size "$MINI_BATCH_SIZE" \
     --num_epochs "$NUM_EPOCHS" \
     --seed "$SEED" \
-    --log_dir "./logs/gr_dit" \
+    --log_dir "./logs/graph_unet_rl" \
     --save_interval 50 \
     $HEADLESS_FLAG
 
@@ -176,5 +144,5 @@ echo ""
 echo "========================================"
 echo "✅ Training completed!"
 echo ""
-echo "Logs saved to: ./logs/gr_dit/$TASK/"
+echo "Logs saved to: ./logs/graph_unet_rl/$TASK/"
 echo "========================================"

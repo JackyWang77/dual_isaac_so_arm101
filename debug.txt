@@ -1,6 +1,25 @@
-(env_isaaclab) jacky_wang@jacky-wang-Legion-R9000P:/mnt/ssd/dual_isaac_so_arm101$ ./run_play.sh 
-[INFO] Using python from: /home/jacky_wang/miniconda3/envs/env_isaaclab/bin/python        
-  File "/mnt/ssd/dual_isaac_so_arm101/play_graph_dit_gripper.sh", line 24
-    --task)
-          ^
-SyntaxError: closing parenthesis ')' does not match opening parenthesis '[' on line 22
+[5] Test forward pass:
+    z_layers shape: torch.Size([2, 2, 64]) ✅
+    Forward pass test: OK
+============================================================
+
+
+[Trainer] Starting training for 500 iterations...
+Traceback (most recent call last):
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/train_graph_rl.py", line 1352, in <module>
+    main()
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/train_graph_rl.py", line 1342, in main
+    trainer.train(
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/train_graph_rl.py", line 701, in train
+    rollout_stats = self.collect_rollout()
+                    ^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/train_graph_rl.py", line 402, in collect_rollout
+    action, info = self.policy.act(
+                   ^^^^^^^^^^^^^^^^
+  File "/mnt/ssd/isaac-sim/exts/omni.isaac.ml_archive/pip_prebundle/torch/utils/_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/ssd/dual_isaac_so_arm101/source/SO_101/SO_101/policies/graph_unet_residual_rl_policy.py", line 1135, in act
+    delta = delta_norm * self.action_std  # Only scale, no shift (delta is residual)
+            ~~~~~~~~~~~^~~~~~~~~~~~~~~~~
+RuntimeError: The size of tensor a (5) must match the size of tensor b (6) at non-singleton dimension 1
