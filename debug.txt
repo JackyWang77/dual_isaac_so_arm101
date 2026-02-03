@@ -1,25 +1,27 @@
-[5] Test forward pass:
-    z_layers shape: torch.Size([2, 2, 64]) ✅
-    Forward pass test: OK
-============================================================
+2026-02-03T15:59:28Z [875ms] [Warning] [carb] Acquiring non optional plugin interface which is not listed as dependency: [omni::physx::IPhysxBenchmarks v1.0] (plugin: <default plugin>), by client: omni.physics.physx.plugin. Add it to CARB_PLUGIN_IMPL_DEPS() macro of a client.
+2026-02-03T15:59:28Z [883ms] [Warning] [omni.isaac.dynamic_control] omni.isaac.dynamic_control is deprecated as of Isaac Sim 4.5. No action is needed from end-users.
 
-
-[Trainer] Starting training for 500 iterations...
-Traceback (most recent call last):
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/train_graph_rl.py", line 1352, in <module>
-    main()
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/train_graph_rl.py", line 1342, in main
-    trainer.train(
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/train_graph_rl.py", line 701, in train
-    rollout_stats = self.collect_rollout()
-                    ^^^^^^^^^^^^^^^^^^^^^^
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/train_graph_rl.py", line 402, in collect_rollout
-    action, info = self.policy.act(
-                   ^^^^^^^^^^^^^^^^
-  File "/mnt/ssd/isaac-sim/exts/omni.isaac.ml_archive/pip_prebundle/torch/utils/_contextlib.py", line 116, in decorate_context
-    return func(*args, **kwargs)
-           ^^^^^^^^^^^^^^^^^^^^^
-  File "/mnt/ssd/dual_isaac_so_arm101/source/SO_101/SO_101/policies/graph_unet_residual_rl_policy.py", line 1135, in act
-    delta = delta_norm * self.action_std  # Only scale, no shift (delta is residual)
-            ~~~~~~~~~~~^~~~~~~~~~~~~~~~~
-RuntimeError: The size of tensor a (5) must match the size of tensor b (6) at non-singleton dimension 1
+|---------------------------------------------------------------------------------------------|
+| Driver Version: 580.95.05     | Graphics API: Vulkan
+|=============================================================================================|
+| GPU | Name                             | Active | LDA | GPU Memory | Vendor-ID | LUID       |
+|     |                                  |        |     |            | Device-ID | UUID       |
+|     |                                  |        |     |            | Bus-ID    |            |
+|---------------------------------------------------------------------------------------------|
+| 0   | NVIDIA GeForce RTX 4060 Laptop.. | Yes: 0 |     | 8188    MB | 10de      | 0          |
+|     |                                  |        |     |            | 28e0      | af5daba2.. |
+|     |                                  |        |     |            | 1         |            |
+|=============================================================================================|
+| OS: 22.04.5 LTS (Jammy Jellyfish) ubuntu, Version: 22.04.5, Kernel: 6.8.0-90-generic
+| XServer Vendor: The X.Org Foundation, XServer Version: 12101004 (1.21.1.4)
+| Processor: AMD Ryzen 9 7945HX with Radeon Graphics
+| Cores: 16 | Logical Cores: 32
+|---------------------------------------------------------------------------------------------|
+| Total Memory (MB): 47847 | Free Memory: 42985
+| Total Page/Swap (MB): 2047 | Free Page/Swap: 2047
+|---------------------------------------------------------------------------------------------|
+2026-02-03T15:59:31Z [3,842ms] [Warning] [gpu.foundation.plugin] CPU performance profile is set to powersave. This profile sets the CPU to the lowest frequency reducing performance.
+2026-02-03T15:59:31Z [3,852ms] [Warning] [gpu.foundation.plugin] IOMMU is enabled.
+usage: play_graph_rl.py [-h] --task TASK --checkpoint CHECKPOINT --pretrained_checkpoint PRETRAINED_CHECKPOINT [--num_envs NUM_ENVS]
+                        [--num_episodes NUM_EPISODES] [--device DEVICE] [--deterministic]
+play_graph_rl.py: error: unrecognized arguments: --headless

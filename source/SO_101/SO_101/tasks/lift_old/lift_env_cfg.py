@@ -173,7 +173,7 @@ class RewardsCfg:
     reaching_object = RewTerm(
         func=mdp.object_ee_distance,
         params={"std": 0.05},
-        weight=1.0,
+        weight=5.0,
     )
 
     # ============================================================
@@ -201,15 +201,15 @@ class TerminationsCfg:
         params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("object")},
     )
 
-    # Success condition: object lifted to target height
-    # This is important for mimic recording to know when a demo is complete
-    # Named "success" so that record_demos.py can automatically detect task completion
-    # Check if object is lifted to at least 0.08m above initial position (0.015m)
+    # Success condition: episode 以「成功」结束、reset 的判定高度
+    # 公式: object_height >= initial_height + minimal_height → 成功
+    # 当前: 0.015 + 0.1 = 0.115m（11.5cm）→ 物体达到 0.115m 就 success 并 reset
+    # 注: reward 里 lifting_object 用 minimal_height=0.04（0.055m）只是给奖励，不决定 success
     success = DoneTerm(
         func=mdp.object_lifted_termination,
         params={
-            "minimal_height": 0.1,  # 8cm above initial position (higher threshold)
-            "initial_height": 0.015,  # Initial height of cube
+            "minimal_height": 0.1,  # 相对 initial 再高 10cm → 成功高度 0.115m
+            "initial_height": 0.015,  # 立方体初始高度 (m)
             "object_cfg": SceneEntityCfg("object"),
         },
     )

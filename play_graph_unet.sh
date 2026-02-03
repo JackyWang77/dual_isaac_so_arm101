@@ -75,8 +75,14 @@ else
     exit 1
 fi
 
+# num_envs=1 + many episodes: verify success rate one-by-one (e.g. 50–200 runs)
+NUM_ENVS="${NUM_ENVS:-50}"
+NUM_EPISODES="${NUM_EPISODES:-1000}"
+
+# 不传 --headless 则默认有窗口；传 --headless false 会变成 True（bool("false")=True）
 python scripts/graph_unet/play.py \
     --task "$TASK_NAME" \
     --checkpoint "$LATEST_CHECKPOINT" \
-    --num_envs 2 \
-    --num_episodes 20
+    --num_envs "$NUM_ENVS" \
+    --num_episodes "$NUM_EPISODES" \
+    --headless true

@@ -26,6 +26,31 @@ import torch.nn.functional as F
 from isaaclab.utils import configclass
 
 
+def _quat_to_axis(quat: torch.Tensor, axis: str = "z") -> torch.Tensor:
+    """从四元数提取某轴的方向向量。Isaac Lab 四元数格式 (w, x, y, z)。"""
+    quat = quat / (torch.norm(quat, dim=-1, keepdim=True) + 1e-8)
+    w, x, y, z = quat[..., 0], quat[..., 1], quat[..., 2], quat[..., 3]
+    if axis == "z":
+        vec_x = 2 * (x * z - w * y)
+        vec_y = 2 * (y * z + w * x)
+        vec_z = 1 - 2 * (x * x + y * y)
+    elif axis == "x":
+        vec_x = 1 - 2 * (y * y + z * z)
+        vec_y = 2 * (x * y + w * z)
+        vec_z = 2 * (x * z - w * y)
+    elif axis == "y":
+        vec_x = 2 * (x * y - w * z)
+        vec_y = 1 - 2 * (x * x + z * z)
+        vec_z = 2 * (y * z + w * x)
+    elif axis == "-z":
+        vec_x = -2 * (x * z - w * y)
+        vec_y = -2 * (y * z + w * x)
+        vec_z = -(1 - 2 * (x * x + y * y))
+    else:
+        raise ValueError(f"Unknown axis: {axis}")
+    return torch.stack([vec_x, vec_y, vec_z], dim=-1)
+
+
 class ActionHistoryBuffer:
     """Buffer for maintaining action history across time steps.
     
@@ -585,6 +610,9 @@ class GraphDiTPolicyCfg:
     
     edge_dim: int = 2
     """Edge feature dimension: distance(1) + orientation_similarity(1) = 2"""
+
+    edge_feature_version: str = "v2"
+    """Edge feature version: 'v1' (quat similarity) or 'v2' (best face alignment, robust to object tilt)."""
     
     joint_dim: int | None = None
     """Joint states dimension (input only). Typically 6 (5 arm + 1 gripper). Policy uses this as context; it does not predict gripper. If None, joint states are not used."""
@@ -1602,37 +1630,46 @@ class GraphDiTPolicy(nn.Module):
     
     def _compute_edge_features(self, ee_node: torch.Tensor, object_node: torch.Tensor):
         """
-        Compute edge features: distance + orientation similarity.
-        
-        Args:
-            ee_node: [batch, 7] - EE position(3) + orientation(4)
-            object_node: [batch, 7] - Object position(3) + orientation(4)
-        Returns:
-            edge_features: [batch, 2] - [distance, orientation_similarity]
+        Compute edge features: distance + alignment.
+        V1: orientation_similarity (quat dot) - sensitive to object tilt.
+        V2: best face alignment - robust when object is knocked over.
         """
-        # Extract positions and orientations
-        ee_pos = ee_node[:, :3]  # [batch, 3]
-        ee_quat = ee_node[:, 3:7]  # [batch, 4]
-        obj_pos = object_node[:, :3]  # [batch, 3]
-        obj_quat = object_node[:, 3:7]  # [batch, 4]
-        
-        # CRITICAL FIX: Normalize quaternions to avoid numerical issues
-        # Add eps to prevent NaN when quaternion is near zero vector
-        ee_quat = F.normalize(ee_quat, p=2, dim=-1, eps=1e-6)  # [batch, 4]
-        obj_quat = F.normalize(obj_quat, p=2, dim=-1, eps=1e-6)  # [batch, 4]
-        
-        # 1. Distance (L2 norm)
-        distance = torch.norm(ee_pos - obj_pos, dim=-1, keepdim=True)  # [batch, 1]
-        
-        # 2. Orientation similarity (quaternion dot product)
-        # Quaternion dot product: q1 · q2 = w1*w2 + x1*x2 + y1*y2 + z1*z2
-        quat_dot = torch.sum(ee_quat * obj_quat, dim=-1, keepdim=True)  # [batch, 1]
-        # Take absolute value (q and -q represent same rotation)
-        orientation_similarity = torch.abs(quat_dot)  # [batch, 1], range [0, 1]
-        
-        edge_features = torch.cat(
-            [distance, orientation_similarity], dim=-1
-        )  # [batch, 2]
+        version = getattr(self.cfg, "edge_feature_version", "v2")
+
+        # Support [batch, 7] or [batch, T, 7]
+        has_time_dim = ee_node.dim() == 3
+        if has_time_dim:
+            B, T, _ = ee_node.shape
+            ee_node = ee_node.reshape(B * T, -1)
+            object_node = object_node.reshape(B * T, -1)
+
+        ee_pos = ee_node[:, :3]
+        ee_quat = ee_node[:, 3:7]
+        obj_pos = object_node[:, :3]
+        obj_quat = object_node[:, 3:7]
+
+        ee_quat = F.normalize(ee_quat, p=2, dim=-1, eps=1e-6)
+        obj_quat = F.normalize(obj_quat, p=2, dim=-1, eps=1e-6)
+
+        distance = torch.norm(ee_pos - obj_pos, dim=-1, keepdim=True)
+
+        if version == "v1":
+            quat_dot = torch.sum(ee_quat * obj_quat, dim=-1, keepdim=True)
+            alignment = torch.abs(quat_dot)
+        else:
+            # V2: best face alignment - robust to object tilt
+            ee_grasp_dir = _quat_to_axis(ee_quat, "-z")
+            obj_x = _quat_to_axis(obj_quat, "x")
+            obj_y = _quat_to_axis(obj_quat, "y")
+            obj_z = _quat_to_axis(obj_quat, "z")
+            align_x = (ee_grasp_dir * obj_x).sum(dim=-1).abs()
+            align_y = (ee_grasp_dir * obj_y).sum(dim=-1).abs()
+            align_z = (ee_grasp_dir * obj_z).sum(dim=-1).abs()
+            alignment = torch.stack([align_x, align_y, align_z], dim=-1).max(dim=-1)[0].unsqueeze(-1)
+
+        edge_features = torch.cat([distance, alignment], dim=-1)
+        if has_time_dim:
+            edge_features = edge_features.reshape(B, T, -1)
         return edge_features
     
     def _get_timestep_embed(self, timesteps: torch.Tensor):

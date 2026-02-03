@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-Train GraphDiT + Residual RL Policy (OUR METHOD)
+Train GraphDiT + Residual RL Policy (OUR METHOD) - FIXED VERSION
 
-不使用 RSL-RL，自己实现训练循环：
-- Rollout 收集
-- GAE 计算
-- Advantage-weighted regression 更新
+修复:
+1. 添加 Success Rate 统计
+2. 添加 Explained Variance 统计
+3. 移除过多 DEBUG 打印
+4. 修复除零保护
+5. 改进日志输出
 
 Usage:
     python scripts/graph_dit_rl/train_graph_rl.py \
@@ -165,14 +167,15 @@ class RolloutBuffer:
         total_samples = T * N
 
         # Flatten
-        obs_flat = self.obs.reshape(total_samples, -1)  # Raw obs
-        obs_norm_flat = self.obs_norm.reshape(total_samples, -1)  # Normalized obs
+        obs_flat = self.obs.reshape(total_samples, -1)
+        obs_norm_flat = self.obs_norm.reshape(total_samples, -1)
         actions_flat = self.actions.reshape(total_samples, -1)
         returns_flat = self.returns.reshape(total_samples)
         adv_flat = self.advantages.reshape(total_samples)
         a_base_flat = self.a_base.reshape(total_samples, -1)
         z_layers_flat = self.z_layers.reshape(total_samples, self.num_layers, -1)
         z_bar_flat = self.z_bar.reshape(total_samples, -1)
+        values_flat = self.values.reshape(total_samples)
 
         # Normalize advantages
         adv_flat = (adv_flat - adv_flat.mean()) / (adv_flat.std() + 1e-8)
@@ -185,14 +188,15 @@ class RolloutBuffer:
                 idx = indices[start:end]
 
                 yield {
-                    "obs": obs_flat[idx],  # Raw obs (for recomputing z_layers)
-                    "obs_norm": obs_norm_flat[idx],  # Normalized obs (for Actor/Critic)
+                    "obs": obs_flat[idx],
+                    "obs_norm": obs_norm_flat[idx],
                     "action": actions_flat[idx],
                     "returns": returns_flat[idx],
                     "adv": adv_flat[idx],
                     "a_base": a_base_flat[idx],
                     "z_layers": z_layers_flat[idx],
                     "z_bar": z_bar_flat[idx],
+                    "values": values_flat[idx],
                 }
 
     def reset(self):
@@ -263,16 +267,6 @@ class GraphDiTRLTrainer:
             if hasattr(graph_dit, 'node_to_z'):
                 node_to_z_params = [p for p in graph_dit.node_to_z.parameters() if p.requires_grad]
                 trainable_params.extend(node_to_z_params)
-                if len(node_to_z_params) > 0:
-                    print(f"[Trainer] Including {len(node_to_z_params)} node_to_z parameters in optimizer")
-        
-        # Verify all trainable components
-        policy_param_names = [name for name, param in policy.named_parameters() if param.requires_grad]
-        print(f"[Trainer] Policy trainable components: {len([n for n in policy_param_names if 'z_adapter' in n])} z_adapter, "
-              f"{len([n for n in policy_param_names if 'gate' in n])} gate, "
-              f"{len([n for n in policy_param_names if 'actor' in n])} actor, "
-              f"{len([n for n in policy_param_names if 'critic' in n])} critic")
-        print(f"[Trainer] Total trainable params: {len(trainable_params)} (policy: {len(trainable_params) - len(node_to_z_params)}, node_to_z: {len(node_to_z_params)})")
         
         self.optimizer = optim.AdamW(trainable_params, lr=lr)
 
@@ -280,14 +274,11 @@ class GraphDiTRLTrainer:
         os.makedirs(log_dir, exist_ok=True)
         self.writer = SummaryWriter(log_dir)
 
-        # Debug log file
-        self.debug_log_path = os.path.join(log_dir, "debug_log.jsonl")
-        self.debug_interval = 10  # Debug every N iterations
-
         # Stats
         self.total_steps = 0
         self.episode_rewards = []
         self.episode_lengths = []
+        self.episode_successes = []
 
         # Initialize env buffers
         policy.init_env_buffers(self.num_envs)
@@ -318,11 +309,21 @@ class GraphDiTRLTrainer:
         self.action_mean = None
         self.action_std = None
 
-        print(f"[Trainer] num_envs: {self.num_envs}")
-        print(f"[Trainer] steps_per_env: {steps_per_env}")
-        print(f"[Trainer] batch_size: {self.num_envs * steps_per_env}")
+        print(f"[Trainer] num_envs: {self.num_envs}, steps_per_env: {steps_per_env}")
         print(f"[Trainer] trainable params: {sum(p.numel() for p in trainable_params):,}")
-    
+
+        # 成功率：与 play / play_rl 一致，仅用 truncated + 高度（不用 env_info log，标量不可用）
+        obs_structure = getattr(cfg, "obs_structure", None)
+        if obs_structure is not None and "object_position" in obs_structure:
+            obj_pos_start, _ = obs_structure["object_position"]
+            self.OBJ_HEIGHT_IDX = obj_pos_start + 2  # Z
+            print(f"[Trainer] OBJ_HEIGHT_IDX = {self.OBJ_HEIGHT_IDX} (from obs_structure)")
+        else:
+            self.OBJ_HEIGHT_IDX = 14
+            print(f"[Trainer] OBJ_HEIGHT_IDX = {self.OBJ_HEIGHT_IDX} (default)")
+        self.SUCCESS_HEIGHT = 0.10  # 与 play / play_rl 一致
+        print(f"[Trainer] Success: timeout=失败, 否则 height>={self.SUCCESS_HEIGHT}m=成功 (与 play 一致)")
+
     def set_normalization_stats(
         self,
         obs_mean=None, obs_std=None,
@@ -344,7 +345,7 @@ class GraphDiTRLTrainer:
         self.action_std = action_std
 
     def collect_rollout(self) -> Dict[str, float]:
-        """收集一个 rollout"""
+        """收集 rollout (FIXED: 添加 success rate，除零保护，移除 DEBUG 打印)"""
         self.policy.eval()
         self.buffer.reset()
 
@@ -353,54 +354,42 @@ class GraphDiTRLTrainer:
 
         ep_rewards = torch.zeros(self.num_envs, device=self.device)
         ep_lengths = torch.zeros(self.num_envs, device=self.device)
-        
-        # Track individual reward terms
-        reward_terms_dict = {}  # {reward_name: list of [N] tensors}
+        rollout_successes = []
+        delta_norms_all = []
 
         for step in range(self.steps_per_env):
-            # CRITICAL: Normalize observations (same as Graph-DiT play.py)
+            # FIXED: 1e-8 除零保护
             if self.obs_mean is not None and self.obs_std is not None:
-                obs_norm = (obs - self.obs_mean) / self.obs_std
+                obs_norm = (obs - self.obs_mean) / (self.obs_std + 1e-8)
             else:
                 obs_norm = obs
-            
-            # Extract current node features and joint states from RAW obs (before normalization for history)
+
             ee_node_current, object_node_current = self.policy._extract_nodes_from_obs(obs)
-            
-            # Extract joint states (joint position only, from first 6 dims of obs)
-            # NOTE: GraphDiT expects 6 dimensions (was trained with 6), regardless of residual RL config
-            # The residual RL config's joint_dim=5 is only for EMA smoothing, not for joint state extraction
-            joint_states_current = obs[:, :6]  # [B, 6] - always 6 for GraphDiT compatibility
-            
-            # CRITICAL: Normalize node and joint histories (same as Graph-DiT play.py)
-            # History tensors are already in batch format [num_envs, history_len, dim]
-            action_history = self.action_history  # [B, H, action_dim] - already normalized
-            
-            # Normalize node histories
-            ee_node_history = self.ee_node_history.clone()  # [B, H, 7]
-            object_node_history = self.object_node_history.clone()  # [B, H, 7]
+            joint_states_current = obs[:, :6]
+
+            action_history = self.action_history
+            ee_node_history = self.ee_node_history.clone()
+            object_node_history = self.object_node_history.clone()
             if self.ee_node_mean is not None and self.ee_node_std is not None:
-                ee_node_history = (ee_node_history - self.ee_node_mean) / self.ee_node_std
+                ee_node_history = (ee_node_history - self.ee_node_mean) / (self.ee_node_std + 1e-8)
             if self.object_node_mean is not None and self.object_node_std is not None:
-                object_node_history = (object_node_history - self.object_node_mean) / self.object_node_std
-            
-            # Normalize joint history
-            joint_states_history = self.joint_state_history.clone()  # [B, H, 6]
+                object_node_history = (object_node_history - self.object_node_mean) / (self.object_node_std + 1e-8)
+
+            joint_states_history = self.joint_state_history.clone()
             if self.joint_mean is not None and self.joint_std is not None:
-                joint_states_history = (joint_states_history - self.joint_mean) / self.joint_std
-            
+                joint_states_history = (joint_states_history - self.joint_mean) / (self.joint_std + 1e-8)
+
             with torch.no_grad():
                 action, info = self.policy.act(
                     obs_raw=obs,
-                    obs_norm=obs_norm,  # Use normalized obs
+                    obs_norm=obs_norm,
                     action_history=action_history,
                     ee_node_history=ee_node_history,
                     object_node_history=object_node_history,
                     joint_states_history=joint_states_history,
                     deterministic=False
                 )
-                
-                # Clip action to action space bounds (critical for stability!)
+
                 if hasattr(self.env, 'action_space'):
                     if hasattr(self.env.action_space, 'low') and hasattr(self.env.action_space, 'high'):
                         action = torch.clamp(
@@ -408,78 +397,12 @@ class GraphDiTRLTrainer:
                             torch.tensor(self.env.action_space.low, device=action.device, dtype=action.dtype),
                             torch.tensor(self.env.action_space.high, device=action.device, dtype=action.dtype)
                         )
-                
-                # DEBUG: Print all joints and gripper base action, residual, and final action
+
+                delta = info.get("delta", None)
+                if delta is not None:
+                    delta_norms_all.append(torch.norm(delta[:, :5], dim=-1).mean().item())
+
                 action_dim = action.shape[-1]
-                if action_dim >= 6:
-                    a_base = info.get("a_base", None)  # [B, action_dim] - denormalized base action
-                    delta = info.get("delta", None)  # [B, action_dim] - denormalized delta
-                    delta_norm = info.get("delta_norm", None)  # [B, action_dim] - normalized delta (Actor output)
-                    alpha_val = info.get("alpha", None)
-                    if alpha_val is not None:
-                        if isinstance(alpha_val, torch.Tensor):
-                            alpha = alpha_val.item()
-                        else:
-                            alpha = float(alpha_val)
-                    else:
-                        alpha = self.policy.alpha.item() if hasattr(self.policy, 'alpha') else 0.1
-                    
-                    if a_base is not None and delta is not None:
-                        # Print for first env only, every 10 steps
-                        if step % 10 == 0:
-                            print(f"\n[Step {step:3d}] Action Debug (env 0):")
-                            print(f"  alpha: {alpha:.4f}")
-                            print(f"\n  Joints (0-4):")
-                            for i in range(min(5, action_dim)):
-                                a_base_i = a_base[0, i].item()
-                                delta_i = delta[0, i].item()
-                                final_i = action[0, i].item()
-                                print(f"    Joint {i}: base={a_base_i:7.4f}, delta={delta_i:7.4f}, final={final_i:7.4f} (base + {alpha:.2f}*delta = {a_base_i + alpha * delta_i:.4f})")
-                            
-                            # Gripper (index 5)
-                            if action_dim >= 6:
-                                a_base_gripper = a_base[0, 5].item()
-                                delta_gripper = delta[0, 5].item()
-                                gripper_continuous = action[0, 5].item()
-                                gripper_binary = 1.0 if gripper_continuous > 0 else -1.0
-                                print(f"\n  Gripper (5):")
-                                print(f"    base: {a_base_gripper:7.4f}")
-                                print(f"    delta: {delta_gripper:7.4f}")
-                                print(f"    continuous (base + {alpha:.2f}*delta): {gripper_continuous:7.4f}")
-                                print(f"    threshold: -0.2")
-                                print(f"    binary (final): {gripper_binary:7.4f} ({'open' if gripper_binary > 0 else 'close'})")
-                            
-                            # Statistics across all envs
-                            print(f"\n  Delta Statistics (all envs):")
-                            delta_mean = delta.mean(dim=0)  # [action_dim]
-                            delta_std = delta.std(dim=0)  # [action_dim]
-                            delta_min = delta.min(dim=0)[0]  # [action_dim]
-                            delta_max = delta.max(dim=0)[0]  # [action_dim]
-                            delta_positive_ratio = (delta > 0).float().mean(dim=0)  # [action_dim]
-                            
-                            print(f"    Joints (0-4):")
-                            for i in range(min(5, action_dim)):
-                                print(f"      Joint {i}: mean={delta_mean[i].item():7.4f}, std={delta_std[i].item():7.4f}, "
-                                      f"min={delta_min[i].item():7.4f}, max={delta_max[i].item():7.4f}, "
-                                      f"positive={delta_positive_ratio[i].item():.1%}")
-                            
-                            if action_dim >= 6:
-                                print(f"    Gripper (5): mean={delta_mean[5].item():7.4f}, std={delta_std[5].item():7.4f}, "
-                                      f"min={delta_min[5].item():7.4f}, max={delta_max[5].item():7.4f}, "
-                                      f"positive={delta_positive_ratio[5].item():.1%}")
-                            
-                            if delta_norm is not None:
-                                delta_norm_mean = delta_norm.mean(dim=0)  # [action_dim]
-                                delta_norm_std = delta_norm.std(dim=0)  # [action_dim]
-                                print(f"\n  Delta_norm Statistics (normalized, all envs):")
-                                print(f"    Joints (0-4):")
-                                for i in range(min(5, action_dim)):
-                                    print(f"      Joint {i}: mean={delta_norm_mean[i].item():7.4f}, std={delta_norm_std[i].item():7.4f}")
-                                if action_dim >= 6:
-                                    print(f"    Gripper (5): mean={delta_norm_mean[5].item():7.4f}, std={delta_norm_std[5].item():7.4f}")
-                
-                # Gripper for sim only: binarize denormalized gripper (< -0.2 -> -1, else -> 1).
-                # Buffer stores original denormalized action (no mapping), same idea as play.
                 action_for_sim = action.clone()
                 if action_dim >= 6:
                     gripper_continuous = action_for_sim[:, 5]
@@ -489,124 +412,82 @@ class GraphDiTRLTrainer:
                         torch.tensor(-1.0, device=action.device, dtype=action.dtype)
                     )
 
-            # Step env with binarized gripper; buffer gets original denormalized action below
             next_obs, reward, terminated, truncated, env_info = self.env.step(action_for_sim)
             done = terminated | truncated
 
-            # Process
             next_obs = self._process_obs(next_obs)
             reward = reward.to(self.device).float()
             done = done.to(self.device).float()
-            
-            # Extract individual reward terms from reward manager (if available)
-            if hasattr(self.env, 'rew_manager'):
-                rew_manager = self.env.rew_manager
-                # Try to get reward terms from the manager
-                # Isaac Lab stores computed rewards in rew_manager.reward_buf
-                if hasattr(rew_manager, 'reward_buf'):
-                    reward_buf = rew_manager.reward_buf
-                    for reward_name in ['reaching_object', 'lifting_object', 'grasp_behavior', 'object_grasped', 'task_complete', 'gripper_smooth']:
-                        if reward_name in reward_buf:
-                            reward_value = reward_buf[reward_name]
-                            if isinstance(reward_value, torch.Tensor):
-                                if reward_name not in reward_terms_dict:
-                                    # Initialize list for this reward term
-                                    reward_terms_dict[reward_name] = []
-                                # Store reward value for this timestep
-                                reward_terms_dict[reward_name].append(reward_value.clone().to(self.device))
+            truncated_tensor = truncated.to(self.device).float()
 
-            # Store (obs is raw, obs_norm is normalized; truncated for GAE bootstrap)
-            self.buffer.add(obs, obs_norm, action, reward, done, truncated, info)
+            self.buffer.add(obs, obs_norm, action, reward, done, truncated_tensor, info)
 
             # Track episode stats
             ep_rewards += reward
             ep_lengths += 1
 
-            # Update history buffers (optimized: use torch.roll for efficiency)
-            # ============================================================
-            # FIX: Store normalized final executed action (not a_base_norm)
-            # This matches play.py and Graph-DiT training where action_history
-            # contains the actual executed actions (normalized)
-            # ============================================================
             if self.action_mean is not None and self.action_std is not None:
-                # action is final executed (denormalized), normalize for history
                 action_for_history = (action - self.action_mean) / (self.action_std + 1e-8)
             else:
                 action_for_history = action
-            
-            # Roll all histories: shift left by 1, new data goes to last position
+
             self.action_history = torch.roll(self.action_history, -1, dims=1)
-            self.action_history[:, -1, :] = action_for_history  # [num_envs, action_dim] - normalized final action
-            
+            self.action_history[:, -1, :] = action_for_history
             self.ee_node_history = torch.roll(self.ee_node_history, -1, dims=1)
-            self.ee_node_history[:, -1, :] = ee_node_current  # [num_envs, 7]
-            
+            self.ee_node_history[:, -1, :] = ee_node_current
             self.object_node_history = torch.roll(self.object_node_history, -1, dims=1)
-            self.object_node_history[:, -1, :] = object_node_current  # [num_envs, 7]
-            
+            self.object_node_history[:, -1, :] = object_node_current
             self.joint_state_history = torch.roll(self.joint_state_history, -1, dims=1)
-            self.joint_state_history[:, -1, :] = joint_states_current  # [num_envs, joint_dim]
-            
-            # Handle resets
+            self.joint_state_history[:, -1, :] = joint_states_current
+
             done_envs = done.nonzero(as_tuple=False).squeeze(-1)
             if len(done_envs) > 0:
                 self.policy.reset_envs(done_envs)
-                # Reset history buffers for done environments (optimized: vectorized)
-                done_env_ids = done_envs.tolist()
-                for i in done_env_ids:
+                for i in done_envs.tolist():
                     self.episode_rewards.append(ep_rewards[i].item())
                     self.episode_lengths.append(ep_lengths[i].item())
-                
-                # Vectorized reset: zero out all done environments at once
+                    # 与 play / play_rl 一致：仅 truncated + 高度（obs = step 前状态）
+                    obj_height = obs[i, self.OBJ_HEIGHT_IDX].item()
+                    is_truncated = bool(truncated[i].item() if hasattr(truncated[i], "item") else truncated[i])
+                    if is_truncated:
+                        is_success = False
+                    else:
+                        is_success = obj_height >= self.SUCCESS_HEIGHT
+                    rollout_successes.append(float(is_success))
+                    self.episode_successes.append(float(is_success))
+
                 self.action_history[done_envs] = 0
                 self.ee_node_history[done_envs] = 0
                 self.object_node_history[done_envs] = 0
                 self.joint_state_history[done_envs] = 0
-                
                 ep_rewards[done_envs] = 0
                 ep_lengths[done_envs] = 0
 
             obs = next_obs
             self.total_steps += self.num_envs
 
-        # At the end of rollout, record any incomplete episodes (if they have accumulated reward)
-        # This helps track progress even when episodes don't complete within steps_per_env
-        incomplete_ep_rewards = ep_rewards[ep_rewards != 0]  # Non-zero accumulated rewards
-        incomplete_ep_lengths = ep_lengths[ep_lengths != 0]  # Non-zero lengths
-        if len(incomplete_ep_rewards) > 0:
-            # These are ongoing episodes, not completed ones, but still useful for tracking
-            for i in range(len(incomplete_ep_rewards)):
-                self.episode_rewards.append(incomplete_ep_rewards[i].item())
-                self.episode_lengths.append(incomplete_ep_lengths[i].item())
-
-        # Compute last value for GAE (history tensors are already in batch format)
-        # CRITICAL: Normalize obs and histories (same as Graph-DiT play.py)
+        # Compute last value for GAE
         if self.obs_mean is not None and self.obs_std is not None:
-            obs_norm = (obs - self.obs_mean) / self.obs_std
+            obs_norm = (obs - self.obs_mean) / (self.obs_std + 1e-8)
         else:
             obs_norm = obs
-        
-        action_history = self.action_history  # [B, H, action_dim] - already normalized
-        
-        # Normalize node histories
-        ee_node_history = self.ee_node_history.clone()  # [B, H, 7]
-        object_node_history = self.object_node_history.clone()  # [B, H, 7]
+
+        ee_node_history = self.ee_node_history.clone()
+        object_node_history = self.object_node_history.clone()
         if self.ee_node_mean is not None and self.ee_node_std is not None:
-            ee_node_history = (ee_node_history - self.ee_node_mean) / self.ee_node_std
+            ee_node_history = (ee_node_history - self.ee_node_mean) / (self.ee_node_std + 1e-8)
         if self.object_node_mean is not None and self.object_node_std is not None:
-            object_node_history = (object_node_history - self.object_node_mean) / self.object_node_std
-        
-        # Normalize joint history
-        joint_states_history = self.joint_state_history.clone()  # [B, H, 6]
+            object_node_history = (object_node_history - self.object_node_mean) / (self.object_node_std + 1e-8)
+
+        joint_states_history = self.joint_state_history.clone()
         if self.joint_mean is not None and self.joint_std is not None:
-            joint_states_history = (joint_states_history - self.joint_mean) / self.joint_std
-        
-        # Compute last value for GAE
+            joint_states_history = (joint_states_history - self.joint_mean) / (self.joint_std + 1e-8)
+
         with torch.no_grad():
             _, last_info = self.policy.act(
                 obs_raw=obs,
-                obs_norm=obs_norm,  # Use normalized obs
-                action_history=action_history,
+                obs_norm=obs_norm,
+                action_history=self.action_history,
                 ee_node_history=ee_node_history,
                 object_node_history=object_node_history,
                 joint_states_history=joint_states_history,
@@ -616,7 +497,6 @@ class GraphDiTRLTrainer:
 
         self.buffer.compute_returns(last_value, self.cfg.gamma, self.cfg.lam)
 
-        # Return stats
         stats = {}
         if len(self.episode_rewards) > 0:
             stats["ep_reward_mean"] = np.mean(self.episode_rewards[-100:])
@@ -624,44 +504,50 @@ class GraphDiTRLTrainer:
             stats["ep_reward_max"] = np.max(self.episode_rewards[-100:])
             stats["ep_reward_min"] = np.min(self.episode_rewards[-100:])
         else:
-            # No episodes completed in this rollout - this is a problem!
             stats["ep_reward_mean"] = 0.0
             stats["ep_length_mean"] = 0.0
-            stats["warning"] = "No episodes completed in this rollout!"
-        
-        # Track individual reward terms collected during rollout
-        # reward_terms_dict contains lists of tensors for each reward term
-        # Convert to stacked tensors and compute statistics
-        for reward_name, reward_list in reward_terms_dict.items():
-            if len(reward_list) > 0:
-                # Stack all timesteps: [T, N]
-                reward_tensor = torch.stack(reward_list, dim=0)
-                stats[f"reward_{reward_name}_mean"] = reward_tensor.mean().item()
-                stats[f"reward_{reward_name}_sum"] = reward_tensor.sum().item()
-                stats[f"reward_{reward_name}_max"] = reward_tensor.max().item()
-                stats[f"reward_{reward_name}_min"] = reward_tensor.min().item()
-        
+            stats["warning"] = "No episodes completed!"
+
+        if len(rollout_successes) > 0:
+            stats["success_rate"] = np.mean(rollout_successes)
+            stats["num_episodes"] = len(rollout_successes)
+        else:
+            stats["success_rate"] = 0.0
+            stats["num_episodes"] = 0
+
+        if len(self.episode_successes) > 0:
+            stats["success_rate_100"] = np.mean(self.episode_successes[-100:])
+        else:
+            stats["success_rate_100"] = 0.0
+
+        if len(delta_norms_all) > 0:
+            stats["delta_norm_mean"] = np.mean(delta_norms_all)
+            stats["delta_norm_max"] = np.max(delta_norms_all)
+        else:
+            stats["delta_norm_mean"] = 0.0
+            stats["delta_norm_max"] = 0.0
+
         return stats
 
     def update(self) -> Dict[str, float]:
-        """更新 policy"""
+        """更新 policy (FIXED: 添加 Explained Variance)"""
         self.policy.train()
 
         total_loss = 0
         total_actor_loss = 0
         total_critic_loss = 0
-        total_gate_entropy = 0
         total_loss_delta_reg = 0
         total_loss_critic_bar = 0
         total_entropy = 0
         num_updates = 0
+        all_returns = []
+        all_values = []
 
         for batch in self.buffer.get_batches(self.mini_batch_size, self.num_epochs):
             losses = self.policy.compute_loss(batch)
 
             self.optimizer.zero_grad()
             losses["loss_total"].backward()
-            # Clip gradients for all trainable parameters (including node_to_z)
             trainable_params = [p for p in self.policy.parameters() if p.requires_grad]
             if hasattr(self.policy, 'backbone') and hasattr(self.policy.backbone, 'backbone'):
                 graph_dit = self.policy.backbone.backbone
@@ -673,22 +559,29 @@ class GraphDiTRLTrainer:
             total_loss += losses["loss_total"].item()
             total_actor_loss += losses["loss_actor"].item()
             total_critic_loss += losses["loss_critic_layers"].item()
-            total_gate_entropy += losses["gate_entropy"].item()
             total_loss_delta_reg += losses["loss_delta_reg"].item()
             total_loss_critic_bar += losses["loss_critic_bar"].item()
             total_entropy += losses["entropy"].item()
             num_updates += 1
+            all_returns.append(batch["returns"])
+            all_values.append(batch["values"])
 
         n = num_updates
+        all_returns = torch.cat(all_returns)
+        all_values = torch.cat(all_values)
+        var_returns = torch.var(all_returns)
+        var_residual = torch.var(all_returns - all_values)
+        explained_variance = (1.0 - var_residual / (var_returns + 1e-8)).item()
+
         return {
             "loss_total": total_loss / n,
             "loss_actor": total_actor_loss / n,
             "loss_critic": total_critic_loss / n,
             "loss_critic_bar": total_loss_critic_bar / n,
-            "gate_entropy": total_gate_entropy / n,
             "loss_delta_reg": total_loss_delta_reg / n,
             "entropy": total_entropy / n,
             "alpha": self.policy.alpha.item(),
+            "explained_variance": explained_variance,
         }
 
     def train(self, max_iterations: int, save_interval: int = 50):
@@ -704,10 +597,6 @@ class GraphDiTRLTrainer:
 
             # Log
             self._log(iteration, rollout_stats, update_stats)
-
-            # Debug (every N iterations)
-            if iteration % self.debug_interval == 0:
-                self.debug_iteration(iteration)
 
             # Save
             if iteration % save_interval == 0:
@@ -728,8 +617,7 @@ class GraphDiTRLTrainer:
         return obs.to(self.device).float()
 
     def _log(self, iteration: int, rollout_stats: Dict, update_stats: Dict):
-        """记录日志：TensorBoard 保留重要指标便于分析，控制台打印简要信息"""
-        # ---- TensorBoard: 重要分析指标（main/ 下便于一起看） ----
+        """记录日志 (FIXED: 关键指标一目了然，只打印一行)"""
         def _scalar(tag: str, value, step: int):
             if isinstance(value, (int, float)):
                 self.writer.add_scalar(tag, value, step)
@@ -740,206 +628,40 @@ class GraphDiTRLTrainer:
                     pass
 
         step = self.total_steps
-        # Reward
+
+        _scalar("main/success_rate", rollout_stats.get("success_rate", 0), step)
+        _scalar("main/success_rate_100", rollout_stats.get("success_rate_100", 0), step)
+        _scalar("main/num_episodes", rollout_stats.get("num_episodes", 0), step)
         _scalar("main/ep_reward_mean", rollout_stats.get("ep_reward_mean", 0), step)
-        _scalar("main/ep_reward_max", rollout_stats.get("ep_reward_max", 0), step)
-        _scalar("main/ep_reward_min", rollout_stats.get("ep_reward_min", 0), step)
         _scalar("main/ep_length_mean", rollout_stats.get("ep_length_mean", 0), step)
-        _scalar("main/reward_reaching_object_mean", rollout_stats.get("reward_reaching_object_mean", 0), step)
-        _scalar("main/reward_lifting_object_mean", rollout_stats.get("reward_lifting_object_mean", 0), step)
-        # Loss
+        _scalar("main/explained_variance", update_stats.get("explained_variance", 0), step)
+        _scalar("main/delta_norm_mean", rollout_stats.get("delta_norm_mean", 0), step)
+        _scalar("main/alpha", update_stats.get("alpha", 0), step)
         _scalar("main/loss_total", update_stats.get("loss_total", 0), step)
         _scalar("main/loss_actor", update_stats.get("loss_actor", 0), step)
-        _scalar("main/loss_critic", update_stats.get("loss_critic", 0), step)
-        _scalar("main/loss_delta_reg", update_stats.get("loss_delta_reg", 0), step)
+        _scalar("main/loss_critic_bar", update_stats.get("loss_critic_bar", 0), step)
         _scalar("main/entropy", update_stats.get("entropy", 0), step)
-        _scalar("main/alpha", update_stats.get("alpha", 0), step)
 
-        # ---- TensorBoard: 完整 rollout / train 明细（按原 key 记录） ----
-        for k, v in rollout_stats.items():
-            if k == "warning":
-                continue
-            if not (isinstance(v, (int, float)) or (hasattr(v, "item") and hasattr(v, "dtype"))):
-                continue
-            try:
-                val = v.item() if hasattr(v, "item") else v
-                self.writer.add_scalar(f"rollout/{k}", val, step)
-            except (ValueError, TypeError):
-                pass
-        for k, v in update_stats.items():
-            if isinstance(v, (int, float)) or (hasattr(v, "item") and hasattr(v, "dtype")):
-                try:
-                    val = v.item() if hasattr(v, "item") else v
-                    self.writer.add_scalar(f"train/{k}", val, step)
-                except (ValueError, TypeError):
-                    pass
-        self.writer.add_scalar("train/iteration", iteration, step)
-
-        # ---- Console ----
-        ep_reward = rollout_stats.get("ep_reward_mean", 0)
-        reward_reach = rollout_stats.get("reward_reaching_object_mean", 0)
-        reward_lift = rollout_stats.get("reward_lifting_object_mean", 0)
+        sr = rollout_stats.get("success_rate", 0) * 100
+        sr_100 = rollout_stats.get("success_rate_100", 0) * 100
+        num_eps = rollout_stats.get("num_episodes", 0)
+        reward = rollout_stats.get("ep_reward_mean", 0)
+        ev = update_stats.get("explained_variance", -999)
+        delta = rollout_stats.get("delta_norm_mean", 0)
+        alpha = update_stats.get("alpha", 0)
+        loss = update_stats.get("loss_total", 0)
         warning = rollout_stats.get("warning", "")
         if warning:
             print(f"[Iter {iteration:4d}] ⚠️  {warning}")
         print(
             f"[Iter {iteration:4d}] "
-            f"steps={self.total_steps:7d} | "
-            f"ep_reward={ep_reward:7.2f} | "
-            f"reach={reward_reach:6.3f} lift={reward_lift:6.3f} | "
-            f"loss={update_stats['loss_total']:7.4f} delta_reg={update_stats.get('loss_delta_reg', 0):.4f} | "
-            f"alpha={update_stats['alpha']:.3f}"
+            f"SR={sr:5.1f}% (100ep:{sr_100:5.1f}%) [{num_eps:2d}ep] | "
+            f"Rew={reward:6.1f} | "
+            f"EV={ev:5.2f} | "
+            f"Δ={delta:.3f} | "
+            f"α={alpha:.2f} | "
+            f"L={loss:.3f}"
         )
-
-    def debug_iteration(self, iteration: int):
-        """Debug iteration: analyze batch and save to file"""
-        # Get a sample batch from buffer
-        sample_batch = None
-        for batch in self.buffer.get_batches(self.mini_batch_size, 1):
-            sample_batch = batch
-            break  # Just get the first batch
-        
-        if sample_batch is None:
-            return
-        
-        obs = sample_batch["obs"]
-        a_base = sample_batch["a_base"]
-        action = sample_batch["action"]
-        adv = sample_batch["adv"]
-        returns = sample_batch.get("returns", None)
-        
-        alpha = torch.clamp(self.policy.alpha, 0.0, 0.3).item()
-        delta = (action - a_base) / (alpha + 1e-8)
-        
-        # Check if base action is reasonable (not all zeros or very small)
-        base_action_norm = torch.norm(a_base, dim=-1).mean().item()
-        action_norm = torch.norm(action, dim=-1).mean().item()
-        delta_norm = torch.norm(delta, dim=-1).mean().item()
-        
-        # Apply residual mask if exists
-        if self.policy.residual_action_mask is not None:
-            delta = delta * self.policy.residual_action_mask
-        
-        # Get joint_dim from config
-        joint_dim = self.cfg.joint_dim if hasattr(self.cfg, 'joint_dim') else 5
-        
-        # ===== 1. Action Decomposition =====
-        joint_base = a_base[:, :joint_dim]
-        joint_delta = delta[:, :joint_dim]
-        joint_final = action[:, :joint_dim]
-        
-        # Gripper (remaining dimensions)
-        if action.shape[-1] > joint_dim:
-            grip_base = a_base[:, joint_dim:]
-            grip_delta = delta[:, joint_dim:]
-            grip_final = action[:, joint_dim:]
-        else:
-            grip_base = None
-            grip_delta = None
-            grip_final = None
-        
-        # ===== 2. Advantage Distribution =====
-        adv_mean = adv.mean().item()
-        adv_std = adv.std().item()
-        adv_min = adv.min().item()
-        adv_max = adv.max().item()
-        adv_positive_pct = (adv > 0).float().mean().item() * 100
-        
-        # ===== 3. AWR Weights =====
-        w = torch.exp(adv / max(self.cfg.beta, 1e-8))
-        w = torch.clamp(w, 0.0, self.cfg.weight_clip_max)
-        w = w / (w.mean() + 1e-8)
-        w_mean = w.mean().item()
-        w_std = w.std().item()
-        w_min = w.min().item()
-        w_max = w.max().item()
-        w_high_pct = (w > 2.0).float().mean().item() * 100
-        
-        # ===== 4. Task Progress (if obs contains position info) =====
-        task_info = {}
-        if obs.shape[-1] >= 16:
-            try:
-                ee_pos = obs[:, 13:16]
-                obj_pos = obs[:, 6:9]
-                distance = torch.norm(ee_pos - obj_pos, dim=-1)
-                obj_height = obj_pos[:, 2]
-                
-                task_info = {
-                    "ee_obj_distance_mean": distance.mean().item(),
-                    "ee_obj_distance_min": distance.min().item(),
-                    "object_height_mean": obj_height.mean().item(),
-                    "object_height_max": obj_height.max().item(),
-                }
-            except:
-                pass
-        
-        # ===== 5. Reward Statistics =====
-        reward_info = {}
-        if returns is not None:
-            reward_info = {
-                "returns_mean": returns.mean().item(),
-                "returns_std": returns.std().item(),
-                "returns_min": returns.min().item(),
-                "returns_max": returns.max().item(),
-            }
-        
-        # Compile debug info
-        debug_info = {
-            "iteration": iteration,
-            "total_steps": self.total_steps,
-            "alpha": alpha,
-            "action_norms": {
-                "base_action_norm": base_action_norm,
-                "action_norm": action_norm,
-                "delta_norm": delta_norm,
-            },
-            "action_decomposition": {
-                "joints": {
-                    "base_mean": joint_base.mean().item(),
-                    "base_std": joint_base.std().item(),
-                    "delta_mean": joint_delta.mean().item(),
-                    "delta_std": joint_delta.std().item(),
-                    "final_mean": joint_final.mean().item(),
-                    "final_std": joint_final.std().item(),
-                },
-            },
-            "advantage": {
-                "mean": adv_mean,
-                "std": adv_std,
-                "min": adv_min,
-                "max": adv_max,
-                "positive_pct": adv_positive_pct,
-            },
-            "awr_weights": {
-                "mean": w_mean,
-                "std": w_std,
-                "min": w_min,
-                "max": w_max,
-                "high_pct": w_high_pct,
-            },
-        }
-        
-        if grip_base is not None:
-            debug_info["action_decomposition"]["gripper"] = {
-                "base_mean": grip_base.mean().item(),
-                "base_std": grip_base.std().item(),
-                "delta_mean": grip_delta.mean().item(),
-                "delta_std": grip_delta.std().item(),
-                "final_mean": grip_final.mean().item(),
-                "final_std": grip_final.std().item(),
-            }
-        
-        if task_info:
-            debug_info["task_progress"] = task_info
-        
-        if reward_info:
-            debug_info["rewards"] = reward_info
-        
-        # Write to JSONL file (one JSON object per line)
-        with open(self.debug_log_path, "a") as f:
-            f.write(json.dumps(debug_info) + "\n")
-        
-        print(f"[DEBUG] Iteration {iteration}: Debug info saved to {self.debug_log_path}")
 
     def _save(self, iteration: int, final: bool = False):
         """保存 checkpoint"""
@@ -954,7 +676,7 @@ class GraphDiTRLTrainer:
 # ============================================================
 def main():
     print("=" * 70)
-    print("GraphDiT + Residual RL Training (OUR METHOD)")
+    print("GraphDiT + Residual RL Training (FIXED VERSION)")
     print("=" * 70)
 
     # Set seed

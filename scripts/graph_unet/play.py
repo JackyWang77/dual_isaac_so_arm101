@@ -11,7 +11,8 @@ Usage:
     ./isaaclab.sh -p scripts/graph_unet/play.py \
         --task SO-ARM101-Pick-Place-DualArm-IK-Abs-v0 \
         --checkpoint ./logs/graph_unet/best_model.pt \
-        --num_envs 64
+        --num_envs 64 --num_batches 2
+    (Default: num_envs=64, num_batches=2 -> 128 episodes; success rate is reported.)
 """
 
 """Launch Isaac Sim Simulator first."""
@@ -24,8 +25,9 @@ from isaaclab.app import AppLauncher
 parser = argparse.ArgumentParser(description="Play Graph-Unet Policy with Gripper Model")
 parser.add_argument("--task", type=str, required=True, help="Task name")
 parser.add_argument("--checkpoint", type=str, required=True, help="Path to Graph-Unet checkpoint")
-parser.add_argument("--num_envs", type=int, default=2, help="Number of environments")
-parser.add_argument("--num_episodes", type=int, default=10, help="Number of episodes to run")
+parser.add_argument("--num_envs", type=int, default=64, help="Number of environments")
+parser.add_argument("--num_episodes", type=int, default=None, help="Number of episodes (default: num_envs * num_batches)")
+parser.add_argument("--num_batches", type=int, default=2, help="Number of batches for success-rate eval (total episodes = num_envs * num_batches if num_episodes not set)")
 parser.add_argument(
     "--num_diffusion_steps", 
     type=int, 
@@ -74,7 +76,8 @@ def play_graph_unet_policy(
     task_name: str,
     checkpoint_path: str,
     num_envs: int = 64,
-    num_episodes: int = 10,
+    num_episodes: int | None = None,
+    num_batches: int = 2,
     device: str = "cuda",
     num_diffusion_steps: int | None = None,
     episode_length_s: float | None = None,
@@ -85,9 +88,13 @@ def play_graph_unet_policy(
         task_name: Environment task name.
         checkpoint_path: Path to trained policy checkpoint.
         num_envs: Number of parallel environments.
-        num_episodes: Number of episodes to run.
+        num_episodes: Number of episodes to run (default: num_envs * num_batches).
+        num_batches: Number of batches for success-rate eval (used when num_episodes is None).
         device: Device to run on.
     """
+    if num_episodes is None:
+        num_episodes = num_envs * num_batches
+        print(f"[Play] num_episodes not set, using num_envs * num_batches = {num_episodes}")
     
     print(f"[Play] ===== Graph-Unet Policy Playback =====")
     print(f"[Play] Task: {task_name}")
@@ -354,8 +361,53 @@ def play_graph_unet_policy(
     obs, info = env.reset()
     episode_count = 0
     episode_rewards = []
+    episode_success = []
     current_episode_rewards = torch.zeros(num_envs, device=device)
     
+    # Success rate: 与 train 一致，仅当 Episode_Termination/success 且 非 object_dropping 时计为成功
+    def _get_success_flags(info):
+        """从 step 返回的 info 取 success [num_envs]。success=True 且 非 object_dropping 才算成功。"""
+        if not isinstance(info, dict):
+            return None
+
+        def _to_mask(arr):
+            if arr is None:
+                return None
+            if isinstance(arr, torch.Tensor):
+                t = arr.to(device).float()
+            elif isinstance(arr, np.ndarray):
+                t = torch.from_numpy(arr).float().to(device)
+            else:
+                return None
+            if t.dim() == 2 and t.shape[1] == 1:
+                t = t.squeeze(-1)
+            if t.dim() != 1 or t.shape[0] != num_envs:
+                return None
+            return (t > 0.5) if t.dtype != torch.bool else t
+
+        log = info.get("log") or info.get("extra_info")
+        if not isinstance(log, dict):
+            return None
+        success_mask = None
+        for key in ("Episode_Termination/success", "success", "episode_success", "termination_success"):
+            if key in log:
+                success_mask = _to_mask(log[key])
+                if success_mask is not None:
+                    break
+        if success_mask is None:
+            return None
+        drop_key = "Episode_Termination/object_dropping"
+        if drop_key in log:
+            drop_mask = _to_mask(log[drop_key])
+            if drop_mask is not None:
+                success_mask = success_mask & (~drop_mask)
+        return success_mask
+
+    # 成功率：与 play_graph_rl / train 一致，仅用 truncated + 高度（Isaac Lab log 为标量不可用）
+    OBJ_HEIGHT_IDX = 14  # object_position.z
+    SUCCESS_HEIGHT = 0.10  # 成功阈值 (m)
+    print(f"[Play] Success: timeout=失败, 否则 height>={SUCCESS_HEIGHT}m=成功 (与 play_graph_rl 一致)")
+
     # Initialize action, node, and joint history buffers for each environment
     action_history_buffers = [
         torch.zeros(action_history_length, action_dim, device=device)
@@ -573,9 +625,6 @@ def play_graph_unet_policy(
                 obs_tensor
             )  # [num_envs, 7]
             
-            # 🟢 VISUAL DEBUG: Extract current EE position for comparison
-            current_ee_pos = ee_node_current[:, :3].cpu().numpy()  # [num_envs, 3] - EE position
-            
             # Extract current joint states (position + velocity) from raw obs
             if joint_dim is not None:
                 joint_states_current = _extract_joint_states_from_obs(
@@ -686,23 +735,6 @@ def play_graph_unet_policy(
                             f"[Play] Warning: No action normalization stats, using normalized actions directly"
                         )
 
-                # 🟢 VISUAL DEBUG
-                target_joint_positions = action_trajectory[:, 0, :5].cpu().numpy()
-                if step_count % 10 == 0:
-                    env_id = 0
-                    target_joint = target_joint_positions[env_id]
-                    current_joint = obs_tensor[env_id, :5].cpu().numpy()
-                    current_ee_pos_debug = current_ee_pos[env_id]
-                    object_pos_debug = object_node_current[env_id, :3].cpu().numpy()
-                    print(f"\n[🟢 VISUAL DEBUG Step {step_count}] ==========")
-                    print(f"  Target Joint (action): {target_joint.tolist()}")
-                    print(f"  Current Joint:         {current_joint.tolist()}")
-                    print(f"  Joint Diff:            {np.abs(target_joint - current_joint).tolist()}")
-                    print(f"  Current EE Position:   {current_ee_pos_debug.tolist()}")
-                    print(f"  Object Position:       {object_pos_debug.tolist()}")
-                    print(f"  EE-Object Distance:    {np.linalg.norm(current_ee_pos_debug - object_pos_debug):.3f}")
-                    print(f"  =========================================\n")
-
                 # Fill buffers with raw 6-dim (normalized raw for policy input; buffer = unmapped original)
                 for env_id in range(num_envs):
                     if len(action_buffers[env_id]) == 0:
@@ -797,7 +829,10 @@ def play_graph_unet_policy(
             
             # Step environment (send mapped gripper -1/1; buffer already has raw for next policy input)
             obs, rewards, terminated, truncated, info = env.step(action_for_env)
+            done = terminated | truncated
             
+            # 成功率仅用 truncated + 高度判断（与 play_graph_rl 一致，不依赖 env_info 标量）
+
             # Accumulate rewards (rewards might be numpy or tensor)
             if isinstance(rewards, np.ndarray):
                 current_episode_rewards += torch.from_numpy(rewards).to(device)
@@ -809,14 +844,29 @@ def play_graph_unet_policy(
                 )
             
             # Check for episode completion and reset history buffers + action buffers
-            done = terminated | truncated
             if done.any():
                 for i in range(num_envs):
                     if done[i]:
                         episode_rewards.append(current_episode_rewards[i].item())
+
+                        # 与 play_graph_rl / train 一致：仅用 truncated + 高度（Isaac Lab log 为标量不可用）
+                        obj_h = obs_tensor[i, OBJ_HEIGHT_IDX].item()  # obs_tensor = step 前状态
+                        is_truncated = bool(
+                            truncated[i].item() if hasattr(truncated[i], "item") else truncated[i]
+                        )
+                        if is_truncated:
+                            is_success = False
+                        else:
+                            is_success = obj_h >= SUCCESS_HEIGHT
+
+                        episode_success.append(is_success)
                         episode_count += 1
+                        status = "✅" if is_success else "❌"
+                        sr = sum(episode_success) / len(episode_success) * 100.0
+                        print(f"[Play] Ep {episode_count:3d} h={obj_h:.3f}m {status} | SR={sr:.1f}%")
+
                         current_episode_rewards[i] = 0.0
-                        
+
                         # Reset history buffers for this environment
                         action_history_buffers[i].zero_()
                         ee_node_history_buffers[i].zero_()
@@ -841,27 +891,28 @@ def play_graph_unet_policy(
             
             step_count += 1
             
-            # Print progress
-            if step_count % 100 == 0:
-                avg_reward = (
-                    sum(episode_rewards[-10:]) / min(len(episode_rewards), 10)
-                    if episode_rewards
-                    else 0.0
-                )
+            # Print progress: 与 train 一致，SR + SR(100ep) + 已完成的 episode 数
+            if step_count % 100 == 0 and episode_success:
+                n = len(episode_success)
+                sr = sum(episode_success) / n * 100.0
+                last_100 = episode_success[-100:] if n >= 100 else episode_success
+                sr_100 = sum(last_100) / len(last_100) * 100.0 if last_100 else 0.0
                 print(
-                    f"[Play] Step: {step_count}, Episodes: {episode_count}/{num_episodes}, "
-                    f"Avg reward (last 10): {avg_reward:.3f}"
+                    f"[Play] Ep {episode_count}/{num_episodes} | SR={sr:5.1f}% (100ep:{sr_100:5.1f}%) [{n}ep]"
                 )
     
-    # Print final statistics
+    # Final statistics: 与 train 一致的统计格式
     if episode_rewards:
+        n = len(episode_success)
+        sr_final = sum(episode_success) / n * 100.0 if episode_success else 0.0
+        last_100 = episode_success[-100:] if n >= 100 else episode_success
+        sr_100_final = sum(last_100) / len(last_100) * 100.0 if last_100 else 0.0
+        mean_reward = sum(episode_rewards) / len(episode_rewards)
         print(f"\n[Play] ===== Final Statistics =====")
-        print(f"[Play] Total episodes: {len(episode_rewards)}")
         print(
-            f"[Play] Average reward: {sum(episode_rewards) / len(episode_rewards):.3f}"
+            f"[Play] SR={sr_final:.1f}% (100ep:{sr_100_final:.1f}%) [{n}ep] | "
+            f"Rew_mean={mean_reward:.1f} | {sum(episode_success)}/{n} success"
         )
-        print(f"[Play] Max reward: {max(episode_rewards):.3f}")
-        print(f"[Play] Min reward: {min(episode_rewards):.3f}")
     
     # Close environment
     env.close()
@@ -871,11 +922,14 @@ def play_graph_unet_policy(
 def main():
     """Main playback function."""
     # Use args_cli that was already parsed at the top of the file (before AppLauncher)
+    num_episodes = getattr(args_cli, "num_episodes", None)
+    num_batches = getattr(args_cli, "num_batches", 2)
     play_graph_unet_policy(
         task_name=args_cli.task,
         checkpoint_path=args_cli.checkpoint,
         num_envs=args_cli.num_envs,
-        num_episodes=args_cli.num_episodes,
+        num_episodes=num_episodes,
+        num_batches=num_batches,
         device=args_cli.device,
         num_diffusion_steps=args_cli.num_diffusion_steps,
         episode_length_s=getattr(args_cli, "episode_length_s", None),

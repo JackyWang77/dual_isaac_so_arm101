@@ -25,7 +25,6 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
-import time
 import numpy as np
 
 import gymnasium as gym
@@ -64,6 +63,8 @@ def play_graph_rl_policy(
     print(f"[Play] RL Checkpoint: {checkpoint_path}")
     print(f"[Play] Graph-Unet Checkpoint: {pretrained_checkpoint}")
     print(f"[Play] Num envs: {num_envs}")
+    OBJ_HEIGHT_IDX = 14  # object_position.z
+    SUCCESS_HEIGHT = 0.10  # 成功阈值 (m)，terminated 时用高度判断
 
     # Load pretrained Graph-Unet
     print(f"\n[Play] Loading pretrained Graph-Unet: {pretrained_checkpoint}")
@@ -181,10 +182,11 @@ def play_graph_rl_policy(
     obs, info = env.reset()
     obs = _process_obs(obs, device)
 
-    # Stats
+    # Stats (tensor for per-env tracking; lists for final stats like play.py)
     episode_rewards = torch.zeros(num_envs, device=device)
     episode_lengths = torch.zeros(num_envs, device=device)
-    completed_episodes = 0
+    episode_success = []  # list of bool for SR(100ep)
+    episode_rewards_list = []  # list of float for mean_reward
 
     print(f"\n[Play] Starting playback (deterministic={deterministic})...")
     print(f"[Play] Press Ctrl+C to stop\n")
@@ -192,7 +194,7 @@ def play_graph_rl_policy(
     # Main loop
     step_count = 0
     try:
-        while simulation_app.is_running() and completed_episodes < num_episodes:
+        while simulation_app.is_running() and len(episode_success) < num_episodes:
             # CRITICAL: Normalize observations (same as train_graph_rl.py)
             if obs_mean is not None and obs_std is not None:
                 obs_norm = (obs - obs_mean) / obs_std
@@ -241,350 +243,27 @@ def play_graph_rl_policy(
                         torch.tensor(env.action_space.low, device=action.device, dtype=action.dtype),
                         torch.tensor(env.action_space.high, device=action.device, dtype=action.dtype)
                     )
-            
-            # DEBUG: Print all joints and gripper base action, residual, and final action (same as train_graph_rl.py)
-            action_dim = action.shape[-1]
-            if action_dim >= 6:
-                a_base = policy_info.get("a_base", None)  # [B, action_dim] - denormalized base action
-                delta = policy_info.get("delta", None)  # [B, action_dim] - denormalized delta
-                delta_norm = policy_info.get("delta_norm", None)  # [B, action_dim] - normalized delta (Actor output)
-                alpha_val = policy_info.get("alpha", None)
-                if alpha_val is not None:
-                    if isinstance(alpha_val, torch.Tensor):
-                        alpha = alpha_val.item()
-                    else:
-                        alpha = float(alpha_val)
-                else:
-                    alpha = policy.alpha.item() if hasattr(policy, 'alpha') else 0.1
-                
-                if a_base is not None and delta is not None:
-                    # Print for first env only, every 10 steps
-                    if step_count % 10 == 0:
-                        print(f"\n[Play Step {step_count:3d}] Action Debug (env 0):")
-                        print(f"  alpha: {alpha:.4f}")
-                        print(f"\n  Joints (0-4):")
-                        for i in range(min(5, action_dim)):
-                            a_base_i = a_base[0, i].item()
-                            delta_i = delta[0, i].item()
-                            final_i = action[0, i].item()
-                            print(f"    Joint {i}: base={a_base_i:7.4f}, delta={delta_i:7.4f}, final={final_i:7.4f} (base + {alpha:.2f}*delta = {a_base_i + alpha * delta_i:.4f})")
-                        
-                        # Gripper (index 5) - before binarization
-                        if action_dim >= 6:
-                            a_base_gripper = a_base[0, 5].item()
-                            delta_gripper = delta[0, 5].item()
-                            gripper_continuous_before_bin = action[0, 5].item()
-                            print(f"\n  Gripper (5) - Before Binarization:")
-                            print(f"    base: {a_base_gripper:7.4f}")
-                            print(f"    delta: {delta_gripper:7.4f}")
-                            print(f"    continuous (base + {alpha:.2f}*delta): {gripper_continuous_before_bin:7.4f}")
-                            print(f"    threshold: -0.2")
-                        
-                        # Statistics across all envs
-                        print(f"\n  Delta Statistics (all envs):")
-                        delta_mean = delta.mean(dim=0)  # [action_dim]
-                        delta_std = delta.std(dim=0)  # [action_dim]
-                        delta_min = delta.min(dim=0)[0]  # [action_dim]
-                        delta_max = delta.max(dim=0)[0]  # [action_dim]
-                        delta_positive_ratio = (delta > 0).float().mean(dim=0)  # [action_dim]
-                        
-                        print(f"    Joints (0-4):")
-                        for i in range(min(5, action_dim)):
-                            print(f"      Joint {i}: mean={delta_mean[i].item():7.4f}, std={delta_std[i].item():7.4f}, "
-                                  f"min={delta_min[i].item():7.4f}, max={delta_max[i].item():7.4f}, "
-                                  f"positive={delta_positive_ratio[i].item():.1%}")
-                        
-                        if action_dim >= 6:
-                            print(f"    Gripper (5): mean={delta_mean[5].item():7.4f}, std={delta_std[5].item():7.4f}, "
-                                  f"min={delta_min[5].item():7.4f}, max={delta_max[5].item():7.4f}, "
-                                  f"positive={delta_positive_ratio[5].item():.1%}")
-                        
-                        if delta_norm is not None:
-                            delta_norm_mean = delta_norm.mean(dim=0)  # [action_dim]
-                            delta_norm_std = delta_norm.std(dim=0)  # [action_dim]
-                            print(f"\n  Delta_norm Statistics (normalized, all envs):")
-                            print(f"    Joints (0-4):")
-                            for i in range(min(5, action_dim)):
-                                print(f"      Joint {i}: mean={delta_norm_mean[i].item():7.4f}, std={delta_norm_std[i].item():7.4f}")
-                            if action_dim >= 6:
-                                print(f"    Gripper (5): mean={delta_norm_mean[5].item():7.4f}, std={delta_norm_std[5].item():7.4f}")
-                
-                # CRITICAL: Binarize gripper action (same as play.py)
-                # Action is already: a_base + alpha * delta (continuous value for all dimensions including gripper)
-                # Isaac Sim expects gripper: > -0.2 -> 1.0 (open), <= -0.2 -> -1.0 (close)
-                # This allows RL to learn fine-tuning of gripper timing, especially when base policy
-                # outputs values near -0.2 threshold
-                gripper_continuous = action[:, 5]  # [num_envs] - continuous value: a_base_gripper + alpha * delta_gripper
-                gripper_binary = torch.where(
-                    gripper_continuous > -0.2,
-                    torch.tensor(1.0, device=action.device, dtype=action.dtype),
-                    torch.tensor(-1.0, device=action.device, dtype=action.dtype)
-                )
-                action[:, 5] = gripper_binary
-                
-                # Print gripper binarization result (for first env, every 10 steps)
-                if step_count % 10 == 0 and a_base is not None and delta is not None:
-                    gripper_binary_val = gripper_binary[0].item()
-                    print(f"  Gripper (5) - After Binarization:")
-                    print(f"    binary (final): {gripper_binary_val:7.4f} ({'open' if gripper_binary_val > 0 else 'close'})")
 
-            # Step environment
-            next_obs, reward, terminated, truncated, env_info = env.step(action)
-            done = terminated | truncated
-
-            # Process
-            next_obs = _process_obs(next_obs, device)
-            reward = reward.to(device).float()
-            done = done.to(device).float()
-
-            # Update history buffers
-            # NOTE: For test_dit_only, Graph-DiT's action is already in normalized space
-            # So we can directly use action for history
-            action_for_history = action
-            
-            # Roll all histories: shift left by 1, new data goes to last position
-            action_history = torch.roll(action_history, -1, dims=1)
-            action_history[:, -1, :] = action_for_history  # [num_envs, action_dim]
-            
-            ee_node_history = torch.roll(ee_node_history, -1, dims=1)
-            ee_node_history[:, -1, :] = ee_node_current  # [num_envs, 7]
-            
-            object_node_history = torch.roll(object_node_history, -1, dims=1)
-            object_node_history[:, -1, :] = object_node_current  # [num_envs, 7]
-            
-            joint_state_history = torch.roll(joint_state_history, -1, dims=1)
-            joint_state_history[:, -1, :] = joint_states_current  # [num_envs, joint_dim]
-
-            # Track stats
-            episode_rewards += reward
-            episode_lengths += 1
-
-            # Handle resets
-            done_envs = done.nonzero(as_tuple=False).squeeze(-1)
-            if len(done_envs) > 0:
-                policy.reset_envs(done_envs)
-                # Reset history buffers for done environments
-                for i in done_envs.tolist():
-                    completed_episodes += 1
-                    # Compute gate entropy from gate_w
-                    gate_w = policy_info["gate_w"][i]
-                    gate_entropy = -(gate_w * torch.log(gate_w + 1e-8)).sum().item()
-                    print(
-                        f"[Play] Episode {completed_episodes:3d} | "
-                        f"Reward: {episode_rewards[i].item():7.2f} | "
-                        f"Length: {episode_lengths[i].item():4.0f} | "
-                        f"Alpha: {policy_info['alpha'].item():.3f} | "
-                        f"Gate Entropy: {gate_entropy:.3f}"
-                    )
-                
-                # Vectorized reset: zero out all done environments at once
-                action_history[done_envs] = 0
-                ee_node_history[done_envs] = 0
-                object_node_history[done_envs] = 0
-                joint_state_history[done_envs] = 0
-                episode_rewards[done_envs] = 0
-                episode_lengths[done_envs] = 0
-
-            obs = next_obs
-            step_count += 1
-
-    except KeyboardInterrupt:
-        print("\n[Play] Interrupted by user")
-
-    print(f"\n[Play] Playback complete!")
-    print(f"[Play] Total steps: {step_count}")
-    print(f"[Play] Completed episodes: {completed_episodes}")
-
-    # Cleanup
-    env.close()
-
-
-def test_dit_only(
-    task_name: str,
-    pretrained_checkpoint: str,
-    num_envs: int = 64,
-    num_steps: int = 200,
-    device: str = "cuda",
-):
-    """Test Graph-Unet base_action only, without residual RL (residual RL is Unet-only)."""
-    print(f"\n[Test Unet Only] ===== Testing Graph-Unet Base Action Only =====")
-    print(f"[Test Unet Only] Task: {task_name}")
-    print(f"[Test Unet Only] Graph-Unet Checkpoint: {pretrained_checkpoint}")
-    print(f"[Test Unet Only] Num envs: {num_envs}")
-    print(f"[Test Unet Only] Num steps: {num_steps}")
-
-    print(f"\n[Test Unet Only] Loading pretrained Graph-Unet: {pretrained_checkpoint}")
-    backbone_policy = GraphUnetPolicy.load(pretrained_checkpoint, device=device)
-    backbone_policy.eval()
-    for p in backbone_policy.parameters():
-        p.requires_grad = False
-    print(f"[Test Unet Only] Graph-Unet loaded and frozen")
-
-    backbone = GraphUnetBackboneAdapter(backbone_policy)
-    
-    # Create environment first to get obs/action dims
-    print(f"\n[Test Unet Only] Creating environment...")
-    env_cfg = parse_env_cfg(task_name, device=device, num_envs=num_envs)
-    env = gym.make(task_name, cfg=env_cfg)
-    
-    # Get observation and action spaces
-    obs_space = env.observation_space
-    action_space = env.action_space
-    print(f"[Test Unet Only] Observation space: {obs_space}")
-    print(f"[Test Unet Only] Action space: {action_space}")
-    
-    # Get dimensions (handle Dict observation space and vectorized action space)
-    if isinstance(obs_space, gym.spaces.Dict):
-        # Extract from 'policy' key if available
-        if 'policy' in obs_space.spaces:
-            policy_obs_space = obs_space['policy']
-            if hasattr(policy_obs_space, 'shape') and policy_obs_space.shape is not None:
-                # Handle vectorized: shape is (num_envs, obs_dim)
-                if len(policy_obs_space.shape) == 2:
-                    obs_dim = policy_obs_space.shape[1]
-                elif len(policy_obs_space.shape) == 1:
-                    obs_dim = policy_obs_space.shape[0]
-                else:
-                    obs_dim = 32  # Fallback
-            else:
-                obs_dim = 32  # Fallback
-        else:
-            obs_dim = 32  # Fallback
-    elif hasattr(obs_space, 'shape') and obs_space.shape is not None:
-        # Handle vectorized: shape is (num_envs, obs_dim)
-        if len(obs_space.shape) == 2:
-            obs_dim = obs_space.shape[1]
-        elif len(obs_space.shape) == 1:
-            obs_dim = obs_space.shape[0]
-        else:
-            obs_dim = 32  # Fallback
-    else:
-        obs_dim = 32  # Default fallback
-    
-    # Get action dimension (handle vectorized action space)
-    if hasattr(action_space, 'shape') and action_space.shape is not None:
-        # Handle vectorized: shape is (num_envs, action_dim)
-        if len(action_space.shape) == 2:
-            action_dim = action_space.shape[1]
-        elif len(action_space.shape) == 1:
-            action_dim = action_space.shape[0]
-        else:
-            action_dim = 6  # Fallback
-    else:
-        action_dim = 6  # Default fallback
-    
-    print(f"[Test Unet Only] Extracted obs_dim: {obs_dim}, action_dim: {action_dim}")
-
-    # Create a minimal policy just to use its helper methods
-    print(f"\n[Test Unet Only] Creating minimal policy for helper methods...")
-    from SO_101.policies.graph_unet_residual_rl_policy import GraphUnetResidualRLCfg
-    cfg = GraphUnetResidualRLCfg(
-        obs_dim=obs_dim,
-        action_dim=action_dim,
-        z_dim=backbone_policy.cfg.z_dim,
-        num_layers=backbone_policy.cfg.num_layers,
-        obs_structure=getattr(backbone_policy.cfg, "obs_structure", None),
-        robot_state_dim=6,
-    )
-    policy = GraphUnetResidualRLPolicy(cfg, backbone=backbone)
-    policy.eval()
-
-    # Load normalization stats from Graph-Unet checkpoint
-    checkpoint = torch.load(pretrained_checkpoint, map_location=device, weights_only=False)
-    if "node_stats" in checkpoint:
-        node_stats = checkpoint["node_stats"]
-        policy.set_normalization_stats(
-            ee_node_mean=node_stats.get("ee_mean"),
-            ee_node_std=node_stats.get("ee_std"),
-            object_node_mean=node_stats.get("object_mean"),
-            object_node_std=node_stats.get("object_std"),
-        )
-        print(f"[Test Unet Only] Loaded normalization stats")
-
-    # Initialize history buffers (same as in trainer)
-    action_history_length = getattr(backbone_policy.cfg, "action_history_length", 16)
-    action_dim = 6
-    graph_dit_joint_dim = 6  # Backbone expects 6 for joint states
-    
-    # Use single tensor [num_envs, history_len, dim] for efficiency
-    action_history = torch.zeros(num_envs, action_history_length, action_dim, device=device)
-    ee_node_history = torch.zeros(num_envs, action_history_length, 7, device=device)
-    object_node_history = torch.zeros(num_envs, action_history_length, 7, device=device)
-    joint_state_history = torch.zeros(num_envs, action_history_length, graph_dit_joint_dim, device=device)
-    
-    # Reset environment
-    obs, info = env.reset()
-    obs = _process_obs(obs, device)
-    
-    # Stats
-    episode_rewards = torch.zeros(num_envs, device=device)
-    episode_lengths = torch.zeros(num_envs, device=device)
-    completed_episodes = 0
-    
-    print(f"\n[Test Unet Only] Starting test (Unet base_action only, no residual)...")
-    print(f"[Test Unet Only] Press Ctrl+C to stop\n")
-    
-    # Main loop
-    step_count = 0
-    try:
-        while simulation_app.is_running() and step_count < num_steps:
-            # Extract current state
-            ee_node_current, object_node_current = policy._extract_nodes_from_obs(obs)
-            # GraphDiT expects 6 dimensions (was trained with 6)
-            joint_states_current = obs[:, :6]  # [B, 6]
-            
-            # Get base_action only (no residual!)
-            with torch.no_grad():
-                a_base = policy.get_base_action(
-                    obs_norm=obs,
-                    action_history=action_history,
-                    ee_node_history=ee_node_history,
-                    object_node_history=object_node_history,
-                    joint_states_history=joint_state_history,
-                    deterministic=True,
-                )
-            
-            # Use base_action directly, no residual!
-            action = a_base
-            
-            # Print first env's action every 10 steps
-            if step_count % 10 == 0:
-                print(f"[{step_count:3d}] a_base: {a_base[0].cpu().numpy().round(3)}")
-            
-            # Clip action to action space bounds
-            if hasattr(env, 'action_space'):
-                if hasattr(env.action_space, 'low') and hasattr(env.action_space, 'high'):
-                    action = torch.clamp(
-                        action,
-                        torch.tensor(env.action_space.low, device=action.device, dtype=action.dtype),
-                        torch.tensor(env.action_space.high, device=action.device, dtype=action.dtype)
-                    )
-            
-            # CRITICAL: Binarize gripper action (same as play.py)
-            # Action is already: a_base + alpha * delta (continuous value for all dimensions including gripper)
-            # Isaac Sim expects gripper: > -0.2 -> 1.0 (open), <= -0.2 -> -1.0 (close)
-            # This allows RL to learn fine-tuning of gripper timing, especially when base policy
-            # outputs values near -0.2 threshold
-            action_dim = action.shape[-1]
-            if action_dim >= 6:
-                gripper_continuous = action[:, 5]  # [num_envs] - continuous value: a_base_gripper + alpha * delta_gripper
+            # Binarize gripper action (same as play.py)
+            if action.shape[-1] >= 6:
+                gripper_continuous = action[:, 5]
                 action[:, 5] = torch.where(
                     gripper_continuous > -0.2,
                     torch.tensor(1.0, device=action.device, dtype=action.dtype),
                     torch.tensor(-1.0, device=action.device, dtype=action.dtype)
                 )
-            
+
             # Step environment
             next_obs, reward, terminated, truncated, env_info = env.step(action)
             done = terminated | truncated
-            
+
             # Process
             next_obs = _process_obs(next_obs, device)
             reward = reward.to(device).float()
             done = done.to(device).float()
-            
+
             # Update history buffers
-            # NOTE: For test_dit_only, Graph-DiT's action is already in normalized space
+            # NOTE: Graph-DiT's action is in normalized space for history
             # So we can directly use action for history
             action_for_history = action
             
@@ -600,23 +279,29 @@ def test_dit_only(
             
             joint_state_history = torch.roll(joint_state_history, -1, dims=1)
             joint_state_history[:, -1, :] = joint_states_current  # [num_envs, joint_dim]
-            
+
             # Track stats
             episode_rewards += reward
             episode_lengths += 1
-            
-            # Handle resets
+
+            # Handle resets（obs = step 前的状态，用于高度判断）
             done_envs = done.nonzero(as_tuple=False).squeeze(-1)
             if len(done_envs) > 0:
-                # Reset history buffers for done environments
+                policy.reset_envs(done_envs)
                 for i in done_envs.tolist():
-                    completed_episodes += 1
-                    print(
-                        f"[Test Unet Only] Episode {completed_episodes:3d} | "
-                        f"Reward: {episode_rewards[i].item():7.2f} | "
-                        f"Length: {episode_lengths[i].item():4.0f}"
-                    )
-                
+                    obj_height = obs[i, OBJ_HEIGHT_IDX].item()  # obs = step 前状态
+                    is_truncated = bool(truncated[i].item() if truncated.dim() > 0 else truncated.item())
+                    if is_truncated:
+                        is_success = False
+                    else:
+                        is_success = obj_height >= SUCCESS_HEIGHT
+                    episode_success.append(is_success)
+                    episode_rewards_list.append(episode_rewards[i].item())
+                    episode_count = len(episode_success)
+                    status = "✅" if is_success else "❌"
+                    sr = sum(episode_success) / len(episode_success) * 100.0
+                    print(f"[Play] Ep {episode_count:3d} h={obj_height:.3f}m {status} | SR={sr:.1f}%")
+
                 # Vectorized reset: zero out all done environments at once
                 action_history[done_envs] = 0
                 ee_node_history[done_envs] = 0
@@ -624,22 +309,35 @@ def test_dit_only(
                 joint_state_history[done_envs] = 0
                 episode_rewards[done_envs] = 0
                 episode_lengths[done_envs] = 0
-            
+
             obs = next_obs
             step_count += 1
-            
-            # Small delay for visualization
-            time.sleep(0.05)
-            
+
+            # Print progress (same as play graph unet)
+            if step_count % 100 == 0 and episode_success:
+                n = len(episode_success)
+                sr = sum(episode_success) / n * 100.0
+                last_100 = episode_success[-100:] if n >= 100 else episode_success
+                sr_100 = sum(last_100) / len(last_100) * 100.0 if last_100 else 0.0
+                print(f"[Play] Ep {n}/{num_episodes} | SR={sr:5.1f}% (100ep:{sr_100:5.1f}%) [{n}ep]")
+
     except KeyboardInterrupt:
-        print("\n[Test Unet Only] Interrupted by user")
-    
-    print(f"\n[Test Unet Only] Test complete!")
-    print(f"[Test Unet Only] Total steps: {step_count}")
-    print(f"[Test Unet Only] Completed episodes: {completed_episodes}")
-    if completed_episodes > 0:
-        print(f"[Test Unet Only] Average reward: {episode_rewards.sum().item() / completed_episodes:.2f}")
-    
+        print("\n[Play] Interrupted by user")
+
+    # Final statistics (same format as play graph unet)
+    if episode_success:
+        n = len(episode_success)
+        sr_final = sum(episode_success) / n * 100.0
+        last_100 = episode_success[-100:] if n >= 100 else episode_success
+        sr_100_final = sum(last_100) / len(last_100) * 100.0 if last_100 else 0.0
+        mean_reward = sum(episode_rewards_list) / len(episode_rewards_list)
+        print(f"\n[Play] ===== Final Statistics =====")
+        print(
+            f"[Play] SR={sr_final:.1f}% (100ep:{sr_100_final:.1f}%) [{n}ep] | "
+            f"Rew_mean={mean_reward:.1f} | {sum(episode_success)}/{n} success"
+        )
+    print(f"\n[Play] Playback completed!")
+
     # Cleanup
     env.close()
 
@@ -656,49 +354,31 @@ def _process_obs(obs, device: str) -> torch.Tensor:
 
 def main():
     parser = argparse.ArgumentParser(description="Play Graph-Unet + Residual RL Policy")
+    parser.add_argument("--headless", action="store_true", help="(AppLauncher) No display window")
     parser.add_argument("--task", type=str, required=True, help="Task name")
-    parser.add_argument("--checkpoint", type=str, default=None, help="RL policy checkpoint path (required if not testing DiT only)")
+    parser.add_argument("--checkpoint", type=str, required=True, help="RL policy checkpoint path")
     parser.add_argument(
         "--pretrained_checkpoint", type=str, required=True,
         help="Pretrained Graph-Unet checkpoint (residual RL is Unet-only)",
     )
     parser.add_argument("--num_envs", type=int, default=64, help="Number of environments")
     parser.add_argument("--num_episodes", type=int, default=10, help="Number of episodes")
-    parser.add_argument("--num_steps", type=int, default=200, help="Number of steps (for test_dit_only mode)")
     parser.add_argument("--device", type=str, default="cuda", help="Device")
     parser.add_argument(
         "--deterministic", action="store_true", help="Use deterministic actions"
     )
-    parser.add_argument(
-        "--test_dit_only", action="store_true",
-        help="Test Graph-Unet base_action only (no residual RL). Requires --pretrained_checkpoint only."
-    )
 
     args = parser.parse_args()
 
-    if args.test_dit_only:
-        # Test DiT only mode
-        test_dit_only(
-            task_name=args.task,
-            pretrained_checkpoint=args.pretrained_checkpoint,
-            num_envs=args.num_envs,
-            num_steps=args.num_steps,
-            device=args.device,
-        )
-    else:
-        # Normal playback mode
-        if args.checkpoint is None:
-            parser.error("--checkpoint is required when not using --test_dit_only")
-        
-        play_graph_rl_policy(
-            task_name=args.task,
-            checkpoint_path=args.checkpoint,
-            pretrained_checkpoint=args.pretrained_checkpoint,
-            num_envs=args.num_envs,
-            num_episodes=args.num_episodes,
-            device=args.device,
-            deterministic=args.deterministic,
-        )
+    play_graph_rl_policy(
+        task_name=args.task,
+        checkpoint_path=args.checkpoint,
+        pretrained_checkpoint=args.pretrained_checkpoint,
+        num_envs=args.num_envs,
+        num_episodes=args.num_episodes,
+        device=args.device,
+        deterministic=args.deterministic,
+    )
 
 
 if __name__ == "__main__":
