@@ -308,7 +308,7 @@ class GraphUnetResidualRLCfg:
 
     # losses (residual RL is U-Net only: no gate, bar head only)
     cV: float = 1.0
-    cEnt: float = 0.0
+    cEnt: float = 0.01
     cGate: float = 0.0  # Unused (no gate)
     c_delta_reg: float = 2.0  # Delta (residual) regularization: higher = smoother, RL "don't move unless reward"
 

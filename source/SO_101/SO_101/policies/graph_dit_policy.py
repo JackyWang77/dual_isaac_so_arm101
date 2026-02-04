@@ -611,7 +611,7 @@ class GraphDiTPolicyCfg:
     edge_dim: int = 2
     """Edge feature dimension: distance(1) + orientation_similarity(1) = 2"""
 
-    edge_feature_version: str = "v2"
+    edge_feature_version: str = "v1"
     """Edge feature version: 'v1' (quat similarity) or 'v2' (best face alignment, robust to object tilt)."""
     
     joint_dim: int | None = None

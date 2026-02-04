@@ -25,8 +25,8 @@ set -e
 # Parse Arguments
 # ============================================================
 PRETRAINED_CHECKPOINT="${1:-}"
-NUM_ENVS="${2:-64}"
-MAX_ITERATIONS="${3:-500}"
+NUM_ENVS="${2:-512}"
+MAX_ITERATIONS="${3:-200}"
 STEPS_PER_ENV="${4:-130}"
 MINI_BATCH_SIZE="${5:-64}"
 NUM_EPOCHS="${6:-5}"
