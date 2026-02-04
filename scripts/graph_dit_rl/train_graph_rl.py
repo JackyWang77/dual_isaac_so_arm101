@@ -36,7 +36,7 @@ parser.add_argument("--log_dir", type=str, default="./logs/graph_unet_rl", help=
 parser.add_argument("--save_interval", type=int, default=50)
 
 # Rollout config
-parser.add_argument("--steps_per_env", type=int, default=130, help="Steps per env per iteration")
+parser.add_argument("--steps_per_env", type=int, default=250, help="Steps per env per iteration (250=full episode at 5s)")
 parser.add_argument("--num_epochs", type=int, default=5, help="Epochs per iteration")
 parser.add_argument("--mini_batch_size", type=int, default=64)
 parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
@@ -220,7 +220,7 @@ class GraphDiTRLTrainer:
         device: str = "cuda",
         log_dir: str = "./logs",
         # Training params
-        steps_per_env: int = 130,
+        steps_per_env: int = 250,
         num_epochs: int = 5,
         mini_batch_size: int = 64,
         lr: float = 3e-4,
