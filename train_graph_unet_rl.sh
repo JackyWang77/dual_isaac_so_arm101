@@ -26,17 +26,18 @@ set -e
 # ============================================================
 PRETRAINED_CHECKPOINT="${1:-}"
 NUM_ENVS="${2:-512}"
-MAX_ITERATIONS="${3:-200}"
+MAX_ITERATIONS="${3:-50}"
 STEPS_PER_ENV="${4:-130}"
 MINI_BATCH_SIZE="${5:-64}"
 NUM_EPOCHS="${6:-5}"
-C_DELTA_REG="${7:-2.0}"
-LR="${8:-3e-4}"
-SEED="${9:-42}"
-HEADLESS="${10:-true}"
+C_DELTA_REG="${7:-1.0}"
+C_ENT="${8:-0.01}"
+LR="${9:-3e-4}"
+SEED="${10:-42}"
+HEADLESS="${11:-false}"
 
 TASK="${TASK:-SO-ARM101-Lift-Cube-v0}"
-SAVE_INTERVAL="${SAVE_INTERVAL:-50}"
+SAVE_INTERVAL="${SAVE_INTERVAL:-10}"
 
 # ============================================================
 # Help / Validation
@@ -49,7 +50,7 @@ if [ -z "$PRETRAINED_CHECKPOINT" ]; then
     echo "❌ Error: Missing required argument: pretrained Graph-Unet checkpoint"
     echo ""
     echo "Usage:"
-    echo "  $0 <checkpoint> [num_envs] [max_iter] [steps] [batch] [epochs] [c_delta] [lr] [seed] [headless]"
+    echo "  $0 <checkpoint> [num_envs] [max_iter] [steps] [batch] [epochs] [c_delta] [c_ent] [lr] [seed] [headless]"
     echo ""
     echo "Arguments:"
     echo "  checkpoint    Pretrained Graph-Unet checkpoint (required)"
@@ -58,14 +59,15 @@ if [ -z "$PRETRAINED_CHECKPOINT" ]; then
     echo "  steps         Steps per env per iteration (default: 130)"
     echo "  batch         Mini-batch size (default: 64)"
     echo "  epochs        Epochs per iteration (default: 5)"
-    echo "  c_delta       Delta regularization weight (default: 2.0)"
+    echo "  c_delta       Delta regularization weight (default: 1.0)"
+    echo "  c_ent         Entropy coefficient (default: 0.01)"
     echo "  lr            Learning rate (default: 3e-4)"
     echo "  seed          Random seed (default: 42)"
     echo "  headless      Run headless (default: false)"
     echo ""
     echo "Environment Variables:"
-    echo "  TASK          Task name (default: SO-ARM101-Lift-Cube-v0)"
-    echo "  SAVE_INTERVAL Save interval (default: 50)"
+    echo "  TASK          Task name (default: SO-ARM101-Lift-Cube-RL-v0, Position+Rotation)"
+    echo "  SAVE_INTERVAL Save interval (default: 20)"
     echo ""
     echo "Examples:"
     echo "  # Basic usage"
@@ -75,7 +77,7 @@ if [ -z "$PRETRAINED_CHECKPOINT" ]; then
     echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 64 500"
     echo ""
     echo "  # Full control"
-    echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 64 500 130 64 5 2.0 3e-4 42 true"
+    echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 64 500 130 64 5 1.0 0.01 3e-4 42 true"
     echo ""
     echo "  # If EV is negative, increase c_delta_reg:"
     echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 64 500 130 64 5 5.0"
@@ -120,9 +122,11 @@ echo "  ├─ Steps per env:        $STEPS_PER_ENV"
 echo "  ├─ Mini-batch size:      $MINI_BATCH_SIZE"
 echo "  ├─ Epochs per iter:      $NUM_EPOCHS"
 echo "  ├─ Delta regularization: $C_DELTA_REG"
+echo "  ├─ Entropy coef (c_ent): $C_ENT"
 echo "  ├─ Learning rate:        $LR"
 echo "  ├─ Seed:                 $SEED"
 echo "  ├─ Headless:             $HEADLESS"
+echo "  ├─ Save interval:        $SAVE_INTERVAL"
 echo "  └─ Log dir:              ./logs/graph_unet_rl/$TASK/"
 echo ""
 echo "Key Metrics to Watch:"
@@ -155,6 +159,7 @@ python scripts/graph_dit_rl/train_graph_rl.py \
     --mini_batch_size "$MINI_BATCH_SIZE" \
     --num_epochs "$NUM_EPOCHS" \
     --c_delta_reg "$C_DELTA_REG" \
+    --c_ent "$C_ENT" \
     --lr "$LR" \
     --seed "$SEED" \
     --log_dir "./logs/graph_unet_rl" \

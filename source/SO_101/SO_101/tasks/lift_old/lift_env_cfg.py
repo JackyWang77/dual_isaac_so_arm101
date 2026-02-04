@@ -148,7 +148,7 @@ class ObservationsCfg:
 
 @configclass
 class EventCfg:
-    """Configuration for events."""
+    """Configuration for events (position-only randomization, used for Play/eval)."""
 
     reset_all = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
 
@@ -158,6 +158,33 @@ class EventCfg:
         params={
             "pose_range": {"x": (-0.1, 0.1), "y": (-0.2, 0.2), "z": (0.0, 0.0)},
             "velocity_range": {},
+            "asset_cfg": SceneEntityCfg("object", body_names="Object"),
+        },
+    )
+
+
+@configclass
+class EventCfgRL:
+    """Configuration for RL training: Position + Rotation randomization (harder, forces new skills)."""
+
+    reset_all = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
+
+    reset_object_state = EventTerm(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={
+            "pose_range": {
+                "x": (-0.1, 0.1),
+                "y": (-0.2, 0.2),
+                "z": (0.0, 0.0),
+                "roll": (-3.14, 3.14),
+                "pitch": (-3.14, 3.14),
+                "yaw": (-3.14, 3.14),
+            },
+            "velocity_range": {
+                "x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0),
+                "roll": (0.0, 0.0), "pitch": (0.0, 0.0), "yaw": (0.0, 0.0),
+            },
             "asset_cfg": SceneEntityCfg("object", body_names="Object"),
         },
     )

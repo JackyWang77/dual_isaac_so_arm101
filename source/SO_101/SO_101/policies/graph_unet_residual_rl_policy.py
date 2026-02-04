@@ -274,16 +274,16 @@ class GraphUnetResidualRLCfg:
     obs_structure: Optional[Dict[str, Tuple[int, int]]] = None
     robot_state_dim: int = 6  # joint_pos dimension
 
-    # Actor/Critic obs selection: which parts of obs to use
-    # Default: "robot_state" - only joint position (recommended, since z_bar already contains scene info)
+    # Actor/Critic obs selection: which parts of obs to use (current state only; z_bar = history)
     # Options:
-    #   - "robot_state": use only joint position (obs[:, :robot_state_dim], default)
-    #   - "full": use all obs (may be redundant with z_bar)
-    #   - Tuple[int, int]: use obs[:, start:end] slice
-    actor_obs_mode: str = "robot_state"  # Only joint position: obs[:, :6]
-    critic_obs_mode: str = "robot_state"  # Only joint position: obs[:, :6]
+    #   - "robot_state": joint position only (obs[:, :6])
+    #   - "joint_object_ee": joint_pos(6) + object(7) + ee(7) = 20 dims (current state)
+    #   - "full": all obs (may be redundant with z_bar)
+    #   - Tuple[int, int]: obs[:, start:end] slice
+    actor_obs_mode: str = "joint_object_ee"
+    critic_obs_mode: str = "joint_object_ee"
 
-    # actor input: [obs_selected, a_base, z_bar]
+    # actor input: [obs_selected, a_base, z_bar]; obs = current, z_bar = from history
     actor_hidden: Tuple[int, ...] = (256, 256)
     critic_hidden: Tuple[int, ...] = (256, 256)
 
@@ -310,7 +310,7 @@ class GraphUnetResidualRLCfg:
     cV: float = 1.0
     cEnt: float = 0.01
     cGate: float = 0.0  # Unused (no gate)
-    c_delta_reg: float = 2.0  # Delta (residual) regularization: higher = smoother, RL "don't move unless reward"
+    c_delta_reg: float = 1.0  # Delta (residual) regularization: higher = smoother, RL "don't move unless reward"
 
     # gae
     gamma: float = 0.99
@@ -582,6 +582,8 @@ class GraphUnetResidualRLPolicy(nn.Module):
                 return cfg.obs_dim
             elif mode == "robot_state" or mode == "robot_state_only":
                 return cfg.robot_state_dim
+            elif mode == "joint_object_ee":
+                return 20  # joint_pos(6) + object(7) + ee(7)
             elif isinstance(mode, tuple) and len(mode) == 2:
                 start, end = mode
                 return end - start
@@ -773,11 +775,12 @@ class GraphUnetResidualRLPolicy(nn.Module):
 
     def _select_obs_for_rl(self, obs: torch.Tensor, mode: str) -> torch.Tensor:
         """
-        Select which parts of obs to use for Actor/Critic
+        Select which parts of obs to use for Actor/Critic (current state only).
+        obs is already normalized (obs_norm); z_bar carries history.
         
         Args:
-            obs: [B, obs_dim] - full observation
-            mode: "full", "robot_state", or Tuple[int, int] for slice
+            obs: [B, obs_dim] - full normalized observation
+            mode: "full", "robot_state", "joint_object_ee", or Tuple[int, int] for slice
         
         Returns:
             obs_selected: [B, selected_dim]
@@ -785,15 +788,37 @@ class GraphUnetResidualRLPolicy(nn.Module):
         if mode == "full":
             return obs
         elif mode == "robot_state" or mode == "robot_state_only":
-            # Use only robot_state (joint_pos) part
             robot_state_dim = self.cfg.robot_state_dim
             return obs[:, :robot_state_dim]
+        elif mode == "joint_object_ee":
+            # joint_pos(6) + object_pos(3)+object_ori(4) + ee_pos(3)+ee_ori(4) = 20 dims
+            cfg = self.cfg
+            if cfg.obs_structure is not None:
+                s = cfg.obs_structure
+                j_end = cfg.robot_state_dim
+                obj_start = s["object_position"][0]
+                obj_end = s["object_orientation"][1]
+                ee_start = s["ee_position"][0]
+                ee_end = s["ee_orientation"][1]
+                return torch.cat([
+                    obs[:, :j_end],
+                    obs[:, obj_start:obj_end],
+                    obs[:, ee_start:ee_end],
+                ], dim=-1)
+            else:
+                # Default: joint(0:6), object(12:19), ee(19:26)
+                return torch.cat([
+                    obs[:, :6],
+                    obs[:, 12:19],
+                    obs[:, 19:26],
+                ], dim=-1)
         elif isinstance(mode, tuple) and len(mode) == 2:
-            # Custom slice: obs[:, start:end]
             start, end = mode
             return obs[:, start:end]
         else:
-            raise ValueError(f"Unknown obs_mode: {mode}. Use 'full', 'robot_state', or (start, end) tuple.")
+            raise ValueError(
+                f"Unknown obs_mode: {mode}. Use 'full', 'robot_state', 'joint_object_ee', or (start, end) tuple."
+            )
 
     def _normalize_nodes(
         self, 

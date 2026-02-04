@@ -24,7 +24,8 @@ from isaaclab.app import AppLauncher
 
 # CLI args
 parser = argparse.ArgumentParser(description="Train GraphDiT + Residual RL Policy")
-parser.add_argument("--task", type=str, default="SO-ARM101-Lift-Cube-v0")
+parser.add_argument("--task", type=str, default="SO-ARM101-Lift-Cube-RL-v0",
+                    help="SO-ARM101-Lift-Cube-RL-v0: Position+Rotation (training), SO-ARM101-Lift-Cube-v0: Position only")
 parser.add_argument("--pretrained_checkpoint", type=str, required=True,
                     help="Pretrained Graph-Unet checkpoint (residual RL is Unet-only)")
 parser.add_argument("--num_envs", type=int, default=64)
@@ -40,7 +41,8 @@ parser.add_argument("--num_epochs", type=int, default=5, help="Epochs per iterat
 parser.add_argument("--mini_batch_size", type=int, default=64)
 parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
 parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradient norm")
-parser.add_argument("--c_delta_reg", type=float, default=2.0, help="Delta (residual) regularization weight; higher = smoother, RL 'don't move unless reward'")
+parser.add_argument("--c_delta_reg", type=float, default=1.0, help="Delta (residual) regularization weight; higher = smoother, RL 'don't move unless reward'")
+parser.add_argument("--c_ent", type=float, default=0.01, help="Entropy coefficient; encourages exploration")
 
 # AppLauncher
 AppLauncher.add_app_launcher_args(parser)
@@ -797,6 +799,7 @@ def main():
         robot_state_dim=6,
         residual_action_mask=residual_action_mask,
         c_delta_reg=args.c_delta_reg,
+        cEnt=args.c_ent,
     )
     print(f"[Main] residual_action_mask: {residual_action_mask.tolist()} (all 1s, no mask)")
     print(f"[Main] Residual RL obs_structure: {policy_cfg.obs_structure}")

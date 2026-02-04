@@ -41,6 +41,17 @@ gym.register(
     disable_env_checker=True,
 )
 
+# RL training with Position+Rotation randomization (harder, cube can be tilted)
+gym.register(
+    id="SO-ARM101-Lift-Cube-RL-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.joint_pos_env_cfg:SoArm100LiftJointCubeEnvCfg_RL",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:LiftCubePPORunnerCfg",
+    },
+    disable_env_checker=True,
+)
+
 gym.register(
     id="SO-ARM101-Lift-Cube-Play-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",

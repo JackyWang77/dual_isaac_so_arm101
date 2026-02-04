@@ -19,7 +19,7 @@ from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from SO_101.robots import (SO_ARM101_CFG, SO_ARM101_ROSCON_CFG,  # noqa: F401
                            SO_ARM101_ROSCON_HIGH_PD_CFG)
-from SO_101.tasks.lift_old.lift_env_cfg import LiftEnvCfg
+from SO_101.tasks.lift_old.lift_env_cfg import EventCfgRL, LiftEnvCfg
 
 from isaaclab.markers.config import FRAME_MARKER_CFG  # isort: skip
 
@@ -70,7 +70,7 @@ class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
         self.scene.object = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Object",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.2, 0.0, 0.015], rot=[1, 0, 0, 0]
+                pos=[0.2, 0.0, 0.005], rot=[1, 0, 0, 0]
             ),
             spawn=UsdFileCfg(
                 usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
@@ -127,12 +127,20 @@ class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
 
 
 @configclass
+class SoArm100LiftJointCubeEnvCfg_RL(SoArm100LiftJointCubeEnvCfg):
+    """RL training config: Position + Rotation randomization (cube can be tilted/knocked over).
+    Forces RL to learn beyond backbone (e.g. with Edge Features V2)."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.events = EventCfgRL()
+
+
+@configclass
 class SoArm100LiftJointCubeEnvCfg_PLAY(SoArm100LiftJointCubeEnvCfg):
     def __post_init__(self):
-        # post init of parent
         super().__post_init__()
-        # make a smaller scene for play
         self.scene.num_envs = 50
         self.scene.env_spacing = 2.5
-        # disable randomization for play
         self.observations.policy.enable_corruption = False
+
