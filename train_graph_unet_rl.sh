@@ -27,8 +27,9 @@ set -e
 PRETRAINED_CHECKPOINT="${1:-}"
 NUM_ENVS="${2:-128}"           # 折中：64太少，512太卡，128 是 L4 甜点位
 MAX_ITERATIONS="${3:-1000}"
-STEPS_PER_ENV="${4:-200}"      # 200步=4s，一次采完 Episode；超时=判负
-MINI_BATCH_SIZE="${5:-2048}"   # 128*200=25600，切成 2048 合适
+# CRITICAL: 必须 > episode_length (3s=150步) 留缓冲，否则超时 episode 可能采不完→SR 虚高
+STEPS_PER_ENV="${4:-160}"
+MINI_BATCH_SIZE="${5:-2048}"   # 128*160=20480，切成 2048 合适
 NUM_EPOCHS="${6:-5}"
 C_DELTA_REG="${7:-1.0}"
 C_ENT="${8:-0.01}"
@@ -57,7 +58,7 @@ if [ -z "$PRETRAINED_CHECKPOINT" ]; then
     echo "  checkpoint    Pretrained Graph-Unet checkpoint (required)"
     echo "  num_envs      Number of parallel environments (default: 128)"
     echo "  max_iter      Maximum training iterations (default: 1000)"
-    echo "  steps         Steps per env per iteration (default: 200, full episode 4s; 超时=判负)"
+    echo "  steps         Steps per env per iteration (default: 160, >150 留缓冲; 超时=判负)"
     echo "  batch         Mini-batch size (default: 2048)"
     echo "  epochs        Epochs per iteration (default: 5)"
     echo "  c_delta       Delta regularization weight (default: 1.0)"
@@ -79,11 +80,11 @@ if [ -z "$PRETRAINED_CHECKPOINT" ]; then
     echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 64 500"
     echo ""
     echo "  # Full control"
-    echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 128 1000 200 2048 5 1.0 0.01 0.05 3e-4 42 true"
+    echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 128 1000 160 2048 5 1.0 0.01 0.05 3e-4 42 true"
     echo ""
     echo "  # If EV is negative, increase c_delta_reg:"
     echo "  # If EV negative, increase c_delta_reg"
-    echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 128 1000 200 2048 5 5.0 0.01 0.05"
+    echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 128 1000 160 2048 5 5.0 0.01 0.05"
     echo ""
     echo "Tips:"
     echo "  - Watch SR (Success Rate): should increase from ~78% to 90%+"

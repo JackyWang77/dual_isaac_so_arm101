@@ -36,7 +36,7 @@ parser.add_argument("--log_dir", type=str, default="./logs/graph_unet_rl", help=
 parser.add_argument("--save_interval", type=int, default=50)
 
 # Rollout config
-parser.add_argument("--steps_per_env", type=int, default=200, help="Steps per env per iteration (200=full episode at 4s; 超时=判负)")
+parser.add_argument("--steps_per_env", type=int, default=160, help="Steps per env per iteration (>150 留缓冲，episode 3s=150步; 超时=判负)")
 parser.add_argument("--num_epochs", type=int, default=5, help="Epochs per iteration")
 parser.add_argument("--mini_batch_size", type=int, default=64)
 parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
@@ -221,7 +221,7 @@ class GraphDiTRLTrainer:
         device: str = "cuda",
         log_dir: str = "./logs",
         # Training params
-        steps_per_env: int = 200,
+        steps_per_env: int = 160,
         num_epochs: int = 5,
         mini_batch_size: int = 64,
         lr: float = 3e-4,
@@ -313,6 +313,11 @@ class GraphDiTRLTrainer:
         self.action_std = None
 
         print(f"[Trainer] num_envs: {self.num_envs}, steps_per_env: {steps_per_env}")
+        if steps_per_env <= 150:
+            print(
+                f"[Trainer] ⚠️ WARNING: steps_per_env={steps_per_env} <= 150 (episode_length). "
+                "超时 episode 可能采不完→SR 虚高！建议 steps_per_env > 150 留缓冲"
+            )
         print(f"[Trainer] trainable params: {sum(p.numel() for p in trainable_params):,}")
 
         # 成功率：与 play / play_rl 一致，仅用 truncated + 高度（不用 env_info log，标量不可用）
