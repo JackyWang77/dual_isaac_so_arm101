@@ -34,7 +34,7 @@ class SoArm100LiftJointCubeEnvCfg(LiftEnvCfg):
         # post init of parent
         super().__post_init__()
         # Increase episode length for Residual RL (needs more time to complete lift task)
-        self.episode_length_s = 3.0  # 3 seconds - ~150 env steps; 150步怎么都完事了，超时=判负
+        self.episode_length_s = 4.0  # 4 seconds - ~200 env steps; 超时=判负
 
         # Set so arm as robot
         # self.scene.robot = SO_ARM101_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
