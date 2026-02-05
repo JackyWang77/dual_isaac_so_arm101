@@ -32,9 +32,10 @@ MINI_BATCH_SIZE="${5:-64}"
 NUM_EPOCHS="${6:-5}"
 C_DELTA_REG="${7:-1.0}"
 C_ENT="${8:-0.005}"
-LR="${9:-3e-4}"
-SEED="${10:-42}"
-HEADLESS="${11:-false}"
+BETA="${9:-0.05}"
+LR="${10:-3e-4}"
+SEED="${11:-42}"
+HEADLESS="${12:-false}"
 
 TASK="${TASK:-SO-ARM101-Lift-Cube-v0}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-10}"
@@ -50,7 +51,7 @@ if [ -z "$PRETRAINED_CHECKPOINT" ]; then
     echo "❌ Error: Missing required argument: pretrained Graph-Unet checkpoint"
     echo ""
     echo "Usage:"
-    echo "  $0 <checkpoint> [num_envs] [max_iter] [steps] [batch] [epochs] [c_delta] [c_ent] [lr] [seed] [headless]"
+    echo "  $0 <checkpoint> [num_envs] [max_iter] [steps] [batch] [epochs] [c_delta] [c_ent] [beta] [lr] [seed] [headless]"
     echo ""
     echo "Arguments:"
     echo "  checkpoint    Pretrained Graph-Unet checkpoint (required)"
@@ -61,6 +62,7 @@ if [ -z "$PRETRAINED_CHECKPOINT" ]; then
     echo "  epochs        Epochs per iteration (default: 5)"
     echo "  c_delta       Delta regularization weight (default: 1.0)"
     echo "  c_ent         Entropy coefficient (default: 0.01)"
+    echo "  beta          AWR beta: w=exp(adv/beta) (default: 1.0)"
     echo "  lr            Learning rate (default: 3e-4)"
     echo "  seed          Random seed (default: 42)"
     echo "  headless      Run headless (default: false)"
@@ -77,7 +79,7 @@ if [ -z "$PRETRAINED_CHECKPOINT" ]; then
     echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 64 500"
     echo ""
     echo "  # Full control"
-    echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 64 500 250 64 5 1.0 0.01 3e-4 42 true"
+    echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 64 500 250 64 5 1.0 0.01 1.0 3e-4 42 true"
     echo ""
     echo "  # If EV is negative, increase c_delta_reg:"
     echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 64 500 130 64 5 5.0"
@@ -123,6 +125,7 @@ echo "  ├─ Mini-batch size:      $MINI_BATCH_SIZE"
 echo "  ├─ Epochs per iter:      $NUM_EPOCHS"
 echo "  ├─ Delta regularization: $C_DELTA_REG"
 echo "  ├─ Entropy coef (c_ent): $C_ENT"
+echo "  ├─ AWR beta:             $BETA"
 echo "  ├─ Learning rate:        $LR"
 echo "  ├─ Seed:                 $SEED"
 echo "  ├─ Headless:             $HEADLESS"
@@ -160,6 +163,7 @@ python scripts/graph_dit_rl/train_graph_rl.py \
     --num_epochs "$NUM_EPOCHS" \
     --c_delta_reg "$C_DELTA_REG" \
     --c_ent "$C_ENT" \
+    --beta "$BETA" \
     --lr "$LR" \
     --seed "$SEED" \
     --log_dir "./logs/graph_unet_rl" \

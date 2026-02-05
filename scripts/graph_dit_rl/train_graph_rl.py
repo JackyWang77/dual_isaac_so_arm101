@@ -43,6 +43,7 @@ parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
 parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradient norm")
 parser.add_argument("--c_delta_reg", type=float, default=1.0, help="Delta (residual) regularization weight; higher = smoother, RL 'don't move unless reward'")
 parser.add_argument("--c_ent", type=float, default=0.01, help="Entropy coefficient; encourages exploration")
+parser.add_argument("--beta", type=float, default=1.0, help="AWR beta: w=exp(adv/beta); higher=softer weighting, lower=sharper on high-adv samples")
 
 # AppLauncher
 AppLauncher.add_app_launcher_args(parser)
@@ -800,6 +801,7 @@ def main():
         residual_action_mask=residual_action_mask,
         c_delta_reg=args.c_delta_reg,
         cEnt=args.c_ent,
+        beta=args.beta,
     )
     print(f"[Main] residual_action_mask: {residual_action_mask.tolist()} (all 1s, no mask)")
     print(f"[Main] Residual RL obs_structure: {policy_cfg.obs_structure}")
