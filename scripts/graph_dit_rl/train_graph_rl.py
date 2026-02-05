@@ -36,7 +36,7 @@ parser.add_argument("--log_dir", type=str, default="./logs/graph_unet_rl", help=
 parser.add_argument("--save_interval", type=int, default=50)
 
 # Rollout config
-parser.add_argument("--steps_per_env", type=int, default=250, help="Steps per env per iteration (250=full episode at 5s)")
+parser.add_argument("--steps_per_env", type=int, default=150, help="Steps per env per iteration (150=full episode at 3s; 超时=判负)")
 parser.add_argument("--num_epochs", type=int, default=5, help="Epochs per iteration")
 parser.add_argument("--mini_batch_size", type=int, default=64)
 parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
@@ -221,7 +221,7 @@ class GraphDiTRLTrainer:
         device: str = "cuda",
         log_dir: str = "./logs",
         # Training params
-        steps_per_env: int = 250,
+        steps_per_env: int = 150,
         num_epochs: int = 5,
         mini_batch_size: int = 64,
         lr: float = 3e-4,
@@ -449,11 +449,11 @@ class GraphDiTRLTrainer:
                 for i in done_envs.tolist():
                     self.episode_rewards.append(ep_rewards[i].item())
                     self.episode_lengths.append(ep_lengths[i].item())
-                    # 与 play / play_rl 一致：仅 truncated + 高度（obs = step 前状态）
+                    # 超时判负：truncated(timeout)=0，否则 height>=0.1=成功
                     obj_height = obs[i, self.OBJ_HEIGHT_IDX].item()
                     is_truncated = bool(truncated[i].item() if hasattr(truncated[i], "item") else truncated[i])
                     if is_truncated:
-                        is_success = False
+                        is_success = False  # 超时=判负，计入分母
                     else:
                         is_success = obj_height >= self.SUCCESS_HEIGHT
                     rollout_successes.append(float(is_success))
