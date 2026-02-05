@@ -209,7 +209,7 @@ class RewardsCfg:
     lifting_object = RewTerm(
         func=mdp.object_is_lifted,
         params={"minimal_height": 0.04, "initial_height": 0.015},
-        weight=15.0,
+        weight=20.0,
     )
 
     # Smoothness: action 变化 + 关节速度 惩罚，减轻抖动
