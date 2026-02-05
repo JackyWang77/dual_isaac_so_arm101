@@ -108,10 +108,10 @@ def success_termination_bonus(
     height = object.data.root_pos_w[:, 2]
     success_mask = height >= minimal_height
 
-    # 获取当前步数 (Isaac Lab: episode_length_buf)
-    step_buf = getattr(env, "episode_length_buf", None) or getattr(
-        getattr(env, "scene", None), "episode_length_buf", None
-    )
+    # 获取当前步数 (Isaac Lab: episode_length_buf)，避免 tensor or ... 导致 RuntimeError
+    step_buf = getattr(env, "episode_length_buf", None)
+    if step_buf is None and hasattr(env, "scene"):
+        step_buf = getattr(env.scene, "episode_length_buf", None)
     if step_buf is not None and step_buf.numel() == object.data.root_pos_w.shape[0]:
         current_step = step_buf.float().clamp(0, max_steps)
         time_ratio = (max_steps - current_step) / max_steps
