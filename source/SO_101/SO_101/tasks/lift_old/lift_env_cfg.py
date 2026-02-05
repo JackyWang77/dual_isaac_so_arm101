@@ -216,6 +216,20 @@ class RewardsCfg:
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-3)
     joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-1e-4)
 
+    # Efficiency shaping: 好的和坏的有区分度
+    # 1) Success_Bonus: 成功 +bonus，失败 0
+    success_termination_bonus = RewTerm(
+        func=mdp.success_termination_bonus,
+        params={"minimal_height": 0.1, "bonus": 10.0},
+        weight=1.0,
+    )
+    # 2) Time penalty ≈ (Max_Steps - Current_Step): 越早成功惩罚越少
+    time_penalty = RewTerm(
+        func=mdp.time_penalty,
+        params={"value": -1.0},
+        weight=0.05,  # -0.05 per step; success@100=-5, timeout@250=-12.5
+    )
+
 
 @configclass
 class TerminationsCfg:

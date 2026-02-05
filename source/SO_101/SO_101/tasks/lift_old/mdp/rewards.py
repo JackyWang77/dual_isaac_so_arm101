@@ -78,3 +78,32 @@ def object_ee_distance(
     object_ee_distance = torch.norm(cube_pos_w - ee_w, dim=1)
 
     return 1 - torch.tanh(object_ee_distance / std)
+
+
+def time_penalty(
+    env: ManagerBasedRLEnv,
+    value: float = -1.0,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+) -> torch.Tensor:
+    """Constant negative reward per step. Encourages faster completion.
+    Base can succeed; RL's value = succeed more efficiently (shorter time).
+    Use weight=0.01 for -0.01 per step."""
+    object: RigidObject = env.scene[object_cfg.name]
+    num_envs = object.data.root_pos_w.shape[0]
+    device = object.data.root_pos_w.device
+    return torch.full((num_envs,), value, device=device, dtype=object.data.root_pos_w.dtype)
+
+
+def success_termination_bonus(
+    env: ManagerBasedRLEnv,
+    minimal_height: float = 0.1,
+    bonus: float = 10.0,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+) -> torch.Tensor:
+    """One-time bonus when object reaches success height (episode terminates).
+    Creates clear distinguishability: success=+bonus, fail=0.
+    Reward = Success_Bonus (additive to per-step rewards)."""
+    object: RigidObject = env.scene[object_cfg.name]
+    height = object.data.root_pos_w[:, 2]
+    return torch.where(height >= minimal_height, bonus, 0.0).float()
+
