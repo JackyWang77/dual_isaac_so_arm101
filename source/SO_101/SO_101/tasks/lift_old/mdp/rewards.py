@@ -85,9 +85,8 @@ def time_penalty(
     value: float = -1.0,
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
 ) -> torch.Tensor:
-    """Constant negative reward per step. Encourages faster completion.
-    Base can succeed; RL's value = succeed more efficiently (shorter time).
-    Use weight=0.01 for -0.01 per step."""
+    """Constant negative reward per step. 已弃用：改用 success_termination_bonus 的 time_bonus。
+    保留函数以防引用。"""
     object: RigidObject = env.scene[object_cfg.name]
     num_envs = object.data.root_pos_w.shape[0]
     device = object.data.root_pos_w.device
@@ -97,13 +96,29 @@ def time_penalty(
 def success_termination_bonus(
     env: ManagerBasedRLEnv,
     minimal_height: float = 0.1,
-    bonus: float = 10.0,
+    base_bonus: float = 10.0,
+    time_bonus_max: float = 3.0,
+    max_steps: float = 150.0,
     object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
 ) -> torch.Tensor:
-    """One-time bonus when object reaches success height (episode terminates).
-    Creates clear distinguishability: success=+bonus, fail=0.
-    Reward = Success_Bonus (additive to per-step rewards)."""
+    """Success bonus with bounded time reward. Total [10.0, 13.0].
+    Actor 不敢为 3 分冒丢 10 分的险，避免为速度牺牲进度。
+    reward = base_bonus + time_bonus_max * (max_steps - current_step) / max_steps"""
     object: RigidObject = env.scene[object_cfg.name]
     height = object.data.root_pos_w[:, 2]
-    return torch.where(height >= minimal_height, bonus, 0.0).float()
+    success_mask = height >= minimal_height
+
+    # 获取当前步数 (Isaac Lab: episode_length_buf)
+    step_buf = getattr(env, "episode_length_buf", None) or getattr(
+        getattr(env, "scene", None), "episode_length_buf", None
+    )
+    if step_buf is not None and step_buf.numel() == object.data.root_pos_w.shape[0]:
+        current_step = step_buf.float().clamp(0, max_steps)
+        time_ratio = (max_steps - current_step) / max_steps
+        time_bonus = time_bonus_max * time_ratio
+        reward = torch.where(success_mask, base_bonus + time_bonus, 0.0)
+    else:
+        reward = torch.where(success_mask, base_bonus, 0.0)
+
+    return reward.float()
 
