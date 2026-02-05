@@ -280,8 +280,8 @@ class GraphUnetResidualRLCfg:
     #   - "joint_object_ee": joint_pos(6) + object(7) + ee(7) = 20 dims (current state)
     #   - "full": all obs (may be redundant with z_bar)
     #   - Tuple[int, int]: obs[:, start:end] slice
-    actor_obs_mode: str = "joint_object_ee"
-    critic_obs_mode: str = "joint_object_ee"
+    actor_obs_mode: str = "robot_state"  # joint only; ee/obj 无明显变化
+    critic_obs_mode: str = "robot_state"
 
     # actor input: [obs_selected, a_base, z_bar]; obs = current, z_bar = from history
     actor_hidden: Tuple[int, ...] = (256, 256)
