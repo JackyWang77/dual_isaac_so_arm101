@@ -25,21 +25,26 @@ set -e
 # Parse Arguments
 # ============================================================
 PRETRAINED_CHECKPOINT="${1:-}"
-NUM_ENVS="${2:-128}"           # 折中：64太少，512太卡，128 是 L4 甜点位
-MAX_ITERATIONS="${3:-1000}"
-# CRITICAL: 必须 > episode_length (3s=150步) 留缓冲，否则超时 episode 可能采不完→SR 虚高
+NUM_ENVS="${2:-128}"
+MAX_ITERATIONS="${3:-200}"
 STEPS_PER_ENV="${4:-160}"
-MINI_BATCH_SIZE="${5:-2048}"   # 128*160=20480，切成 2048 合适
-NUM_EPOCHS="${6:-5}"
-C_DELTA_REG="${7:-1.0}"
-C_ENT="${8:-0.01}"
-BETA="${9:-0.05}"              # 保持精英筛选
-LR="${10:-3e-4}"
-SEED="${11:-42}"
-HEADLESS="${12:-true}"
+MINI_BATCH_SIZE="${5:-128}"   
+NUM_EPOCHS="${6:-8}"
+C_DELTA_REG="${7:-10.0}"
+C_ENT="${8:-0.0}"              # no entropy 效果好
+BETA="${9:-0.5}"               # 从 0.05 → 0.3
+ALPHA_INIT="${10:-0.10}"       # residual alpha init: a=base+alpha*delta; 可调
+EXPECTILE_TAU="${11:-0.5}"     # expectile τ for value loss (IQL-style)
+LR="${12:-5e-4}"               # 小一点保护 85%
+SEED="${13:-42}"
+HEADLESS="${14:-true}"
 
 TASK="${TASK:-SO-ARM101-Lift-Cube-v0}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-10}"
+USE_ADAPTIVE_ALPHA="${USE_ADAPTIVE_ALPHA:-false}"  # true: alpha_net (state-dependent); false: scalar alpha
+USE_ADAPTIVE_ENTROPY="${USE_ADAPTIVE_ENTROPY:-true}"  # true: adv<0 高熵探索, adv>0 低熵收敛; false: 固定 cEnt
+C_ENT_BAD="${C_ENT_BAD:-0.005}"    # adv<0 时熵权重 (Adaptive Entropy)
+C_ENT_GOOD="${C_ENT_GOOD:-0.0001}" # adv>0 时熵权重 (Adaptive Entropy)
 
 # ============================================================
 # Help / Validation
@@ -52,7 +57,7 @@ if [ -z "$PRETRAINED_CHECKPOINT" ]; then
     echo "❌ Error: Missing required argument: pretrained Graph-Unet checkpoint"
     echo ""
     echo "Usage:"
-    echo "  $0 <checkpoint> [num_envs] [max_iter] [steps] [batch] [epochs] [c_delta] [c_ent] [beta] [lr] [seed] [headless]"
+    echo "  $0 <checkpoint> [num_envs] [max_iter] [steps] [batch] [epochs] [c_delta] [c_ent] [beta] [alpha_init] [expectile_tau] [lr] [seed] [headless]"
     echo ""
     echo "Arguments:"
     echo "  checkpoint    Pretrained Graph-Unet checkpoint (required)"
@@ -63,14 +68,18 @@ if [ -z "$PRETRAINED_CHECKPOINT" ]; then
     echo "  epochs        Epochs per iteration (default: 5)"
     echo "  c_delta       Delta regularization weight (default: 1.0)"
     echo "  c_ent         Entropy coefficient (default: 0.01)"
-    echo "  beta          AWR beta: w=exp(adv/beta) (default: 0.05, 精英筛选)"
-    echo "  lr            Learning rate (default: 3e-4)"
+echo "  beta          AWR beta: w=exp(adv/beta) (default: 0.05, 精英筛选)"
+echo "  alpha_init    Residual alpha init (default: 0.10, 可调)"
+echo "  expectile_tau Expectile τ for value loss (default: 0.7, IQL-style)"
+echo "  lr            Learning rate (default: 3e-4)"
     echo "  seed          Random seed (default: 42)"
     echo "  headless      Run headless (default: true)"
     echo ""
     echo "Environment Variables:"
-    echo "  TASK          Task name (default: SO-ARM101-Lift-Cube-RL-v0, Position+Rotation)"
-    echo "  SAVE_INTERVAL Save interval (default: 20)"
+    echo "  TASK              Task name (default: SO-ARM101-Lift-Cube-RL-v0, Position+Rotation)"
+    echo "  SAVE_INTERVAL     Save interval (default: 20)"
+    echo "  USE_ADAPTIVE_ENTROPY  true/false (default: true)"
+    echo "  C_ENT_BAD, C_ENT_GOOD  Adaptive entropy weights (default: 0.02, 0.005)"
     echo ""
     echo "Examples:"
     echo "  # Basic usage"
@@ -79,12 +88,11 @@ if [ -z "$PRETRAINED_CHECKPOINT" ]; then
     echo "  # With 64 envs, 500 iterations"
     echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 64 500"
     echo ""
-    echo "  # Full control"
-    echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 128 1000 160 2048 5 1.0 0.01 0.05 3e-4 42 true"
+echo "  # Full control"
+echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 128 1000 160 2048 5 1.0 0.01 0.05 0.10 0.7 3e-4 42 true"
     echo ""
-    echo "  # If EV is negative, increase c_delta_reg:"
-    echo "  # If EV negative, increase c_delta_reg"
-    echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 128 1000 160 2048 5 5.0 0.01 0.05"
+echo "  # If EV negative, increase c_delta_reg"
+echo "  $0 ./logs/graph_unet/lift_joint/best_model.pt 128 1000 160 2048 5 5.0 0.01 0.05 0.10 0.7"
     echo ""
     echo "Tips:"
     echo "  - Watch SR (Success Rate): should increase from ~78% to 90%+"
@@ -101,13 +109,19 @@ if [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
 fi
 
 # ============================================================
-# Headless Flag
+# Headless Flag / Adaptive Alpha Flag
 # ============================================================
 if [ "$HEADLESS" = "true" ] || [ "$HEADLESS" = "1" ]; then
     HEADLESS_FLAG="--headless"
 else
     HEADLESS_FLAG=""
 fi
+ADAPTIVE_ALPHA_FLAG=""
+[ "$USE_ADAPTIVE_ALPHA" = "false" ] && ADAPTIVE_ALPHA_FLAG="--no_adaptive_alpha"
+ADAPTIVE_ENTROPY_FLAG=""
+[ "$USE_ADAPTIVE_ENTROPY" = "false" ] && ADAPTIVE_ENTROPY_FLAG="--no_adaptive_entropy"
+DEBUG_ALPHA_FLAG=""
+[ "${DEBUG_ALPHA:-false}" = "true" ] && DEBUG_ALPHA_FLAG="--debug_alpha"
 
 # ============================================================
 # Display Configuration
@@ -127,7 +141,11 @@ echo "  ├─ Mini-batch size:      $MINI_BATCH_SIZE"
 echo "  ├─ Epochs per iter:      $NUM_EPOCHS"
 echo "  ├─ Delta regularization: $C_DELTA_REG"
 echo "  ├─ Entropy coef (c_ent): $C_ENT"
+echo "  ├─ Adaptive entropy:     $USE_ADAPTIVE_ENTROPY (bad=$C_ENT_BAD, good=$C_ENT_GOOD)"
 echo "  ├─ AWR beta:             $BETA"
+echo "  ├─ Alpha init:           $ALPHA_INIT"
+echo "  ├─ Adaptive alpha:       $USE_ADAPTIVE_ALPHA (state-dependent alpha_net)"
+echo "  ├─ Expectile τ:          $EXPECTILE_TAU"
 echo "  ├─ Learning rate:        $LR"
 echo "  ├─ Seed:                 $SEED"
 echo "  ├─ Headless:             $HEADLESS"
@@ -165,7 +183,14 @@ python scripts/graph_dit_rl/train_graph_rl.py \
     --num_epochs "$NUM_EPOCHS" \
     --c_delta_reg "$C_DELTA_REG" \
     --c_ent "$C_ENT" \
+    --c_ent_bad "$C_ENT_BAD" \
+    --c_ent_good "$C_ENT_GOOD" \
     --beta "$BETA" \
+    --alpha_init "$ALPHA_INIT" \
+    --expectile_tau "$EXPECTILE_TAU" \
+    $ADAPTIVE_ALPHA_FLAG \
+    $ADAPTIVE_ENTROPY_FLAG \
+    $DEBUG_ALPHA_FLAG \
     --lr "$LR" \
     --seed "$SEED" \
     --log_dir "./logs/graph_unet_rl" \

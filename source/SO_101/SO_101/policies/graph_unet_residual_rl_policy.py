@@ -297,6 +297,8 @@ class GraphUnetResidualRLCfg:
 
     # residual scaling
     alpha_init: float = 0.10
+    use_adaptive_alpha: bool = True  # True: alpha_net(z_bar,obs)->[B,6]; False: scalar alpha
+    alpha_hidden: Tuple[int, ...] = (64,)  # Hidden dims for adaptive alpha net
 
     # EMA smoothing for base_action (joints only, gripper excluded)
     ema_alpha: float = 0.5  # EMA weight: higher = more responsive, lower = smoother
@@ -308,9 +310,20 @@ class GraphUnetResidualRLCfg:
 
     # losses (residual RL is U-Net only: no gate, bar head only)
     cV: float = 1.0
-    cEnt: float = 0.01
+    # Adaptive Entropy: adv<0 烂动作→高熵(探索), adv>0 好动作→低熵(收敛)
+    cEnt: float = 0.01  # 仅 use_adaptive_entropy=False 时使用
+    use_adaptive_entropy: bool = True
+    c_ent_bad: float = 0.02   # adv<0 时熵权重，强迫探索
+    c_ent_good: float = 0.005  # adv>0 时熵权重，允许收敛
     cGate: float = 0.0  # Unused (no gate)
     c_delta_reg: float = 1.0  # Delta (residual) regularization: higher = smoother, RL "don't move unless reward"
+
+    # expectile value loss (IQL-style): τ>0.5 → value learns optimistic target
+    use_expectile_value: bool = True
+    expectile_tau: float = 0.7  # τ=0.7: predict 70th percentile of returns
+
+    # debug: print alpha/delta stats in act() (set True to diagnose 0% SR)
+    debug_alpha: bool = False
 
     # gae
     gamma: float = 0.99
@@ -348,6 +361,27 @@ class LayerWiseGateNet(nn.Module):
         logits = self.net(x)
         w = torch.softmax(logits, dim=-1)
         return w
+
+
+class AdaptiveAlphaNet(nn.Module):
+    """State-dependent per-dim alpha: alpha_vec = f(z_bar, obs) -> [B, 6].
+    Arm (0-4): [0, 0.3]; Gripper (5): always 1.0."""
+    def __init__(self, in_dim: int, hidden: Tuple[int, ...], act: str = "silu", alpha_init: float = 0.10):
+        super().__init__()
+        self.net = mlp(in_dim, hidden, 6, act=act)
+        # Init last layer so initial output ~alpha_init/0.3 for arm (sigmoid scale)
+        init_val = alpha_init / 0.3
+        init_val = max(0.01, min(0.99, init_val))
+        logit_init = np.log(init_val / (1 - init_val))
+        nn.init.zeros_(self.net[-1].weight)
+        nn.init.constant_(self.net[-1].bias, logit_init)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: [B, z_dim + obs_dim]
+        raw = torch.sigmoid(self.net(x))  # [B, 6], range (0, 1)
+        alpha_vec = raw * 0.3  # Arm: [0, 0.3]
+        alpha_vec[:, 5] = 1.0  # Gripper: full override
+        return alpha_vec
 
 
 class ResidualGaussianActor(nn.Module):
@@ -618,8 +652,21 @@ class GraphUnetResidualRLPolicy(nn.Module):
             use_layer_heads=False,
         )
 
-        # Residual scaling
-        self.alpha = nn.Parameter(torch.tensor(cfg.alpha_init, dtype=torch.float32))
+        # Residual scaling: scalar (legacy) or adaptive (state-dependent)
+        self.use_adaptive_alpha = getattr(cfg, "use_adaptive_alpha", False)
+        if self.use_adaptive_alpha:
+            alpha_in_dim = cfg.z_dim + actor_obs_dim
+            print(f"[GraphUnetResidualRLPolicy] AdaptiveAlphaNet: in_dim={alpha_in_dim} (z_dim={cfg.z_dim} + actor_obs_dim={actor_obs_dim})")
+            self.alpha_net = AdaptiveAlphaNet(
+                alpha_in_dim,
+                getattr(cfg, "alpha_hidden", (64,)),
+                act=cfg.activation,
+                alpha_init=cfg.alpha_init,
+            )
+            self.alpha = None  # Unused when adaptive
+        else:
+            self.alpha = nn.Parameter(torch.tensor(cfg.alpha_init, dtype=torch.float32))
+            self.alpha_net = None
 
         # Residual mask
         if cfg.residual_action_mask is not None:
@@ -635,6 +682,9 @@ class GraphUnetResidualRLPolicy(nn.Module):
         
         # Unified history buffer (lazy initialization)
         self.history_buffer: UnifiedHistoryBuffer | None = None
+
+        # Debug counter (only print first few acts when debug_alpha)
+        self._act_debug_count = 0
 
         # ============================================================
         # RHC buffers (for base_action, low-frequency)
@@ -665,6 +715,13 @@ class GraphUnetResidualRLPolicy(nn.Module):
         if cfg.orthogonal_init:
             orthogonal_init(self.actor, gain=np.sqrt(2))
             orthogonal_init(self.critic, gain=np.sqrt(2))
+            if self.alpha_net is not None:
+                # AlphaNet uses custom last-layer init; only init hidden layers
+                for m in self.alpha_net.net[:-1]:
+                    if isinstance(m, nn.Linear):
+                        nn.init.orthogonal_(m.weight, gain=0.5)
+                        if m.bias is not None:
+                            nn.init.zeros_(m.bias)
             # CRITICAL: Zero initialize Actor's mu layer (last layer)
             # This ensures initial delta ≈ 0, so action ≈ a_base at start of training
             # Without this, random initialization can cause large deltas that break base policy
@@ -703,6 +760,22 @@ class GraphUnetResidualRLPolicy(nn.Module):
         if action_mean is not None:
             self.action_mean = _to_tensor(action_mean)
             self.action_std = _to_tensor(action_std)
+
+    def _compute_alpha_vec(
+        self, z_bar: torch.Tensor, obs_actor: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute alpha_vec [B, 6]. Returns (alpha_vec, alpha_mean_for_log)."""
+        if self.use_adaptive_alpha:
+            x = torch.cat([z_bar, obs_actor], dim=-1)
+            alpha_vec = self.alpha_net(x)
+            alpha_mean = alpha_vec[:, :5].mean()  # Arm dims only for logging
+        else:
+            alpha_scalar = torch.clamp(self.alpha, 0.0, 0.3)
+            B = z_bar.shape[0]
+            alpha_vec = torch.ones(B, 6, device=z_bar.device, dtype=z_bar.dtype) * alpha_scalar
+            alpha_vec[:, 5] = 1.0
+            alpha_mean = alpha_scalar
+        return alpha_vec, alpha_mean
 
     # -----------------------------
     # Buffer management
@@ -1099,14 +1172,23 @@ class GraphUnetResidualRLPolicy(nn.Module):
         if self.residual_action_mask is not None:
             delta = delta * self.residual_action_mask
 
-        # Per-channel alpha: Arm (0-4) low authority, Gripper (5) full authority
-        alpha_learned = torch.clamp(self.alpha, 0.0, 0.3)
-        alpha_vec = torch.ones_like(delta, device=delta.device, dtype=delta.dtype) * alpha_learned
-        alpha_vec[:, 5] = 1.0  # Gripper: full override
+        # Per-channel alpha: adaptive (state-dependent) or scalar
+        obs_actor = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
+        alpha_vec, alpha_mean = self._compute_alpha_vec(z_bar, obs_actor)
 
         a = a_base + alpha_vec * delta  # [B, 6]
-        alpha = alpha_learned  # for info
-        
+        alpha = alpha_mean  # for info
+
+        # Debug: diagnose 0% SR (print first 3 acts only)
+        if getattr(self.cfg, "debug_alpha", False) and self._act_debug_count < 3:
+            self._act_debug_count += 1
+            with torch.no_grad():
+                print(f"[act debug #{self._act_debug_count}] z_bar: {z_bar.float().mean():.3f}, {z_bar.float().std():.3f} | "
+                      f"alpha_vec: {alpha_vec.float().mean():.3f}, {alpha_vec.float().max():.3f} | "
+                      f"delta: {delta.float().mean():.3f}, {delta.float().std():.3f} | "
+                      f"a_base: {a_base.float().mean():.3f} | "
+                      f"action: {a.float().mean():.3f}, {a.float().std():.3f}")
+
         # 7. Update history buffer (AFTER computing action)
         if self.history_buffer is not None:
             # Use normalized action for history (matches training data format)
@@ -1208,12 +1290,9 @@ class GraphUnetResidualRLPolicy(nn.Module):
         x = torch.cat([obs_actor, a_base_norm_6d, z_bar_new], dim=-1)
         dist = self.actor.dist(x)
 
-        # Recover delta in denormalized space
-        # Recover delta with per-channel alpha (same as act(): arm=alpha_learned, gripper=1.0)
-        alpha_learned = torch.clamp(self.alpha, 0.0, 0.3)
-        B_loss = obs_norm.shape[0]
-        alpha_vec = torch.ones(B_loss, 6, device=action.device, dtype=action.dtype) * alpha_learned
-        alpha_vec[:, 5] = 1.0
+        # Recover delta in denormalized space (same alpha_vec as act())
+        obs_actor_loss = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
+        alpha_vec, alpha_mean = self._compute_alpha_vec(z_bar_new, obs_actor_loss)
         delta = (action - a_base) / (alpha_vec + 1e-8)
 
         if self.residual_action_mask is not None:
@@ -1227,14 +1306,13 @@ class GraphUnetResidualRLPolicy(nn.Module):
         log_prob = dist.log_prob(delta_norm).sum(dim=-1)
         entropy = dist.entropy().sum(dim=-1)
         loss_delta_reg = (delta_norm ** 2).mean()
-        alpha = alpha_learned  # for return dict
+        alpha = alpha_mean  # for return dict
 
-        # AWR weights
-        w_adv = torch.exp(adv / max(self.cfg.beta, 1e-8))
+        # AWR weights (原始)
+        beta = max(self.cfg.beta, 1e-8)
+        w_adv = torch.exp(adv / beta)
         w_adv = torch.clamp(w_adv, 0.0, self.cfg.weight_clip_max)
         w_adv = w_adv / (w_adv.mean() + 1e-8)
-
-        # Actor loss
         loss_actor = -(w_adv.detach() * log_prob).mean()
 
         # Critic: bar head only (no layer heads)
@@ -1243,18 +1321,35 @@ class GraphUnetResidualRLPolicy(nn.Module):
         # Baseline head: select obs based on critic_obs_mode
         obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
         V_bar = self.critic.forward_bar(z_bar_new, obs_critic)
-        loss_v_bar = F.mse_loss(V_bar, returns)
+        if getattr(self.cfg, "use_expectile_value", False):
+            # Expectile loss (IQL-style): L2^τ(u) = |τ - 1(u<0)| * u²
+            # forward_bar already returns [B], no squeeze needed
+            diff = returns - V_bar
+            tau = getattr(self.cfg, "expectile_tau", 0.7)
+            weight = torch.where(diff >= 0, tau, 1.0 - tau)
+            loss_v_bar = (weight * diff ** 2).mean()
+        else:
+            loss_v_bar = F.mse_loss(V_bar, returns)
 
         # No gate (U-Net only)
         gate_entropy = torch.tensor(0.0, device=obs.device)
         loss_gate = torch.tensor(0.0, device=obs.device)
+
+        # Entropy: 固定 或 Adaptive (adv<0 高熵探索, adv>0 低熵收敛)
+        if getattr(self.cfg, "use_adaptive_entropy", False):
+            c_ent_bad = getattr(self.cfg, "c_ent_bad", 0.1)
+            c_ent_good = getattr(self.cfg, "c_ent_good", 0.005)
+            entropy_coef = torch.where(adv < 0, c_ent_bad, c_ent_good)
+            loss_entropy = -(entropy_coef * entropy).mean()
+        else:
+            loss_entropy = -self.cfg.cEnt * entropy.mean()
 
         # Total
         loss_total = (
             loss_actor
             + self.cfg.cV * (loss_critic + 0.5 * loss_v_bar)
             + self.cfg.cGate * loss_gate
-            - self.cfg.cEnt * entropy.mean()
+            + loss_entropy
             + self.cfg.c_delta_reg * loss_delta_reg  # Delta regularization: encourage small residuals (smoother)
         )
 

@@ -41,9 +41,17 @@ parser.add_argument("--num_epochs", type=int, default=5, help="Epochs per iterat
 parser.add_argument("--mini_batch_size", type=int, default=64)
 parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
 parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradient norm")
-parser.add_argument("--c_delta_reg", type=float, default=1.0, help="Delta (residual) regularization weight; higher = smoother, RL 'don't move unless reward'")
+parser.add_argument("--c_delta_reg", type=float, default=2.0, help="Delta (residual) regularization weight; higher = smoother, RL 'don't move unless reward'")
 parser.add_argument("--c_ent", type=float, default=0.01, help="Entropy coefficient; encourages exploration")
 parser.add_argument("--beta", type=float, default=1.0, help="AWR beta: w=exp(adv/beta); higher=softer weighting, lower=sharper on high-adv samples")
+parser.add_argument("--alpha_init", type=float, default=0.10, help="Residual alpha init: a=base+alpha*delta; arm uses clamped(0,0.5), gripper=1.0")
+parser.add_argument("--expectile_tau", type=float, default=0.7, help="Expectile τ for value loss (IQL-style); τ=0.7 → optimistic; 0.5=MSE")
+parser.add_argument("--use_adaptive_alpha", action="store_true", default=True, help="Use state-dependent alpha_net (default: True)")
+parser.add_argument("--no_adaptive_alpha", action="store_false", dest="use_adaptive_alpha", help="Use scalar alpha instead")
+parser.add_argument("--debug_alpha", action="store_true", help="Print alpha/delta stats in act() to diagnose 0%% SR")
+parser.add_argument("--no_adaptive_entropy", action="store_true", help="Use fixed cEnt instead of Adaptive Entropy")
+parser.add_argument("--c_ent_bad", type=float, default=0.02, help="High entropy weight for adv<0 (failed steps)")
+parser.add_argument("--c_ent_good", type=float, default=0.005, help="Low entropy weight for adv>0 (success steps)")
 
 # AppLauncher
 AppLauncher.add_app_launcher_args(parser)
@@ -547,6 +555,7 @@ class GraphDiTRLTrainer:
         total_loss_delta_reg = 0
         total_loss_critic_bar = 0
         total_entropy = 0
+        total_alpha = 0.0
         num_updates = 0
         all_returns = []
         all_values = []
@@ -561,6 +570,7 @@ class GraphDiTRLTrainer:
                 graph_dit = self.policy.backbone.backbone
                 if hasattr(graph_dit, 'node_to_z'):
                     trainable_params.extend([p for p in graph_dit.node_to_z.parameters() if p.requires_grad])
+            # Gradient Clipping: 防小 batch 梯度爆炸，max_norm 通常 0.5~1.0
             torch.nn.utils.clip_grad_norm_(trainable_params, self.max_grad_norm)
             self.optimizer.step()
 
@@ -570,6 +580,9 @@ class GraphDiTRLTrainer:
             total_loss_delta_reg += losses["loss_delta_reg"].item()
             total_loss_critic_bar += losses["loss_critic_bar"].item()
             total_entropy += losses["entropy"].item()
+            alpha_val = losses.get("alpha")
+            if alpha_val is not None:
+                total_alpha += alpha_val.item() if hasattr(alpha_val, "item") else float(alpha_val)
             num_updates += 1
             all_returns.append(batch["returns"])
             all_values.append(batch["values"])
@@ -588,7 +601,7 @@ class GraphDiTRLTrainer:
             "loss_critic_bar": total_loss_critic_bar / n,
             "loss_delta_reg": total_loss_delta_reg / n,
             "entropy": total_entropy / n,
-            "alpha": self.policy.alpha.item(),
+            "alpha": total_alpha / num_updates if num_updates else 0.0,
             "explained_variance": explained_variance,
         }
 
@@ -596,12 +609,28 @@ class GraphDiTRLTrainer:
         """主训练循环"""
         print(f"\n[Trainer] Starting training for {max_iterations} iterations...")
 
+        # Step Decay LR Scheduler: 0-25% 1.0, 25-50% 0.8, 50-75% 0.6, 75-100% 0.2
+        def lr_lambda(epoch):
+            progress = (epoch + 1) / max_iterations
+            if progress < 0.25:
+                return 1.0
+            elif progress < 0.50:
+                return 0.8
+            elif progress < 0.75:
+                return 0.6
+            else:
+                return 0.2
+
+        scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda)
+
         for iteration in range(1, max_iterations + 1):
+            current_lr = self.optimizer.param_groups[0]["lr"]
             # Collect
             rollout_stats = self.collect_rollout()
 
             # Update
             update_stats = self.update()
+            update_stats["lr"] = current_lr
 
             # Log
             self._log(iteration, rollout_stats, update_stats)
@@ -609,6 +638,8 @@ class GraphDiTRLTrainer:
             # Save
             if iteration % save_interval == 0:
                 self._save(iteration)
+
+            scheduler.step()
 
         # Final save
         self._save(max_iterations, final=True)
@@ -649,6 +680,7 @@ class GraphDiTRLTrainer:
         _scalar("main/loss_actor", update_stats.get("loss_actor", 0), step)
         _scalar("main/loss_critic_bar", update_stats.get("loss_critic_bar", 0), step)
         _scalar("main/entropy", update_stats.get("entropy", 0), step)
+        _scalar("main/lr", update_stats.get("lr", 0), step)
 
         sr = rollout_stats.get("success_rate", 0) * 100
         sr_100 = rollout_stats.get("success_rate_100", 0) * 100
@@ -658,6 +690,7 @@ class GraphDiTRLTrainer:
         delta = rollout_stats.get("delta_norm_mean", 0)
         alpha = update_stats.get("alpha", 0)
         loss = update_stats.get("loss_total", 0)
+        lr = update_stats.get("lr", 0)
         warning = rollout_stats.get("warning", "")
         if warning:
             print(f"[Iter {iteration:4d}] ⚠️  {warning}")
@@ -668,7 +701,8 @@ class GraphDiTRLTrainer:
             f"EV={ev:5.2f} | "
             f"Δ={delta:.3f} | "
             f"α={alpha:.2f} | "
-            f"L={loss:.3f}"
+            f"L={loss:.3f} | "
+            f"LR={lr:.1e}"
         )
 
     def _save(self, iteration: int, final: bool = False):
@@ -807,6 +841,14 @@ def main():
         c_delta_reg=args.c_delta_reg,
         cEnt=args.c_ent,
         beta=args.beta,
+        alpha_init=args.alpha_init,
+        use_expectile_value=True,
+        expectile_tau=args.expectile_tau,
+        use_adaptive_alpha=args.use_adaptive_alpha,
+        debug_alpha=getattr(args, "debug_alpha", False),
+        use_adaptive_entropy=not getattr(args, "no_adaptive_entropy", False),
+        c_ent_bad=args.c_ent_bad,
+        c_ent_good=args.c_ent_good,
     )
     print(f"[Main] residual_action_mask: {residual_action_mask.tolist()} (all 1s, no mask)")
     print(f"[Main] Residual RL obs_structure: {policy_cfg.obs_structure}")
@@ -815,6 +857,8 @@ def main():
         print("[Main] ⚠️  WARNING: obs_structure MISMATCH between backbone and Residual RL!")
     else:
         print("[Main] ✅ obs_structure consistent")
+    ent_mode = f"Adaptive Entropy (bad={getattr(policy_cfg,'c_ent_bad',0.1)}, good={getattr(policy_cfg,'c_ent_good',0.005)})" if getattr(policy_cfg, "use_adaptive_entropy", False) else f"Fixed cEnt={policy_cfg.cEnt}"
+    print(f"[Main] Entropy: {ent_mode}")
 
     # Create policy (gripper from backbone 6th dim only)
     policy = GraphUnetResidualRLPolicy(

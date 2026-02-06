@@ -195,12 +195,17 @@ class RewardsCfg:
     """Reward terms for the MDP. Only reach + lift (backbone handles grasp/task well)."""
 
     # ============================================================
-    # 1. Reaching Reward (EE 接近物体)
+    # 1. Reaching Reward (EE 接近物体)：粗调+精调
     # ============================================================
-    reaching_object = RewTerm(
+    reaching_coarse = RewTerm(
         func=mdp.object_ee_distance,
         params={"std": 0.05},
         weight=5.0,
+    )
+    reaching_fine = RewTerm(
+        func=mdp.object_ee_distance,
+        params={"std": 0.01},
+        weight=15.0,
     )
 
     # ============================================================
@@ -215,18 +220,6 @@ class RewardsCfg:
     # Smoothness: action 变化 + 关节速度 惩罚，减轻抖动
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-3)
     joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-1e-4)
-
-    # Efficiency shaping: 成功 [10, 13] 分，time_bonus 有上限，不敢为速度牺牲进度
-    success_termination_bonus = RewTerm(
-        func=mdp.success_termination_bonus,
-        params={
-            "minimal_height": 0.1,
-            "base_bonus": 10.0,
-            "time_bonus_max": 3.0,
-            "max_steps": 150.0,
-        },
-        weight=1.0,
-    )
 
 
 @configclass
