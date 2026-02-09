@@ -22,7 +22,7 @@ class DualCubeStackIKRelMimicEnvCfg(DualSoArm101CubeStackEnvCfg, MimicEnvCfg):
 
         subtask_configs = [
             SubTaskConfig(
-                object_ref="object",
+                object_ref="cube_1",
                 subtask_term_signal="pick_cube_top",
                 subtask_term_offset_range=(10, 20),
                 selection_strategy="nearest_neighbor_object",
@@ -35,7 +35,7 @@ class DualCubeStackIKRelMimicEnvCfg(DualSoArm101CubeStackEnvCfg, MimicEnvCfg):
                 next_subtask_description="Stack on base",
             ),
             SubTaskConfig(
-                object_ref="object",
+                object_ref="cube_1",
                 subtask_term_signal="stack_cube",
                 subtask_term_offset_range=(10, 20),
                 selection_strategy="nearest_neighbor_object",

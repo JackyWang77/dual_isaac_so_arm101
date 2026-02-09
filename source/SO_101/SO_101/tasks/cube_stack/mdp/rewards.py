@@ -1,7 +1,7 @@
 # Copyright (c) 2024-2025, SO-ARM101 Project
 # SPDX-License-Identifier: BSD-3-Clause
 
-"""Rewards for dual-arm cube stack: reach cube_top, lift, then stack on cube_base."""
+"""Rewards for dual-arm cube stack: stack two cubes at fixed target (center)."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 def object_is_lifted(
     env: ManagerBasedRLEnv,
     minimal_height: float,
-    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    object_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
 ) -> torch.Tensor:
     """Reward for lifting object (cube_top) above minimal height."""
     obj: RigidObject = env.scene[object_cfg.name]
@@ -29,7 +29,7 @@ def object_is_lifted(
 def closer_arm_reaches_object(
     env: ManagerBasedRLEnv,
     std: float,
-    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    object_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     ee_right_cfg: SceneEntityCfg = SceneEntityCfg("ee_right"),
     ee_left_cfg: SceneEntityCfg = SceneEntityCfg("ee_left"),
 ) -> torch.Tensor:
@@ -51,7 +51,7 @@ def closer_arm_reaches_object(
 
 def farther_arm_stays_still(
     env: ManagerBasedRLEnv,
-    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    object_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     ee_right_cfg: SceneEntityCfg = SceneEntityCfg("ee_right"),
     ee_left_cfg: SceneEntityCfg = SceneEntityCfg("ee_left"),
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
@@ -78,7 +78,7 @@ def farther_arm_stays_still(
 def grasp_intent(
     env: ManagerBasedRLEnv,
     proximity_threshold: float = 0.05,
-    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    object_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     ee_right_cfg: SceneEntityCfg = SceneEntityCfg("ee_right"),
     ee_left_cfg: SceneEntityCfg = SceneEntityCfg("ee_left"),
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
@@ -108,13 +108,10 @@ def cube_stack_alignment(
     env: ManagerBasedRLEnv,
     xy_std: float = 0.03,
     z_tolerance: float = 0.015,
-    cube_top_cfg: SceneEntityCfg = SceneEntityCfg("object"),
-    cube_base_cfg: SceneEntityCfg = SceneEntityCfg("cube_base"),
+    cube_top_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
+    cube_base_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
 ) -> torch.Tensor:
-    """Reward cube_top being above cube_base (xy aligned, z just above base).
-
-    Success region: xy within ~xy_std, cube_top z > cube_base z + z_tolerance.
-    """
+    """Reward cube_top being above cube_base (xy aligned, z just above base)."""
     top: RigidObject = env.scene[cube_top_cfg.name]
     base: RigidObject = env.scene[cube_base_cfg.name]
     top_pos = top.data.root_pos_w[:, :3]
@@ -122,3 +119,19 @@ def cube_stack_alignment(
     xy_dist = torch.norm(top_pos[:, :2] - base_pos[:, :2], dim=1)
     z_above = (top_pos[:, 2] > base_pos[:, 2] + z_tolerance).float()
     return z_above * (1 - torch.tanh(xy_dist / xy_std))
+
+
+def cube_near_target_xy(
+    env: ManagerBasedRLEnv,
+    target_xy: tuple[float, float] = (0.2, 0.0),
+    xy_std: float = 0.05,
+    object_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
+) -> torch.Tensor:
+    """Reward object xy position near fixed target (center)."""
+    obj: RigidObject = env.scene[object_cfg.name]
+    pos = obj.data.root_pos_w[:, :2]
+    target = torch.tensor(
+        target_xy, dtype=pos.dtype, device=env.device
+    ).unsqueeze(0).expand(pos.shape[0], -1)
+    xy_dist = torch.norm(pos - target, dim=1)
+    return (1 - torch.tanh(xy_dist / xy_std))

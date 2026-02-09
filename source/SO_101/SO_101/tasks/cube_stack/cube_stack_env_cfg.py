@@ -1,7 +1,7 @@
 # Copyright (c) 2024-2025, SO-ARM101 Project
 # SPDX-License-Identifier: BSD-3-Clause
 #
-# Dual-arm cube stack: two SO-ARM101 arms, cube_base (bottom), cube_top (pick and stack).
+# Dual-arm cube stack: two SO-ARM101 arms, two random cubes, fixed target at center.
 # Same pipeline as single-arm lift: collect data -> flow matching -> RL.
 #
 
@@ -25,17 +25,21 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from . import mdp
 
 
+# Fixed target position at center (no physical object)
+TARGET_XY = (0.2, 0.0)
+TARGET_Z_TABLE = 0.015
+
+
 @configclass
 class CubeStackSceneCfg(InteractiveSceneCfg):
-    """Scene: two SO-ARM101 arms + cube_base (bottom) + cube_top (object to stack)."""
+    """Scene: two SO-ARM101 arms + cube_1 + cube_2 (both random). Target zone fixed at center."""
 
     left_arm: ArticulationCfg = MISSING
     right_arm: ArticulationCfg = MISSING
     ee_right: FrameTransformerCfg = MISSING
     ee_left: FrameTransformerCfg = MISSING
-    cube_base: RigidObjectCfg = MISSING
-    object: RigidObjectCfg = MISSING  # cube_top: pick and stack on cube_base
-
+    cube_1: RigidObjectCfg = MISSING
+    cube_2: RigidObjectCfg = MISSING
     table = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Table",
         init_state=AssetBaseCfg.InitialStateCfg(
@@ -88,7 +92,7 @@ class ObservationsCfg:
             func=mdp.object_pos_in_arm_frame,
             params={
                 "arm_cfg": SceneEntityCfg("left_arm"),
-                "object_cfg": SceneEntityCfg("object"),
+                "object_cfg": SceneEntityCfg("cube_1"),
             },
         )
         right_joint_pos = ObsTerm(
@@ -103,20 +107,24 @@ class ObservationsCfg:
             func=mdp.object_pos_in_arm_frame,
             params={
                 "arm_cfg": SceneEntityCfg("right_arm"),
-                "object_cfg": SceneEntityCfg("object"),
+                "object_cfg": SceneEntityCfg("cube_1"),
             },
         )
-        cube_base_pos = ObsTerm(
+        cube_1_pos = ObsTerm(
             func=mdp.object_position_w,
-            params={"object_cfg": SceneEntityCfg("cube_base")},
+            params={"object_cfg": SceneEntityCfg("cube_1")},
         )
-        object_pos = ObsTerm(
-            func=mdp.object_position_w,
-            params={"object_cfg": SceneEntityCfg("object")},
-        )
-        object_ori = ObsTerm(
+        cube_1_ori = ObsTerm(
             func=mdp.object_orientation_w,
-            params={"object_cfg": SceneEntityCfg("object")},
+            params={"object_cfg": SceneEntityCfg("cube_1")},
+        )
+        cube_2_pos = ObsTerm(
+            func=mdp.object_position_w,
+            params={"object_cfg": SceneEntityCfg("cube_2")},
+        )
+        cube_2_ori = ObsTerm(
+            func=mdp.object_orientation_w,
+            params={"object_cfg": SceneEntityCfg("cube_2")},
         )
         last_action_all = ObsTerm(
             func=mdp.last_action,
@@ -131,34 +139,35 @@ class ObservationsCfg:
 
 @configclass
 class EventCfg:
-    """Randomize cube_base and cube_top (object) positions on reset."""
+    """Two random cubes (cube_1, cube_2). Target zone fixed at center (no physical base)."""
 
     reset_all = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
 
-    reset_cube_base = EventTerm(
+    # cube_1 & cube_2: lift_old-style pose_range (offset from default) so arm can reach
+    reset_cube_1 = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
-            "pose_range": {"x": (0.15, 0.22), "y": (-0.12, 0.12), "z": (0.015, 0.015)},
+            "pose_range": {"x": (-0.1, 0.1), "y": (-0.2, 0.2), "z": (0.0, 0.0)},
             "velocity_range": {},
-            "asset_cfg": SceneEntityCfg("cube_base", body_names="Object"),
+            "asset_cfg": SceneEntityCfg("cube_1", body_names="Cube1"),
         },
     )
 
-    reset_cube_top = EventTerm(
+    reset_cube_2 = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
-            "pose_range": {"x": (0.18, 0.25), "y": (-0.15, 0.15), "z": (0.015, 0.015)},
+            "pose_range": {"x": (-0.1, 0.1), "y": (-0.2, 0.2), "z": (0.0, 0.0)},
             "velocity_range": {},
-            "asset_cfg": SceneEntityCfg("object", body_names="Object"),
+            "asset_cfg": SceneEntityCfg("cube_2", body_names="Cube2"),
         },
     )
 
 
 @configclass
 class CubeStackRewardsCfg:
-    """Reach cube_top -> grasp -> lift -> stack on cube_base."""
+    """Stack cube_1 and cube_2 at fixed target (center), any order."""
 
     closer_arm_reaches = RewTerm(
         func=mdp.closer_arm_reaches_object,
@@ -192,16 +201,38 @@ class CubeStackRewardsCfg:
     )
     lifting_object = RewTerm(
         func=mdp.object_is_lifted,
-        params={"minimal_height": 0.04},
+        params={"minimal_height": 0.04, "object_cfg": SceneEntityCfg("cube_1")},
         weight=15.0,
     )
-    stack_alignment = RewTerm(
+    # Cubes near fixed target (center)
+    cube_1_near_target = RewTerm(
+        func=mdp.cube_near_target_xy,
+        params={"target_xy": TARGET_XY, "object_cfg": SceneEntityCfg("cube_1")},
+        weight=10.0,
+    )
+    cube_2_near_target = RewTerm(
+        func=mdp.cube_near_target_xy,
+        params={"target_xy": TARGET_XY, "object_cfg": SceneEntityCfg("cube_2")},
+        weight=10.0,
+    )
+    # Stack cube_1 on cube_2 (either order)
+    stack_1_on_2 = RewTerm(
         func=mdp.cube_stack_alignment,
         params={
             "xy_std": 0.03,
             "z_tolerance": 0.015,
-            "cube_top_cfg": SceneEntityCfg("object"),
-            "cube_base_cfg": SceneEntityCfg("cube_base"),
+            "cube_top_cfg": SceneEntityCfg("cube_1"),
+            "cube_base_cfg": SceneEntityCfg("cube_2"),
+        },
+        weight=20.0,
+    )
+    stack_2_on_1 = RewTerm(
+        func=mdp.cube_stack_alignment,
+        params={
+            "xy_std": 0.03,
+            "z_tolerance": 0.015,
+            "cube_top_cfg": SceneEntityCfg("cube_2"),
+            "cube_base_cfg": SceneEntityCfg("cube_1"),
         },
         weight=20.0,
     )
@@ -221,17 +252,22 @@ class CubeStackRewardsCfg:
 @configclass
 class TerminationsCfg:
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
-    object_dropping = DoneTerm(
+    cube_1_dropping = DoneTerm(
         func=mdp.root_height_below_minimum,
-        params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("object")},
+        params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("cube_1")},
+    )
+    cube_2_dropping = DoneTerm(
+        func=mdp.root_height_below_minimum,
+        params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("cube_2")},
     )
     stack_success = DoneTerm(
-        func=mdp.cube_stacked,
+        func=mdp.two_cubes_stacked_at_target,
         params={
+            "target_xy": TARGET_XY,
             "xy_threshold": 0.025,
             "z_tolerance": 0.01,
-            "cube_top_cfg": SceneEntityCfg("object"),
-            "cube_base_cfg": SceneEntityCfg("cube_base"),
+            "cube_1_cfg": SceneEntityCfg("cube_1"),
+            "cube_2_cfg": SceneEntityCfg("cube_2"),
         },
     )
 

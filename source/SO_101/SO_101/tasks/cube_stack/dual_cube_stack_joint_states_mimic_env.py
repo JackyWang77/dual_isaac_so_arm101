@@ -40,11 +40,11 @@ class DualCubeStackJointStatesMimicEnv(ManagerBasedRLMimicEnv):
     def get_object_poses(
         self, env_ids: Sequence[int] | None = None
     ) -> dict[str, torch.Tensor]:
-        """Return cube_base and object (cube_top) poses as 4x4."""
+        """Return cube_1 and cube_2 poses as 4x4 (no physical base; target at center)."""
         if env_ids is None:
             env_ids = slice(None)
         out = {}
-        for name in ("cube_base", "object"):
+        for name in ("cube_1", "cube_2"):
             obj = self.scene[name]
             pos = obj.data.root_pos_w[env_ids]
             quat = obj.data.root_quat_w[env_ids]

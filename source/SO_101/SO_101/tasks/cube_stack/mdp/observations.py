@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 def object_position_w(
     env: ManagerBasedRLEnv,
-    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    object_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
 ) -> torch.Tensor:
     """Object position in world frame. Shape: (num_envs, 3)."""
     obj: RigidObject = env.scene[object_cfg.name]
@@ -27,7 +27,7 @@ def object_position_w(
 
 def object_orientation_w(
     env: ManagerBasedRLEnv,
-    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    object_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
 ) -> torch.Tensor:
     """Object orientation (quat) in world frame. Shape: (num_envs, 4)."""
     obj: RigidObject = env.scene[object_cfg.name]
@@ -37,7 +37,7 @@ def object_orientation_w(
 def object_pos_in_arm_frame(
     env: ManagerBasedRLEnv,
     arm_cfg: SceneEntityCfg,
-    object_cfg: SceneEntityCfg = SceneEntityCfg("object"),
+    object_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
 ) -> torch.Tensor:
     """Object position in the given arm's root frame. Shape: (num_envs, 3)."""
     arm = env.scene[arm_cfg.name]

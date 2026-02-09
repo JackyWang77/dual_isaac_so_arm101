@@ -1,7 +1,7 @@
 # Copyright (c) 2024-2025, SO-ARM101 Project
 # SPDX-License-Identifier: BSD-3-Clause
 #
-# Dual-arm cube stack: two SO-ARM101, cube_base + cube_top.
+# Dual-arm cube stack: two SO-ARM101, two cubes, stack at fixed target (center).
 # Pipeline: collect data (mimic) -> flow matching -> RL (same as single-arm).
 #
 

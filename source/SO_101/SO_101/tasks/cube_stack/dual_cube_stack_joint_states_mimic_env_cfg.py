@@ -16,6 +16,33 @@ from .joint_pos_env_cfg import DualSoArm101CubeStackJointPosEnvCfg
 
 
 @configclass
+class CubeStackSubtaskCfg(ObsGroup):
+    """Subtask signals for cube stack (pick_cube_top, stack_cube)."""
+
+    pick_cube_top = ObsTerm(
+        func=mdp.object_is_lifted,
+        params={
+            "minimal_height": 0.04,
+            "object_cfg": SceneEntityCfg("cube_1"),
+        },
+    )
+    stack_cube = ObsTerm(
+        func=mdp.two_cubes_stacked_at_target,
+        params={
+            "target_xy": (0.2, 0.0),
+            "xy_threshold": 0.025,
+            "z_tolerance": 0.01,
+            "cube_1_cfg": SceneEntityCfg("cube_1"),
+            "cube_2_cfg": SceneEntityCfg("cube_2"),
+        },
+    )
+
+    def __post_init__(self):
+        self.enable_corruption = False
+        self.concatenate_terms = False
+
+
+@configclass
 class DualCubeStackJointStatesMimicEnvCfg(
     DualSoArm101CubeStackJointPosEnvCfg, MimicEnvCfg
 ):
@@ -32,26 +59,7 @@ class DualCubeStackJointStatesMimicEnvCfg(
         self.observations.policy.enable_corruption = False
 
         # Subtask signals for data generation (must match get_subtask_term_signals)
-        self.observations.subtask_terms = ObsGroup(
-            pick_cube_top=ObsTerm(
-                func=mdp.object_is_lifted,
-                params={
-                    "minimal_height": 0.04,
-                    "object_cfg": SceneEntityCfg("object"),
-                },
-            ),
-            stack_cube=ObsTerm(
-                func=mdp.cube_stacked,
-                params={
-                    "xy_threshold": 0.025,
-                    "z_tolerance": 0.01,
-                    "cube_top_cfg": SceneEntityCfg("object"),
-                    "cube_base_cfg": SceneEntityCfg("cube_base"),
-                },
-            ),
-        )
-        self.observations.subtask_terms.enable_corruption = False
-        self.observations.subtask_terms.concatenate_terms = False
+        self.observations.subtask_terms = CubeStackSubtaskCfg()
 
         self.datagen_config.name = "cube_stack"
         self.datagen_config.generation_guarantee = True
@@ -64,7 +72,7 @@ class DualCubeStackJointStatesMimicEnvCfg(
 
         subtask_configs = [
             SubTaskConfig(
-                object_ref="object",
+                object_ref="cube_1",
                 subtask_term_signal="pick_cube_top",
                 subtask_term_offset_range=(10, 20),
                 selection_strategy="nearest_neighbor_object",
@@ -77,7 +85,7 @@ class DualCubeStackJointStatesMimicEnvCfg(
                 next_subtask_description="Stack on base",
             ),
             SubTaskConfig(
-                object_ref="object",
+                object_ref="cube_1",
                 subtask_term_signal="stack_cube",
                 subtask_term_offset_range=(10, 20),
                 selection_strategy="nearest_neighbor_object",

@@ -1,7 +1,7 @@
 # Copyright (c) 2024-2025, SO-ARM101 Project
 # SPDX-License-Identifier: BSD-3-Clause
 #
-# Dual-arm cube stack: joint env config (two SO-ARM101 + cube_base + cube_top).
+# Dual-arm cube stack: two SO-ARM101 + two cubes, stack at fixed target (center).
 # Uses same IK + binary gripper action as dual lift for consistency.
 #
 
@@ -37,7 +37,7 @@ _rigid_props = RigidBodyPropertiesCfg(
 
 @configclass
 class DualSoArm101CubeStackEnvCfg(CubeStackEnvCfg):
-    """Dual SO-ARM101 cube stack: two arms + cube_base + cube_top (object)."""
+    """Dual SO-ARM101 cube stack: two arms + cube_1 + cube_2, stack at center target."""
 
     def __post_init__(self):
         super().__post_init__()
@@ -68,11 +68,13 @@ class DualSoArm101CubeStackEnvCfg(CubeStackEnvCfg):
             ),
         )
 
+        # (Target visual removed: FrameTransformer requires rigid bodies; Table is not.)
+
         # ---------------
-        # Cube base (bottom cube, stay on table)
+        # cube_1 and cube_2 only; target zone at center (no physical base)
         # ---------------
-        self.scene.cube_base = RigidObjectCfg(
-            prim_path="{ENV_REGEX_NS}/CubeBase",
+        self.scene.cube_1 = RigidObjectCfg(
+            prim_path="{ENV_REGEX_NS}/Cube1",
             init_state=RigidObjectCfg.InitialStateCfg(
                 pos=[0.20, 0.0, 0.015], rot=[1, 0, 0, 0]
             ),
@@ -82,14 +84,10 @@ class DualSoArm101CubeStackEnvCfg(CubeStackEnvCfg):
                 rigid_props=_rigid_props,
             ),
         )
-
-        # ---------------
-        # Cube top (object to pick and stack on cube_base)
-        # ---------------
-        self.scene.object = RigidObjectCfg(
-            prim_path="{ENV_REGEX_NS}/CubeTop",
+        self.scene.cube_2 = RigidObjectCfg(
+            prim_path="{ENV_REGEX_NS}/Cube2",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.25, 0.05, 0.015], rot=[1, 0, 0, 0]
+                pos=[0.20, 0.0, 0.015], rot=[1, 0, 0, 0]
             ),
             spawn=UsdFileCfg(
                 usd_path=f"{ISAAC_NUCLEUS_DIR}/Props/Blocks/DexCube/dex_cube_instanceable.usd",
@@ -156,6 +154,7 @@ class DualSoArm101CubeStackEnvCfg(CubeStackEnvCfg):
         marker_cfg = FRAME_MARKER_CFG.copy()
         marker_cfg.markers["frame"].scale = (0.05, 0.05, 0.05)
         marker_cfg.prim_path = "/Visuals/FrameTransformer"
+        # EE frame offset: same as lift_old (wrist_2_link + [0.01, 0, -0.1])
         self.scene.ee_right = FrameTransformerCfg(
             prim_path="{ENV_REGEX_NS}/Right_Arm/base",
             debug_vis=False,
@@ -164,7 +163,7 @@ class DualSoArm101CubeStackEnvCfg(CubeStackEnvCfg):
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Right_Arm/wrist_2_link",
                     name="ee_right",
-                    offset=OffsetCfg(pos=[0.004, -0.102, 0]),
+                    offset=OffsetCfg(pos=[0.01, 0.0, -0.1]),
                 ),
             ],
         )
@@ -176,7 +175,7 @@ class DualSoArm101CubeStackEnvCfg(CubeStackEnvCfg):
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Left_Arm/wrist_2_link",
                     name="ee_left",
-                    offset=OffsetCfg(pos=[0.004, -0.102, 0]),
+                    offset=OffsetCfg(pos=[0.01, 0.0, -0.1]),
                 ),
             ],
         )
