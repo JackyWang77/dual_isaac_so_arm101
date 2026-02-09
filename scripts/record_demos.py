@@ -366,23 +366,40 @@ def setup_teleop_device(callbacks: dict[str, Callable]) -> object:
                 print(f"               ✓ Topic: {ros2_cfg.ee_pose_topic}")
                 print("[record_demos] 💡 Press 'R' to reset episode, Ctrl+C to stop")
             elif args_cli.teleop_device.lower() == "joint_states":
-                # Create Joint States ROS2 device
+                # Create Joint States ROS2 device (single arm 6 dof or dual arm 12 dof)
                 from SO_101.devices import JointStatesROS2, JointStatesROS2Cfg
 
-                joint_states_cfg = JointStatesROS2Cfg(
-                    joint_state_topic="/joint_states",  # Subscribe directly to raw topic (lowest latency)
-                    # If using relay, change to: joint_state_topic="/isaac_joint_command"
-                    num_dof=6,  # 5 arm joints + 1 gripper
-                    joint_names=[
+                _is_dual_cube_stack_joint_states = "Dual-Cube-Stack-Joint-States-Mimic" in args_cli.task
+                if _is_dual_cube_stack_joint_states:
+                    # Dual arm: right 6 + left 6 (same order as env action)
+                    _joint_names = [
                         "shoulder_pan_joint",
                         "shoulder_lift_joint",
                         "elbow_joint",
                         "wrist_pitch_joint",
                         "wrist_roll_joint",
                         "jaw_joint",
-                    ],
-                    scale=1.0,
-                )
+                    ]
+                    joint_states_cfg = JointStatesROS2Cfg(
+                        joint_state_topic="/joint_states",
+                        num_dof=12,
+                        joint_names=_joint_names + _joint_names,  # right then left
+                        scale=1.0,
+                    )
+                else:
+                    joint_states_cfg = JointStatesROS2Cfg(
+                        joint_state_topic="/joint_states",
+                        num_dof=6,
+                        joint_names=[
+                            "shoulder_pan_joint",
+                            "shoulder_lift_joint",
+                            "elbow_joint",
+                            "wrist_pitch_joint",
+                            "wrist_roll_joint",
+                            "jaw_joint",
+                        ],
+                        scale=1.0,
+                    )
                 teleop_interface = JointStatesROS2(joint_states_cfg)
                 print("[record_demos] 🤖 Using ROS2 Joint States teleoperation device")
                 print("[record_demos] 📡 Waiting for joint states from real robot:")
@@ -596,27 +613,47 @@ def run_simulation_loop(
 
         # If successfully read initial position, set it in environment
         if initial_joint_pos is not None and initial_joint_pos.numel() > 0:
-            robot = env.scene["robot"]
             joint_pos_list = initial_joint_pos[0].cpu().tolist()
+            joint_names = teleop_interface.cfg.joint_names
+            num_dof = teleop_interface.cfg.num_dof
 
-            # Save initial position for immediate setting after reset
-            initial_joint_pos_saved = {
-                "joint_pos_list": joint_pos_list,
-                "joint_names": teleop_interface.cfg.joint_names,
-            }
+            # Dual-arm: right_arm + left_arm (first 6, last 6); single-arm: robot
+            use_dual_arm = "right_arm" in env.scene and num_dof == 12
 
-            # Set initial joint positions for all environments (used during reset)
-            for env_id in range(env.num_envs):
-                for i, joint_name in enumerate(teleop_interface.cfg.joint_names):
-                    if i < len(joint_pos_list):
-                        # Set initial joint position
-                        if joint_name in robot.joint_names:
+            if use_dual_arm:
+                right_arm = env.scene["right_arm"]
+                left_arm = env.scene["left_arm"]
+                right_pos = joint_pos_list[:6]
+                left_pos = joint_pos_list[6:12]
+                for env_id in range(env.num_envs):
+                    for i, joint_name in enumerate(joint_names[:6]):
+                        if joint_name in right_arm.joint_names:
+                            joint_idx = right_arm.joint_names.index(joint_name)
+                            right_arm.data.default_joint_pos[env_id, joint_idx] = right_pos[i]
+                    for i, joint_name in enumerate(joint_names[6:12]):
+                        if joint_name in left_arm.joint_names:
+                            joint_idx = left_arm.joint_names.index(joint_name)
+                            left_arm.data.default_joint_pos[env_id, joint_idx] = left_pos[i]
+            else:
+                robot = env.scene["robot"]
+                for env_id in range(env.num_envs):
+                    for i, joint_name in enumerate(joint_names):
+                        if i < len(joint_pos_list) and joint_name in robot.joint_names:
                             joint_idx = robot.joint_names.index(joint_name)
                             robot.data.default_joint_pos[env_id, joint_idx] = joint_pos_list[i]
 
+            initial_joint_pos_saved = {
+                "joint_pos_list": joint_pos_list,
+                "joint_names": joint_names,
+                "use_dual_arm": use_dual_arm,
+            }
+
             print("[record_demos] ✅ Set Isaac Sim robot initial pose to match real robot")
-            joint_pos_dict = dict(zip(teleop_interface.cfg.joint_names, joint_pos_list))
-            print(f"[record_demos]    Joint positions: {joint_pos_dict}")
+            if use_dual_arm:
+                print(f"[record_demos]    Right: {dict(zip(joint_names[:6], joint_pos_list[:6]))}")
+                print(f"[record_demos]    Left:  {dict(zip(joint_names[6:12], joint_pos_list[6:12]))}")
+            else:
+                print(f"[record_demos]    Joint positions: {dict(zip(joint_names, joint_pos_list))}")
         else:
             print("[record_demos] ⚠️  Could not read initial joint positions from ROS2, using default pose")
     # ============================================================
@@ -628,24 +665,40 @@ def run_simulation_loop(
 
     # === Optimization: Immediately set current joint positions to ensure first frame is synchronized ===
     if initial_joint_pos_saved is not None:
-        robot = env.scene["robot"]
         joint_pos_list = initial_joint_pos_saved["joint_pos_list"]
         joint_names = initial_joint_pos_saved["joint_names"]
+        use_dual_arm = initial_joint_pos_saved.get("use_dual_arm", False)
 
-        # Build complete joint position tensor (including all joints, not just ROS2-controlled ones)
-        joint_pos_tensor = robot.data.default_joint_pos.clone()
-        joint_vel_tensor = torch.zeros_like(robot.data.default_joint_vel)
-
-        # Update ROS2-controlled joint positions
-        for env_id in range(env.num_envs):
-            for i, joint_name in enumerate(joint_names):
-                if i < len(joint_pos_list):
-                    if joint_name in robot.joint_names:
+        if use_dual_arm:
+            right_arm = env.scene["right_arm"]
+            left_arm = env.scene["left_arm"]
+            right_pos = [joint_pos_list[i] for i in range(6)]
+            left_pos = [joint_pos_list[i] for i in range(6, 12)]
+            joint_pos_r = right_arm.data.default_joint_pos.clone()
+            joint_vel_r = torch.zeros_like(right_arm.data.default_joint_vel)
+            joint_pos_l = left_arm.data.default_joint_pos.clone()
+            joint_vel_l = torch.zeros_like(left_arm.data.default_joint_vel)
+            for env_id in range(env.num_envs):
+                for i, joint_name in enumerate(joint_names[:6]):
+                    if joint_name in right_arm.joint_names:
+                        joint_idx = right_arm.joint_names.index(joint_name)
+                        joint_pos_r[env_id, joint_idx] = right_pos[i]
+                for i, joint_name in enumerate(joint_names[6:12]):
+                    if joint_name in left_arm.joint_names:
+                        joint_idx = left_arm.joint_names.index(joint_name)
+                        joint_pos_l[env_id, joint_idx] = left_pos[i]
+            right_arm.write_joint_state_to_sim(joint_pos_r, joint_vel_r)
+            left_arm.write_joint_state_to_sim(joint_pos_l, joint_vel_l)
+        else:
+            robot = env.scene["robot"]
+            joint_pos_tensor = robot.data.default_joint_pos.clone()
+            joint_vel_tensor = torch.zeros_like(robot.data.default_joint_vel)
+            for env_id in range(env.num_envs):
+                for i, joint_name in enumerate(joint_names):
+                    if i < len(joint_pos_list) and joint_name in robot.joint_names:
                         joint_idx = robot.joint_names.index(joint_name)
                         joint_pos_tensor[env_id, joint_idx] = joint_pos_list[i]
-
-        # Immediately write to physics engine to ensure first frame is synchronized
-        robot.write_joint_state_to_sim(joint_pos_tensor, joint_vel_tensor)
+            robot.write_joint_state_to_sim(joint_pos_tensor, joint_vel_tensor)
         print("[record_demos] ✅ Immediately synchronized robot pose in physics engine")
     # ============================================================
 

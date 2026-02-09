@@ -25,14 +25,14 @@ set -e
 # Parse Arguments
 # ============================================================
 PRETRAINED_CHECKPOINT="${1:-}"
-NUM_ENVS="${2:-128}"
+NUM_ENVS="${2:-64}"
 MAX_ITERATIONS="${3:-200}"
 STEPS_PER_ENV="${4:-160}"
-MINI_BATCH_SIZE="${5:-128}"   
-NUM_EPOCHS="${6:-8}"
-C_DELTA_REG="${7:-10.0}"
+MINI_BATCH_SIZE="${5:-64}"   
+NUM_EPOCHS="${6:-2}"
+C_DELTA_REG="${7:-2.0}"
 C_ENT="${8:-0.0}"              # no entropy 效果好
-BETA="${9:-0.5}"               # 从 0.05 → 0.3
+BETA="${9:-1.0}"               # 从 0.05 → 0.3
 ALPHA_INIT="${10:-0.10}"       # residual alpha init: a=base+alpha*delta; 可调
 EXPECTILE_TAU="${11:-0.5}"     # expectile τ for value loss (IQL-style)
 LR="${12:-5e-4}"               # 小一点保护 85%
@@ -42,7 +42,7 @@ HEADLESS="${14:-true}"
 TASK="${TASK:-SO-ARM101-Lift-Cube-v0}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-10}"
 USE_ADAPTIVE_ALPHA="${USE_ADAPTIVE_ALPHA:-false}"  # true: alpha_net (state-dependent); false: scalar alpha
-USE_ADAPTIVE_ENTROPY="${USE_ADAPTIVE_ENTROPY:-true}"  # true: adv<0 高熵探索, adv>0 低熵收敛; false: 固定 cEnt
+USE_ADAPTIVE_ENTROPY="${USE_ADAPTIVE_ENTROPY:-false}"  # true: adv<0 高熵探索, adv>0 低熵收敛; false: 固定 cEnt
 C_ENT_BAD="${C_ENT_BAD:-0.005}"    # adv<0 时熵权重 (Adaptive Entropy)
 C_ENT_GOOD="${C_ENT_GOOD:-0.0001}" # adv>0 时熵权重 (Adaptive Entropy)
 

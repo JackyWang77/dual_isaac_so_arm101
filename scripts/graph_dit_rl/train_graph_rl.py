@@ -13,7 +13,7 @@ Usage:
     python scripts/graph_dit_rl/train_graph_rl.py \
         --task SO-ARM101-Lift-Cube-v0 \
         --pretrained_checkpoint ./logs/graph_dit/best_model.pt \
-        --num_envs 64 \
+        --num_envs 128 \
         --max_iterations 500
 """
 
@@ -28,7 +28,7 @@ parser.add_argument("--task", type=str, default="SO-ARM101-Lift-Cube-RL-v0",
                     help="SO-ARM101-Lift-Cube-RL-v0: Position+Rotation (training), SO-ARM101-Lift-Cube-v0: Position only")
 parser.add_argument("--pretrained_checkpoint", type=str, required=True,
                     help="Pretrained Graph-Unet checkpoint (residual RL is Unet-only)")
-parser.add_argument("--num_envs", type=int, default=64)
+parser.add_argument("--num_envs", type=int, default=128)
 parser.add_argument("--max_iterations", type=int, default=500)
 parser.add_argument("--seed", type=int, default=42)
 # Note: --device is added by AppLauncher, don't add it manually
@@ -66,7 +66,6 @@ simulation_app = app_launcher.app
 # ============================================================
 import os
 import json
-from datetime import datetime
 from typing import Dict  # List, Optional removed (unused)
 
 import gymnasium as gym
@@ -290,6 +289,7 @@ class GraphDiTRLTrainer:
         self.episode_rewards = []
         self.episode_lengths = []
         self.episode_successes = []
+        self.best_sr = -1.0  # For best-model-by-SR saving
 
         # Initialize env buffers
         policy.init_env_buffers(self.num_envs)
@@ -609,7 +609,7 @@ class GraphDiTRLTrainer:
         """主训练循环"""
         print(f"\n[Trainer] Starting training for {max_iterations} iterations...")
 
-        # Step Decay LR Scheduler: 0-25% 1.0, 25-50% 0.8, 50-75% 0.6, 75-100% 0.2
+        # Step Decay LR Scheduler: 0-25% 1.0, 25-50% 0.8, 50-75% 0.6, 75-100% 0.4 (final lr = 2e-4 when base=5e-4)
         def lr_lambda(epoch):
             progress = (epoch + 1) / max_iterations
             if progress < 0.25:
@@ -619,7 +619,7 @@ class GraphDiTRLTrainer:
             elif progress < 0.75:
                 return 0.6
             else:
-                return 0.2
+                return 0.4
 
         scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda)
 
@@ -635,7 +635,13 @@ class GraphDiTRLTrainer:
             # Log
             self._log(iteration, rollout_stats, update_stats)
 
-            # Save
+            # Save best by success rate (use rolling 100-ep SR to avoid noisy single-rollout SR)
+            sr_100 = rollout_stats.get("success_rate_100", 0.0)
+            if sr_100 > self.best_sr:
+                self.best_sr = sr_100
+                self._save_best(iteration)
+
+            # Save interval
             if iteration % save_interval == 0:
                 self._save(iteration)
 
@@ -704,6 +710,12 @@ class GraphDiTRLTrainer:
             f"L={loss:.3f} | "
             f"LR={lr:.1e}"
         )
+
+    def _save_best(self, iteration: int):
+        """按 success_rate_100（最近 100 episode 平均）保存当前最佳模型，避免单轮 SR 波动大"""
+        path = os.path.join(self.log_dir, "best_model.pt")
+        self.policy.save(path)
+        print(f"[Trainer] Best model saved (SR_100={self.best_sr*100:.1f}%): {path}")
 
     def _save(self, iteration: int, final: bool = False):
         """保存 checkpoint"""
@@ -948,8 +960,14 @@ def main():
             action_std = action_stats["std"].squeeze().to(device)
         print(f"[Main] Loaded action normalization stats")
 
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    log_dir = os.path.join(args.log_dir, args.task, timestamp)
+    # Run folder name from key hyperparams only (no timestamp)
+    use_adapt_ent = not getattr(args, "no_adaptive_entropy", False)
+    run_name = (
+        f"env{args.num_envs}_epochs{args.num_epochs}_beta{args.beta}_"
+        f"cEnt{args.c_ent}_cDelta{args.c_delta_reg}_adaptEnt{use_adapt_ent}"
+    )
+    run_name = run_name.replace(" ", "").replace("/", "-")
+    log_dir = os.path.join(args.log_dir, args.task, run_name)
 
     # Get num_envs from env_cfg (more reliable)
     num_envs = env_cfg.scene.num_envs if hasattr(env_cfg, "scene") and hasattr(env_cfg.scene, "num_envs") else args.num_envs
