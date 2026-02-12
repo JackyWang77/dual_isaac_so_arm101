@@ -12,26 +12,31 @@ from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 
 from . import mdp
+from .cube_stack_env_cfg import TARGET_XY
 from .joint_pos_env_cfg import DualSoArm101CubeStackJointPosEnvCfg
 
 
 @configclass
 class CubeStackSubtaskCfg(ObsGroup):
-    """Subtask signals for cube stack (pick_cube_top, stack_cube)."""
+    """Subtask signals for cube stack (pick_cube, stack_cube)."""
 
-    pick_cube_top = ObsTerm(
-        func=mdp.object_is_lifted,
+    pick_cube = ObsTerm(
+        func=mdp.either_cube_placed_at_target,
         params={
-            "minimal_height": 0.04,
-            "object_cfg": SceneEntityCfg("cube_1"),
+            "target_xy": TARGET_XY,
+            "target_z": 0.006,
+            "target_eps_xy": 0.2,
+            "target_eps_z": 0.005,
+            "cube_1_cfg": SceneEntityCfg("cube_1"),
+            "cube_2_cfg": SceneEntityCfg("cube_2"),
         },
     )
     stack_cube = ObsTerm(
-        func=mdp.two_cubes_stacked_at_target,
+        func=mdp.two_cubes_stacked_aligned,
         params={
-            "target_xy": (0.2, 0.0),
-            "xy_threshold": 0.025,
-            "z_tolerance": 0.01,
+            "expected_height": 0.018,
+            "eps_z": 0.003,
+            "eps_xy": 0.009,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
         },
@@ -73,7 +78,7 @@ class DualCubeStackJointStatesMimicEnvCfg(
         subtask_configs = [
             SubTaskConfig(
                 object_ref="cube_1",
-                subtask_term_signal="pick_cube_top",
+                subtask_term_signal="pick_cube",
                 subtask_term_offset_range=(10, 20),
                 selection_strategy="nearest_neighbor_object",
                 selection_strategy_kwargs={"nn_k": 3},
@@ -81,8 +86,8 @@ class DualCubeStackJointStatesMimicEnvCfg(
                 num_interpolation_steps=5,
                 num_fixed_steps=0,
                 apply_noise_during_interpolation=False,
-                description="Pick cube top",
-                next_subtask_description="Stack on base",
+                description="Pick cube",
+                next_subtask_description="Stack cube",
             ),
             SubTaskConfig(
                 object_ref="cube_1",
@@ -94,7 +99,7 @@ class DualCubeStackJointStatesMimicEnvCfg(
                 num_interpolation_steps=5,
                 num_fixed_steps=0,
                 apply_noise_during_interpolation=False,
-                description="Stack on base",
+                description="Stack cube",
             ),
         ]
         self.subtask_configs["dual_arm"] = subtask_configs

@@ -317,10 +317,35 @@ class JointStatesROS2(DeviceBase):
         - Direct indexing instead of list operations
         - Thread-safe tensor update
 
+        Fallback: When msg has exactly num_dof positions (e.g. dual-arm with
+        duplicate names like base_6+base_6), use position order directly instead
+        of name-based lookup. This avoids needing unique names or USD changes.
+
         Args:
             msg: ROS2 JointState message containing joint names and positions.
         """
         try:
+            # Position-order fallback: publisher uses duplicate names (e.g. base_6+base_6),
+            # msg.position is [right_6, left_6] in order. Just copy by index.
+            if len(msg.position) == self.cfg.num_dof:
+                for i in range(self.cfg.num_dof):
+                    self._joint_positions_array[i] = msg.position[i]
+                current_time = time.time()
+                self._previous_joint_positions.copy_(self._latest_joint_positions)
+                self._previous_update_time = self._last_update_time
+                self._latest_joint_positions[0] = torch.from_numpy(
+                    self._joint_positions_array
+                )
+                self._last_update_time = current_time
+                self._last_joint_msg_time = current_time
+                if not hasattr(self, "_first_msg_printed"):
+                    print(
+                        f"[JointStatesROS2] ✅ Position-order mode (len={self.cfg.num_dof}): "
+                        f"R-J1={self._joint_positions_array[0]:.2f} L-J1={self._joint_positions_array[6]:.2f}"
+                    )
+                    self._first_msg_printed = True
+                return
+
             # Create mapping from message joint names to indices (only once)
             if not hasattr(self, "_msg_name_to_idx"):
                 self._msg_name_to_idx = {name: i for i, name in enumerate(msg.name)}

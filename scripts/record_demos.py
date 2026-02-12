@@ -618,7 +618,8 @@ def run_simulation_loop(
             num_dof = teleop_interface.cfg.num_dof
 
             # Dual-arm: right_arm + left_arm (first 6, last 6); single-arm: robot
-            use_dual_arm = "right_arm" in env.scene and num_dof == 12
+            # Use articulations dict (env.scene lacks __contains__, would fallback to scene[0] and fail)
+            use_dual_arm = "right_arm" in env.scene.articulations and num_dof == 12
 
             if use_dual_arm:
                 right_arm = env.scene["right_arm"]
@@ -714,6 +715,9 @@ def run_simulation_loop(
     subtasks = {}
     # Initialize terminal display flag
     run_simulation_loop._last_task_desc = ""
+
+    # Cube position debug print (every 5s)
+    _last_cube_pos_print_time = 0.0
 
     with torch.inference_mode():
         while simulation_app.is_running():
@@ -830,6 +834,21 @@ def run_simulation_loop(
                                 run_simulation_loop._debug_printed = True
             else:
                 env.sim.render()
+
+            # Print cube positions every 5 seconds (debug)
+            now = time.time()
+            if now - _last_cube_pos_print_time >= 5.0:
+                _last_cube_pos_print_time = now
+                try:
+                    if "cube_1" in env.scene.rigid_objects:
+                        c1 = env.scene["cube_1"].data.root_pos_w[0].cpu().tolist()
+                        c2 = env.scene["cube_2"].data.root_pos_w[0].cpu().tolist()
+                        print(f"[record_demos] 📦 Cube positions (env 0): cube_1=[x={c1[0]:.3f}, y={c1[1]:.3f}, z={c1[2]:.3f}], cube_2=[x={c2[0]:.3f}, y={c2[1]:.3f}, z={c2[2]:.3f}]")
+                    elif "object" in env.scene.rigid_objects:
+                        obj = env.scene["object"].data.root_pos_w[0].cpu().tolist()
+                        print(f"[record_demos] 📦 Object position (env 0): [x={obj[0]:.3f}, y={obj[1]:.3f}, z={obj[2]:.3f}]")
+                except Exception:
+                    pass
 
             # Check for success condition
             success_step_count, success_reset_needed = process_success_condition(env, success_term, success_step_count)

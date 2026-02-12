@@ -34,6 +34,7 @@ echo "========================================"
 #     --device "$DEVICE" \
 #     --task "$TASK_ANNOTATE" \
 #     --auto \
+#     --headless \
 #     --enable_cameras \
 #     --input_file "$INPUT_FILE" \
 #     --output_file "$ANNOTATED_FILE"

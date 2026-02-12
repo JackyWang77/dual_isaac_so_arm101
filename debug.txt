@@ -1,13 +1,38 @@
-2026-02-09T17:17:20Z [19,365ms] [Warning] [omni.physx.fabric.plugin] FabricManager::initializePointInstancer mismatched prototypes on point instancer: /Visuals/TargetFrame.
-2026-02-09T17:17:20Z [19,400ms] [Warning] [omni.fabric.plugin] getAttributeCount called on non-existent path /World/envs/env_0/Right_Arm/wrist_2_link/visuals/wrist_roll_follower_so101_v1
-2026-02-09T17:17:20Z [19,400ms] [Warning] [omni.fabric.plugin] getTypes called on non-existent path /World/envs/env_0/Right_Arm/wrist_2_link/visuals/wrist_roll_follower_so101_v1
+|   Index   | Name     |
++-----------+----------+
++-----------+----------+
+
+Creating window for environment.
+[INFO]: Completed setting up the environment...
+🚀 Ready! Press 'L' to START/STOP recording, 'R' to RESET.
+14:40:03 [record_demos.py] WARNING: No teleop device 'joint_states' found in environment config. Creating default.
+[JointStatesROS2] 🤖 Initialized ROS2 Joint States teleoperation device
+[JointStatesROS2] 📡 Subscribed to: /joint_states
+[JointStatesROS2] 🔧 Expected joints: ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint', 'wrist_pitch_joint', 'wrist_roll_joint', 'jaw_joint', 'shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint', 'wrist_pitch_joint', 'wrist_roll_joint', 'jaw_joint']
+[JointStatesROS2] 📊 DOF: 12
+[JointStatesROS2] 💡 Waiting for joint state data...
+[record_demos] 🤖 Using ROS2 Joint States teleoperation device
+[record_demos] 📡 Waiting for joint states from real robot:
+               ✓ Topic: /joint_states
+               ✓ Joints: ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint', 'wrist_pitch_joint', 'wrist_roll_joint', 'jaw_joint', 'shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint', 'wrist_pitch_joint', 'wrist_roll_joint', 'jaw_joint']
+[record_demos] 💡 Real robot controls simulated robot, EE poses recorded
+[record_demos] 💡 Press 'R' to reset episode, Ctrl+C to stop
+[record_demos] ⌨️  Keyboard control active: [L] = Start/Pause, [R] = Reset
+[record_demos] 🔄 Waiting for initial joint states from real robot...
+[JointStatesROS2] ⚠️  No ROS2 messages received for 2.0s
+[JointStatesROS2] Make sure real robot is publishing to: /joint_states
+[JointStatesROS2] ✅ Position-order mode (len=12): R-J1=0.00 L-J1=-0.18
+[JointStatesROS2] ✅ Connection restored
+[record_demos] ✅ Received initial joint positions: [0.003067959100008011, -1.8300374746322632, 1.5968726873397827, 1.260931134223938, -0.1273203045129776, -0.7393780946731567, -0.18407754600048065, -1.6536298990249634, 1.512503743171692, 1.13821280002594, 0.13192223012447357, -0.326737642288208]
 Traceback (most recent call last):
-  File "/mnt/ssd/IsaacLab/source/isaaclab/isaaclab/sensors/sensor_base.py", line 158, in <lambda>
-    lambda event, obj=weakref.proxy(self): obj._debug_vis_callback(event)
-                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/mnt/ssd/IsaacLab/source/isaaclab/isaaclab/sensors/frame_transformer/frame_transformer.py", line 444, in _debug_vis_callback
-    frames_pos = torch.cat([self._data.source_pos_w, self._data.target_pos_w.view(-1, 3)], dim=0)
-                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-AttributeError: 'NoneType' object has no attribute 'view'
-[INFO]: Time taken for simulation start : 5.434796 seconds
-18:17:20 [record_demos.py] ERROR: Failed to create environment: While resolving expression '/World/envs/env_.*/Table' found a prim '/World/envs/env_0/Table' which is not a rigid body. The class only supports transformations between rigid bodies.
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/record_demos.py", line 918, in <module>
+    main()
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/record_demos.py", line 908, in main
+    current_recorded_demo_count = run_simulation_loop(env, None, success_term, rate_limiter)
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/record_demos.py", line 621, in run_simulation_loop
+    use_dual_arm = "right_arm" in env.scene and num_dof == 12
+                   ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/ssd/IsaacLab/source/isaaclab/isaaclab/scene/interactive_scene.py", line 707, in __getitem__
+    raise KeyError(f"Scene entity with key '{key}' not found. Available Entities: '{all_keys}'")
+KeyError: "Scene entity with key '0' not found. Available Entities: '['terrain', 'left_arm', 'right_arm', 'cube_1', 'cube_2', 'ee_right', 'ee_left', 'table', 'plane', 'light']'"

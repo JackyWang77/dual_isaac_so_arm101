@@ -14,7 +14,7 @@ from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
 from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
-from SO_101.robots.so_arm101_roscon import SO_ARM101_ROSCON_CFG
+from SO_101.robots.so_arm101_roscon import SO_ARM101_ROSCON_HIGH_PD_CFG
 from SO_101.tasks.cube_stack.cube_stack_env_cfg import CubeStackEnvCfg
 
 from . import mdp
@@ -37,36 +37,43 @@ class DualSoArm101CubeStackJointPosEnvCfg(CubeStackEnvCfg):
     def __post_init__(self):
         super().__post_init__()
 
-        # Same orientation as lift_old: rot=(1,0,0,0) upright, no rotation; fix root like pick_place
-        self.scene.right_arm = SO_ARM101_ROSCON_CFG.replace(
+        # Same as lift_old: SO_ARM101_ROSCON_HIGH_PD_CFG for responsive teleop
+        # (SO_ARM101_ROSCON_CFG has lower stiffness -> laggy feel)
+        self.scene.right_arm = SO_ARM101_ROSCON_HIGH_PD_CFG.replace(
             prim_path="{ENV_REGEX_NS}/Right_Arm",
-            init_state=SO_ARM101_ROSCON_CFG.init_state.replace(
+            init_state=SO_ARM101_ROSCON_HIGH_PD_CFG.init_state.replace(
                 pos=(0.0, -0.25, 0.0),
                 rot=(1.0, 0.0, 0.0, 0.0),
                 joint_pos={
-                    **SO_ARM101_ROSCON_CFG.init_state.joint_pos,
+                    **SO_ARM101_ROSCON_HIGH_PD_CFG.init_state.joint_pos,
                     "jaw_joint": 0.698,
                 },
             ),
         )
         self.scene.right_arm.spawn.articulation_props.fix_root_link = True
 
-        self.scene.left_arm = SO_ARM101_ROSCON_CFG.replace(
+        self.scene.left_arm = SO_ARM101_ROSCON_HIGH_PD_CFG.replace(
             prim_path="{ENV_REGEX_NS}/Left_Arm",
-            init_state=SO_ARM101_ROSCON_CFG.init_state.replace(
+            init_state=SO_ARM101_ROSCON_HIGH_PD_CFG.init_state.replace(
                 pos=(0.0, 0.25, 0.0),
                 rot=(1.0, 0.0, 0.0, 0.0),
                 joint_pos={
-                    **SO_ARM101_ROSCON_CFG.init_state.joint_pos,
+                    **SO_ARM101_ROSCON_HIGH_PD_CFG.init_state.joint_pos,
                     "jaw_joint": 0.698,
                 },
             ),
         )
         self.scene.left_arm.spawn.articulation_props.fix_root_link = True
 
-        # (Target visual removed: FrameTransformer requires rigid bodies; Table is not. Target = (0.2, 0, 0.02).)
+        # Same sim rate as lift_old for smooth teleop (200Hz physics, decimation=4 -> 50Hz control)
+        self.sim.dt = 1.0 / 200
+        self.decimation = 4
+        self.sim.render_interval = self.decimation
 
-        # cube_1 & cube_2 only; target zone fixed at center (0.2, 0), no physical base
+        # (Target visual removed: FrameTransformer requires rigid bodies; Table is not.
+        #  Target = TARGET_XY (0.117, -0.011), z=table.)
+
+        # cube_1 & cube_2 only; target zone fixed at TARGET_XY (0.117, -0.011), no physical base
         self.scene.cube_1 = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Cube1",
             init_state=RigidObjectCfg.InitialStateCfg(
@@ -126,7 +133,7 @@ class DualSoArm101CubeStackJointPosEnvCfg(CubeStackEnvCfg):
         marker_cfg = FRAME_MARKER_CFG.copy()
         marker_cfg.markers["frame"].scale = (0.05, 0.05, 0.05)
         marker_cfg.prim_path = "/Visuals/FrameTransformer"
-        # EE frame offset: same as lift_old (Robot/wrist_2_link + [0.01, 0, -0.1])
+        # EE frame offset: wrist_2_link + [0.002, 0, -0.1]
         self.scene.ee_right = FrameTransformerCfg(
             prim_path="{ENV_REGEX_NS}/Right_Arm/base",
             debug_vis=False,
@@ -135,7 +142,7 @@ class DualSoArm101CubeStackJointPosEnvCfg(CubeStackEnvCfg):
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Right_Arm/wrist_2_link",
                     name="ee_right",
-                    offset=OffsetCfg(pos=[0.01, 0.0, -0.1]),
+                    offset=OffsetCfg(pos=[0.002, 0.0, -0.1]),
                 ),
             ],
         )
@@ -147,7 +154,7 @@ class DualSoArm101CubeStackJointPosEnvCfg(CubeStackEnvCfg):
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Left_Arm/wrist_2_link",
                     name="ee_left",
-                    offset=OffsetCfg(pos=[0.01, 0.0, -0.1]),
+                    offset=OffsetCfg(pos=[0.002, 0.0, -0.1]),
                 ),
             ],
         )

@@ -34,6 +34,7 @@ python scripts/isaaclab_mimic/annotate_demos.py \
     --device "$DEVICE" \
     --task "$TASK_ANNOTATE" \
     --auto \
+    --headless \
     --enable_cameras \
     --input_file "$INPUT_FILE" \
     --output_file "$ANNOTATED_FILE"

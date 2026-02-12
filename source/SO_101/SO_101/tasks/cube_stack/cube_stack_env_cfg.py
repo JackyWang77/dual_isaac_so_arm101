@@ -25,8 +25,8 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from . import mdp
 
 
-# Fixed target position at center (no physical object)
-TARGET_XY = (0.2, 0.0)
+# Fixed target position (stack goal; either order OK)
+TARGET_XY = (0.117, -0.011)
 TARGET_Z_TABLE = 0.015
 
 
@@ -143,12 +143,13 @@ class EventCfg:
 
     reset_all = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
 
-    # cube_1 & cube_2: lift_old-style pose_range (offset from default) so arm can reach
+    # cube_1: right side; cube_2: left side (original spawn zones)
+    # Target for stacking = TARGET_XY (0.117, -0.011)
     reset_cube_1 = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
-            "pose_range": {"x": (-0.1, 0.1), "y": (-0.2, 0.2), "z": (0.0, 0.0)},
+            "pose_range": {"x": (-0.03, 0.01), "y": (-0.18, -0.14), "z": (0.0, 0.0)},
             "velocity_range": {},
             "asset_cfg": SceneEntityCfg("cube_1", body_names="Cube1"),
         },
@@ -158,7 +159,7 @@ class EventCfg:
         func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
-            "pose_range": {"x": (-0.1, 0.1), "y": (-0.2, 0.2), "z": (0.0, 0.0)},
+            "pose_range": {"x": (-0.03, 0.01), "y": (0.14, 0.18), "z": (0.0, 0.0)},
             "velocity_range": {},
             "asset_cfg": SceneEntityCfg("cube_2", body_names="Cube2"),
         },
@@ -260,14 +261,37 @@ class TerminationsCfg:
         func=mdp.root_height_below_minimum,
         params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("cube_2")},
     )
-    stack_success = DoneTerm(
-        func=mdp.two_cubes_stacked_at_target,
+    # Named "success" for record_demos.py auto-reset when all done (must release gripper)
+    success = DoneTerm(
+        func=mdp.two_cubes_stacked_aligned_gripper_released,
         params={
-            "target_xy": TARGET_XY,
-            "xy_threshold": 0.025,
-            "z_tolerance": 0.01,
+            "expected_height": 0.018,
+            "eps_z": 0.003,
+            "eps_xy": 0.009,
+            "gripper_open_threshold": 0.1,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
+            "right_arm_cfg": SceneEntityCfg("right_arm"),
+            "left_arm_cfg": SceneEntityCfg("left_arm"),
+        },
+    )
+    stack_success = DoneTerm(
+        func=mdp.two_cubes_stacked_at_target_released,
+        params={
+            "target_xy": TARGET_XY,
+            "expected_height": 0.018,
+            "eps_z": 0.003,
+            "eps_xy": 0.009,
+            "target_eps_xy": 0.2,
+            "gripper_open_threshold": 0.1,
+            "vel_threshold": 0.001,
+            "stable_steps_required": 50,
+            "cube_1_cfg": SceneEntityCfg("cube_1"),
+            "cube_2_cfg": SceneEntityCfg("cube_2"),
+            "right_arm_cfg": SceneEntityCfg("right_arm"),
+            "left_arm_cfg": SceneEntityCfg("left_arm"),
+            "ee_right_cfg": SceneEntityCfg("ee_right"),
+            "ee_left_cfg": SceneEntityCfg("ee_left"),
         },
     )
 

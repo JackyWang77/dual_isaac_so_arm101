@@ -68,7 +68,8 @@ class DualSoArm101CubeStackEnvCfg(CubeStackEnvCfg):
             ),
         )
 
-        # (Target visual removed: FrameTransformer requires rigid bodies; Table is not.)
+        # (Target visual removed: FrameTransformer requires rigid bodies; Table is not.
+        #  Target = TARGET_XY (0.117, -0.011), z=table.)
 
         # ---------------
         # cube_1 and cube_2 only; target zone at center (no physical base)
@@ -114,7 +115,7 @@ class DualSoArm101CubeStackEnvCfg(CubeStackEnvCfg):
             ),
             scale=0.5,
             body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(
-                pos=[0.004, -0.102, 0.0]
+                pos=[0.002, 0.0, -0.1]
             ),
         )
         self.actions.left_arm_action = DifferentialInverseKinematicsActionCfg(
@@ -132,7 +133,7 @@ class DualSoArm101CubeStackEnvCfg(CubeStackEnvCfg):
             ),
             scale=0.5,
             body_offset=DifferentialInverseKinematicsActionCfg.OffsetCfg(
-                pos=[0.004, -0.102, 0.0]
+                pos=[0.002, 0.0, -0.1]
             ),
         )
         self.actions.right_gripper_action = mdp.BinaryJointPositionActionCfg(
@@ -154,7 +155,7 @@ class DualSoArm101CubeStackEnvCfg(CubeStackEnvCfg):
         marker_cfg = FRAME_MARKER_CFG.copy()
         marker_cfg.markers["frame"].scale = (0.05, 0.05, 0.05)
         marker_cfg.prim_path = "/Visuals/FrameTransformer"
-        # EE frame offset: same as lift_old (wrist_2_link + [0.01, 0, -0.1])
+        # EE frame offset: wrist_2_link + [0.002, 0, -0.1]
         self.scene.ee_right = FrameTransformerCfg(
             prim_path="{ENV_REGEX_NS}/Right_Arm/base",
             debug_vis=False,
@@ -163,7 +164,7 @@ class DualSoArm101CubeStackEnvCfg(CubeStackEnvCfg):
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Right_Arm/wrist_2_link",
                     name="ee_right",
-                    offset=OffsetCfg(pos=[0.01, 0.0, -0.1]),
+                    offset=OffsetCfg(pos=[0.002, 0.0, -0.1]),
                 ),
             ],
         )
@@ -175,7 +176,7 @@ class DualSoArm101CubeStackEnvCfg(CubeStackEnvCfg):
                 FrameTransformerCfg.FrameCfg(
                     prim_path="{ENV_REGEX_NS}/Left_Arm/wrist_2_link",
                     name="ee_left",
-                    offset=OffsetCfg(pos=[0.01, 0.0, -0.1]),
+                    offset=OffsetCfg(pos=[0.002, 0.0, -0.1]),
                 ),
             ],
         )

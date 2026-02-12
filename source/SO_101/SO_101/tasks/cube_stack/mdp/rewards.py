@@ -123,7 +123,7 @@ def cube_stack_alignment(
 
 def cube_near_target_xy(
     env: ManagerBasedRLEnv,
-    target_xy: tuple[float, float] = (0.2, 0.0),
+    target_xy: tuple[float, float] = (0.117, -0.011),
     xy_std: float = 0.05,
     object_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
 ) -> torch.Tensor:

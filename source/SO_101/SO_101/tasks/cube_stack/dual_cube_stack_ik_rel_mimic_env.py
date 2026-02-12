@@ -84,6 +84,6 @@ class DualCubeStackIKRelMimicEnv(ManagerBasedRLMimicEnv):
         signals = {}
         if "subtask_terms" in self.obs_buf:
             terms = self.obs_buf["subtask_terms"]
-            signals["pick_cube_top"] = terms.get("pick_cube_top", torch.zeros(1))[env_ids]
+            signals["pick_cube"] = terms.get("pick_cube", torch.zeros(1))[env_ids]
             signals["stack_cube"] = terms.get("stack_cube", torch.zeros(1))[env_ids]
         return signals

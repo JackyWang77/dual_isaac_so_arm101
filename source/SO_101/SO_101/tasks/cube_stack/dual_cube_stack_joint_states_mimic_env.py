@@ -72,6 +72,6 @@ class DualCubeStackJointStatesMimicEnv(ManagerBasedRLMimicEnv):
             env_ids = slice(None)
         signals = {}
         subtask_terms = self.obs_buf["subtask_terms"]
-        signals["pick_cube_top"] = subtask_terms["pick_cube_top"][env_ids]
+        signals["pick_cube"] = subtask_terms["pick_cube"][env_ids]
         signals["stack_cube"] = subtask_terms["stack_cube"][env_ids]
         return signals
