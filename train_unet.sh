@@ -1,16 +1,12 @@
 #!/bin/bash
-# Train Graph-Unet Policy (Full Graph Attention + U-Net 1D backbone)
-#
-# Key difference from train_unet.sh:
-#   UnetPolicy:      Node → MLP → pool → z → U-Net  (no real graph)
-#   GraphUnetPolicy: Node → MLP → GraphAttention×N (GRU edge + Edge Modulation) → pool → z → U-Net
+# Train Graph-Unet Policy (Graph encoder + U-Net 1D backbone)
 
 # Mode selection (default: flow_matching)
 MODE="${1:-flow_matching}"
 
 # Validate mode (only flow_matching supported)
 if [ "$MODE" != "flow_matching" ]; then
-    echo "Error: Invalid mode '$MODE'"
+    echo "❌ Error: Invalid mode '$MODE'"
     echo ""
     echo "Usage:"
     echo "  $0 [flow_matching]"
@@ -22,16 +18,14 @@ if [ "$MODE" != "flow_matching" ]; then
 fi
 
 echo "========================================"
-echo "Training Graph-Unet Policy (Full Graph)"
+echo "Training Graph-Unet Policy"
 echo "Mode: $MODE"
-echo "Policy: GraphUnetPolicy (GRU + Graph Attention + Edge Modulation + U-Net)"
 echo "LR Schedule: constant (fixed)"
 echo "========================================"
 
 python scripts/graph_unet/train.py \
     --task SO-ARM101-Lift-Cube-v0 \
     --dataset ./datasets/lift_annotated_dataset.hdf5 \
-    --policy_type graph_unet \
     --obs_dim 32 \
     --action_dim 6 \
     --action_history_length 10 \
@@ -47,5 +41,5 @@ python scripts/graph_unet/train.py \
     --pred_horizon 20 \
     --exec_horizon 10 \
     --device cuda \
-    --save_dir ./logs/graph_unet_full/lift_joint \
-    --log_dir ./logs/graph_unet_full/lift_joint
+    --save_dir ./logs/graph_unet/lift_joint \
+    --log_dir ./logs/graph_unet/lift_joint

@@ -28,6 +28,9 @@ parser.add_argument("--task", type=str, default="SO-ARM101-Lift-Cube-RL-v0",
                     help="SO-ARM101-Lift-Cube-RL-v0: Position+Rotation (training), SO-ARM101-Lift-Cube-v0: Position only")
 parser.add_argument("--pretrained_checkpoint", type=str, required=True,
                     help="Pretrained Graph-Unet checkpoint (residual RL is Unet-only)")
+parser.add_argument("--policy_type", type=str, default="unet",
+                    choices=["unet", "graph_unet"],
+                    help="Backbone policy: 'unet' (MLP + U-Net) or 'graph_unet' (Graph Attention + U-Net)")
 parser.add_argument("--num_envs", type=int, default=128)
 parser.add_argument("--max_iterations", type=int, default=500)
 parser.add_argument("--seed", type=int, default=42)
@@ -76,7 +79,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import SO_101.tasks  # noqa: F401 Register envs
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
-from SO_101.policies.graph_unet_policy import GraphUnetPolicy
+from SO_101.policies.graph_unet_policy import GraphUnetPolicy, UnetPolicy
 from SO_101.policies.graph_unet_residual_rl_policy import (
     GraphUnetBackboneAdapter,
     GraphUnetResidualRLCfg,
@@ -740,9 +743,10 @@ def main():
     # Get device from AppLauncher (or use default)
     device = getattr(args, "device", "cuda")
 
-    # Load pretrained Graph-Unet (residual RL is Unet-only)
-    print(f"\n[Main] Loading pretrained Graph-Unet: {args.pretrained_checkpoint}")
-    backbone_policy = GraphUnetPolicy.load(args.pretrained_checkpoint, device=device)
+    # Load pretrained backbone (UnetPolicy or GraphUnetPolicy)
+    BackboneClass = GraphUnetPolicy if args.policy_type == "graph_unet" else UnetPolicy
+    print(f"\n[Main] Loading pretrained {BackboneClass.__name__}: {args.pretrained_checkpoint}")
+    backbone_policy = BackboneClass.load(args.pretrained_checkpoint, device=device)
     backbone_policy.eval()
     for p in backbone_policy.parameters():
         p.requires_grad = False

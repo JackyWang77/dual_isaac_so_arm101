@@ -47,7 +47,7 @@ import graph_unet_policy as _graph_unet_policy_module
 sys.modules["SO_101.policies.graph_unet_policy"] = _graph_unet_policy_module
 
 from graph_dit_policy import GraphDiTPolicy
-from graph_unet_policy import GraphUnetPolicy
+from graph_unet_policy import UnetPolicy
 from dataset import HDF5DemoDataset, demo_collate_fn
 
 
@@ -195,7 +195,7 @@ def main():
     print("[Input Sensitivity] 加载 Unet...")
     chk_unet = torch.load(ckpt_unet, map_location=device, weights_only=False)
     cfg_unet = chk_unet["cfg"]
-    policy_unet = GraphUnetPolicy(cfg_unet).to(device)
+    policy_unet = UnetPolicy(cfg_unet).to(device)
     policy_unet.load_state_dict(chk_unet["policy_state_dict"])
     policy_unet.eval()
 

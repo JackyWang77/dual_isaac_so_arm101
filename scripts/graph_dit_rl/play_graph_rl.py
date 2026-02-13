@@ -31,7 +31,7 @@ import gymnasium as gym
 import SO_101.tasks  # noqa: F401  # Register environments
 import torch
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
-from SO_101.policies.graph_unet_policy import GraphUnetPolicy
+from SO_101.policies.graph_unet_policy import UnetPolicy
 from SO_101.policies.graph_unet_residual_rl_policy import (
     GraphUnetBackboneAdapter,
     GraphUnetResidualRLPolicy,
@@ -68,7 +68,7 @@ def play_graph_rl_policy(
 
     # Load pretrained Graph-Unet
     print(f"\n[Play] Loading pretrained Graph-Unet: {pretrained_checkpoint}")
-    backbone_policy = GraphUnetPolicy.load(pretrained_checkpoint, device=device)
+    backbone_policy = UnetPolicy.load(pretrained_checkpoint, device=device)
     backbone_policy.eval()
     for p in backbone_policy.parameters():
         p.requires_grad = False

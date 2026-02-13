@@ -38,7 +38,7 @@ import SO_101.tasks  # noqa: F401  # Register environments
 import torch
 import torch.optim as optim
 from SO_101.policies.graph_dit_policy import GraphDiTPolicyCfg
-from SO_101.policies.graph_unet_policy import GraphUnetPolicy
+from SO_101.policies.graph_unet_policy import GraphUnetPolicy, UnetPolicy
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.tensorboard import SummaryWriter
@@ -829,6 +829,7 @@ def train_graph_unet_policy(
     lr_schedule: str = "constant",
     skip_first_steps: int = 10,
     num_inference_steps: int = 40,
+    policy_type: str = "unet",
 ):
     """Train Graph-Unet Policy with Action Chunking.
 
@@ -1063,8 +1064,9 @@ def train_graph_unet_policy(
         )
 
     # Create policy network
-    print(f"\n[Train] Creating Graph-Unet Policy...")
-    policy = GraphUnetPolicy(cfg).to(device)
+    PolicyClass = GraphUnetPolicy if policy_type == "graph_unet" else UnetPolicy
+    print(f"\n[Train] Creating {PolicyClass.__name__} Policy...")
+    policy = PolicyClass(cfg).to(device)
 
     # Print model summary
     total_params = sum(p.numel() for p in policy.parameters())
@@ -1399,6 +1401,15 @@ def main():
     """Main training function."""
     parser = argparse.ArgumentParser(description="Train Graph-DiT Policy")
 
+    # Policy type
+    parser.add_argument(
+        "--policy_type",
+        type=str,
+        default="unet",
+        choices=["unet", "graph_unet"],
+        help="Policy class: 'unet' (MLP encoder + U-Net) or 'graph_unet' (full Graph Attention + U-Net)",
+    )
+
     # Dataset arguments
     parser.add_argument("--task", type=str, required=True, help="Task name")
     parser.add_argument("--dataset", type=str, required=True, help="HDF5 dataset path")
@@ -1542,6 +1553,7 @@ def main():
         lr_schedule=args.lr_schedule,
         skip_first_steps=args.skip_first_steps,
         num_inference_steps=args.num_inference_steps,
+        policy_type=args.policy_type,
     )
 
 

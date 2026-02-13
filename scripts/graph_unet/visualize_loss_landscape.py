@@ -45,7 +45,7 @@ import graph_unet_policy as _graph_unet_policy_module
 
 sys.modules["SO_101.policies.graph_unet_policy"] = _graph_unet_policy_module
 
-from graph_unet_policy import GraphUnetPolicy
+from graph_unet_policy import UnetPolicy
 from dataset import HDF5DemoDataset, demo_collate_fn
 
 
@@ -146,7 +146,7 @@ def main():
     try:
         checkpoint = torch.load(CKPT_PATH, map_location=device, weights_only=False)
         cfg = checkpoint["cfg"]
-        policy = GraphUnetPolicy(cfg).to(device)
+        policy = UnetPolicy(cfg).to(device)
         policy.load_state_dict(checkpoint["policy_state_dict"])
         print("模型加载成功")
     except Exception as e:

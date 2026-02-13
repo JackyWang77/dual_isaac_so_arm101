@@ -61,7 +61,7 @@ import numpy as np
 import SO_101.tasks  # noqa: F401  # Register environments
 import torch
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
-from SO_101.policies.graph_unet_policy import GraphUnetPolicy
+from SO_101.policies.graph_unet_policy import UnetPolicy
 
 # Try to import visualization utilities (if available)
 try:
@@ -231,7 +231,7 @@ def play_graph_unet_policy(
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     
     # Load policy
-    policy = GraphUnetPolicy.load(checkpoint_path, device=device)
+    policy = UnetPolicy.load(checkpoint_path, device=device)
     policy.eval()
     
     # Policy outputs 6-dim (5 arm + 1 gripper); gripper mapped to -1/1 only for env.step
