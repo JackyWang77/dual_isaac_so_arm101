@@ -326,41 +326,64 @@ def main():
         print(f"Saved: {out_npz}")
         return
 
+    # Paper style: serif (default serif font), no in-figure titles (caption in LaTeX)
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.size": 11,
+        "axes.labelsize": 13,
+        "xtick.labelsize": 12,
+        "ytick.labelsize": 12,
+        "legend.fontsize": 11,
+        "axes.linewidth": 0.8,
+        "figure.dpi": 300,
+    })
+
     X, Y = np.meshgrid(alphas, betas)
-    fig = plt.figure(figsize=(16, 7))
+    fig = plt.figure(figsize=(16, 7), facecolor="white")
     ax1 = fig.add_subplot(121, projection="3d")
     ax2 = fig.add_subplot(122, projection="3d")
+    for ax in (ax1, ax2):
+        ax.set_facecolor("white")
+        ax.xaxis.pane.fill = False
+        ax.yaxis.pane.fill = False
+        ax.zaxis.pane.fill = False
+        ax.xaxis.pane.set_edgecolor("#e5e7eb")
+        ax.yaxis.pane.set_edgecolor("#e5e7eb")
+        ax.zaxis.pane.set_edgecolor("#e5e7eb")
+        ax.grid(True, alpha=0.25, color="#9ca3af")
+    for ax, label in zip((ax1, ax2), ["(a)", "(b)"]):
+        ax.text2D(0.02, 0.95, label, transform=ax.transAxes, fontsize=14, fontweight="bold", va="top")
 
-    surf1 = ax1.plot_surface(X, Y, losses_dit, cmap="viridis", edgecolor="none", alpha=0.9)
-    ax1.contour(X, Y, losses_dit, zdir="z", offset=np.nanmin(losses_dit), cmap="viridis", alpha=0.5)
-    ax1.set_title("Graph-DiT Loss Landscape", fontsize=14)
-    ax1.set_xlabel("Direction X")
-    ax1.set_ylabel("Direction Y")
-    ax1.set_zlabel("Flow Matching Loss")
+    vmin, vmax = float(z_lim[0]), float(z_lim[1])
+    surf1 = ax1.plot_surface(X, Y, losses_dit, cmap="viridis", edgecolor="none", alpha=0.9, vmin=vmin, vmax=vmax)
+    ax1.contour(X, Y, losses_dit, zdir="z", offset=np.nanmin(losses_dit), cmap="viridis", alpha=0.5, vmin=vmin, vmax=vmax)
+    ax1.set_xlabel("Direction X", labelpad=10)
+    ax1.set_ylabel("Direction Y", labelpad=10)
+    ax1.set_zlabel("Flow Matching Loss", labelpad=6)
+    ax1.tick_params(axis="x", pad=4)
+    ax1.tick_params(axis="y", pad=4)
     ax1.set_zlim(z_lim)
     c1 = losses_dit[RESOLUTION // 2, RESOLUTION // 2]
-    ax1.scatter(0, 0, c1, c="r", s=100, marker="*", label="Best")
-    ax1.legend()
+    ax1.scatter(0, 0, c1, c="r", s=100, marker="*")
 
-    surf2 = ax2.plot_surface(X, Y, losses_unet, cmap="viridis", edgecolor="none", alpha=0.9)
-    ax2.contour(X, Y, losses_unet, zdir="z", offset=np.nanmin(losses_unet), cmap="viridis", alpha=0.5)
-    ax2.set_title("Graph-Unet Loss Landscape", fontsize=14)
-    ax2.set_xlabel("Direction X")
-    ax2.set_ylabel("Direction Y")
-    ax2.set_zlabel("Flow Matching Loss")
+    surf2 = ax2.plot_surface(X, Y, losses_unet, cmap="viridis", edgecolor="none", alpha=0.9, vmin=vmin, vmax=vmax)
+    ax2.contour(X, Y, losses_unet, zdir="z", offset=np.nanmin(losses_unet), cmap="viridis", alpha=0.5, vmin=vmin, vmax=vmax)
+    ax2.set_xlabel("Direction X", labelpad=10)
+    ax2.set_ylabel("Direction Y", labelpad=10)
+    ax2.set_zlabel("Flow Matching Loss", labelpad=6)
+    ax2.tick_params(axis="x", pad=4)
+    ax2.tick_params(axis="y", pad=4)
     ax2.set_zlim(z_lim)
     c2 = losses_unet[RESOLUTION // 2, RESOLUTION // 2]
-    ax2.scatter(0, 0, c2, c="r", s=100, marker="*", label="Best")
-    ax2.legend()
+    ax2.scatter(0, 0, c2, c="r", s=100, marker="*")
 
     plt.colorbar(surf1, ax=ax1, shrink=0.5)
     plt.colorbar(surf2, ax=ax2, shrink=0.5)
-    plt.suptitle("Loss Landscape Comparison (same data, same scale)", fontsize=12)
     plt.tight_layout()
-    out_png = os.path.join(REPO_ROOT, "loss_landscape_compare.png")
-    plt.savefig(out_png, dpi=120)
+    out_pdf = os.path.join(REPO_ROOT, "loss_landscape_compare.pdf")
+    plt.savefig(out_pdf, bbox_inches="tight", facecolor=fig.get_facecolor())
     plt.close()
-    print(f"Saved: {out_png}")
+    print(f"Saved: {out_pdf}")
 
     out_npz = os.path.join(REPO_ROOT, "loss_landscape_compare.npz")
     np.savez(out_npz, alphas=alphas, betas=betas, losses_dit=losses_dit, losses_unet=losses_unet)

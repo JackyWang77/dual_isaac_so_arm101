@@ -230,6 +230,20 @@ def main():
         print("未安装 matplotlib，已保存 input_sensitivity.npz")
         return
 
+    # Paper style: serif, unified palette, no in-figure title (caption in LaTeX)
+    # Same rcParams & figsize as frequency/jerk for consistent 4-in-a-row layout
+    plt.rcParams.update({
+        "font.family": "serif",
+        "font.size": 16,
+        "axes.labelsize": 18,
+        "xtick.labelsize": 15,
+        "ytick.labelsize": 15,
+        "legend.fontsize": 15,
+        "axes.linewidth": 1.2,
+        "figure.dpi": 300,
+    })
+    palette = {"DiT": "#4878CF", "U-Net": "#D65F5F"}
+
     # Light smoothing (window=5) to reduce jaggedness while preserving trend
     def _smooth(y, w=5):
         if len(y) < w:
@@ -240,42 +254,33 @@ def main():
     diffs_dit_smooth = _smooth(diffs_dit)
     diffs_unet_smooth = _smooth(diffs_unet)
 
-    # Refined color palette
-    color_dit = "#6366f1"   # indigo
-    color_unet = "#0d9488"  # teal
-
-    fig, ax = plt.subplots(figsize=(9, 5.5), facecolor="#fafafa")
-    ax.set_facecolor("#ffffff")
+    fig, ax = plt.subplots(figsize=(5.5, 4), facecolor="white")
+    ax.set_facecolor("white")
     ax.plot(
         sigmas, diffs_dit_smooth,
-        label="Graph-DiT (Transformer)",
-        color=color_dit,
+        label="DiT",
+        color=palette["DiT"],
         linewidth=2.5,
         alpha=0.9,
     )
     ax.plot(
         sigmas, diffs_unet_smooth,
-        label="Graph-U-Net (CNN)",
-        color=color_unet,
+        label="U-Net",
+        color=palette["U-Net"],
         linewidth=2.5,
         alpha=0.9,
     )
-    # Subtle fill under curves
-    ax.fill_between(sigmas, diffs_dit_smooth, alpha=0.08, color=color_dit)
-    ax.fill_between(sigmas, diffs_unet_smooth, alpha=0.08, color=color_unet)
+    ax.fill_between(sigmas, diffs_dit_smooth, alpha=0.08, color=palette["DiT"])
+    ax.fill_between(sigmas, diffs_unet_smooth, alpha=0.08, color=palette["U-Net"])
 
-    ax.set_xlabel("Input Noise Level (Sensor Jitter)", fontsize=13, color="#374151")
-    ax.set_ylabel("Output Action Deviation (Robot Jitter)", fontsize=13, color="#374151")
-    ax.set_title("Why DiT Jitters: Input Sensitivity Analysis", fontsize=15, fontweight=600, color="#111827", pad=14)
-    ax.legend(fontsize=12, framealpha=0.95, edgecolor="#e5e7eb", loc="upper right")
-    ax.grid(True, alpha=0.25, color="#9ca3af", linestyle="-")
+    ax.set_xlabel("Input Noise Level")
+    ax.set_ylabel("Action Deviation")
+    ax.legend(framealpha=0.95, loc="upper right")
+    ax.grid(True, alpha=0.25, linestyle="-")
     ax.set_xlim(0, 0.1)
-    ax.tick_params(colors="#6b7280", labelsize=11)
-    for spine in ax.spines.values():
-        spine.set_color("#e5e7eb")
     plt.tight_layout()
-    out_path = os.path.join(REPO_ROOT, "input_sensitivity.png")
-    plt.savefig(out_path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
+    out_path = os.path.join(REPO_ROOT, "input_sensitivity.pdf")
+    plt.savefig(out_path, bbox_inches="tight", facecolor=fig.get_facecolor())
     plt.close()
     print(f"已保存: {out_path}")
 
