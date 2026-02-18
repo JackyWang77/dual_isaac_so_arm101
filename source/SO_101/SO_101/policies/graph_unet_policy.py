@@ -179,12 +179,11 @@ class UnetPolicy(GraphDiTPolicy):
     """
     MLP node encoder + Conditional U-Net 1D backbone (no real graph attention).
 
-    Node path: Node History [B,H,7] → MLP_node → TemporalAgg → concat → MLP_z → z
+    Node path: Node History [B,N,H,7] → MLP_node + type_embed → TemporalAgg → pool → MLP_z → z
     Action path: noisy_action + z + timestep → U-Net → velocity_pred
 
-    NOTE: This class does NOT use GRU edge encoder, Multihead Graph Attention, or
-    Edge-Conditioned Modulation. It simply embeds nodes with an MLP and pools to z.
-    For the full graph version, use GraphUnetPolicy instead.
+    Supports dynamic N-node graphs via ``node_histories`` kwarg or legacy
+    2-node API via ``ee_node_history`` + ``object_node_history``.
     """
 
     def __init__(self, cfg: GraphDiTPolicyCfg):
@@ -194,16 +193,87 @@ class UnetPolicy(GraphDiTPolicy):
         del self.noise_head
         del self.pred_horizon_pos_embed
 
+        self._use_joint_film = getattr(cfg, "use_joint_film", False)
         z_dim = getattr(cfg, "z_dim", 64)
-        # Smaller U-Net (128,256,512) to fit ~8GB GPU; use [256,512,1024] if you have more VRAM
+        joint_z_dim = 0
+        if self._use_joint_film:
+            jd = getattr(cfg, "joint_dim", None) or 6
+            hist_len = cfg.action_history_length
+            self.joint_encoder = nn.Sequential(
+                nn.Linear(jd * hist_len, cfg.hidden_dim),
+                nn.GELU(),
+                nn.Linear(cfg.hidden_dim, z_dim),
+            )
+            joint_z_dim = z_dim
+
         self.unet = ConditionalUnet1D(
             input_dim=cfg.action_dim,
-            global_cond_dim=z_dim,
+            global_cond_dim=z_dim + joint_z_dim,
             diffusion_step_embed_dim=cfg.hidden_dim,
             down_dims=[128, 256, 512],
             kernel_size=5,
             n_groups=8,
         )
+
+    # ------------------------------------------------------------------
+    # Shared helper: build node_histories [B, N, H, 7] from any input API
+    # ------------------------------------------------------------------
+
+    def _build_node_histories(
+        self,
+        obs: torch.Tensor,
+        ee_node_history: torch.Tensor | None = None,
+        object_node_history: torch.Tensor | None = None,
+        node_histories: torch.Tensor | None = None,
+        node_types: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return (node_histories [B, N, H, 7], node_types [N]).
+
+        Accepts either the new unified tensor or the legacy separate tensors.
+        Falls back to extracting from obs if nothing is provided.
+        """
+        num_node_types = getattr(self.cfg, "num_node_types", 2)
+
+        if node_histories is not None:
+            # New API: already [B, N, H, 7]
+            N = node_histories.shape[1]
+            if node_types is None:
+                node_types = torch.zeros(N, dtype=torch.long, device=node_histories.device)
+            return node_histories, node_types
+
+        if ee_node_history is not None and object_node_history is not None:
+            # Legacy 2-node API → stack into [B, N=2, H, 7]
+            nh = torch.stack([ee_node_history, object_node_history], dim=1)  # [B, 2, H, 7]
+            nt = torch.tensor([0, 1], dtype=torch.long, device=nh.device)
+            return nh, nt
+
+        # Fallback: extract from obs (single timestep, H=1)
+        ee_node, object_node = self._extract_node_features(obs)
+        nh = torch.stack([ee_node.unsqueeze(1), object_node.unsqueeze(1)], dim=1)
+        nt = torch.tensor([0, 1], dtype=torch.long, device=nh.device)
+        return nh, nt
+
+    def _embed_node_histories(
+        self,
+        node_histories: torch.Tensor,
+        node_types: torch.Tensor,
+    ) -> torch.Tensor:
+        """Embed raw node histories into feature space with type embeddings.
+
+        Args:
+            node_histories: [B, N, H, 7]
+            node_types: [N]
+        Returns:
+            [B, N, H, D]
+        """
+        B, N, H, node_dim = node_histories.shape
+        flat = node_histories.reshape(B * N * H, node_dim)
+        embedded = self.node_embedding(flat).view(B, N, H, -1)  # [B, N, H, D]
+        type_emb = self.node_type_embedding(node_types)  # [N, D]
+        embedded = embedded + type_emb.view(1, N, 1, -1)
+        return embedded
+
+    # ------------------------------------------------------------------
 
     def forward(
         self,
@@ -212,6 +282,8 @@ class UnetPolicy(GraphDiTPolicy):
         action_history: torch.Tensor | None = None,
         ee_node_history: torch.Tensor | None = None,
         object_node_history: torch.Tensor | None = None,
+        node_histories: torch.Tensor | None = None,
+        node_types: torch.Tensor | None = None,
         joint_states_history: torch.Tensor | None = None,
         subtask_condition: torch.Tensor | None = None,
         timesteps: torch.Tensor | None = None,
@@ -220,23 +292,18 @@ class UnetPolicy(GraphDiTPolicy):
         if noisy_action is None or timesteps is None:
             raise ValueError("UnetPolicy.forward requires noisy_action and timesteps")
 
-        node_dim = 7
-
-        if ee_node_history is not None and object_node_history is not None:
-            B, H, _ = ee_node_history.shape
-            ee_flat = ee_node_history.reshape(-1, node_dim)
-            obj_flat = object_node_history.reshape(-1, node_dim)
-            ee_embed = self.node_embedding(ee_flat).view(B, H, -1)
-            obj_embed = self.node_embedding(obj_flat).view(B, H, -1)
-            node_features = torch.stack([ee_embed, obj_embed], dim=2)
-            node_features = node_features.transpose(1, 2)
-        else:
-            ee_node, object_node = self._extract_node_features(obs)
-            ee_embed = self.node_embedding(ee_node).unsqueeze(1)
-            obj_embed = self.node_embedding(object_node).unsqueeze(1)
-            node_features = torch.stack([ee_embed, obj_embed], dim=1)
+        nh, nt = self._build_node_histories(
+            obs, ee_node_history, object_node_history, node_histories, node_types,
+        )
+        node_features = self._embed_node_histories(nh, nt)  # [B, N, H, D]
 
         z = self._pool_node_latent(node_features)
+
+        if self._use_joint_film and joint_states_history is not None:
+            B_j = joint_states_history.shape[0]
+            joint_flat = joint_states_history.reshape(B_j, -1)
+            joint_enc = self.joint_encoder(joint_flat)
+            z = torch.cat([z, joint_enc], dim=-1)
 
         x = noisy_action.transpose(1, 2)
         ts_embed = self._get_timestep_embed(timesteps)
@@ -248,39 +315,39 @@ class UnetPolicy(GraphDiTPolicy):
         return noise_pred
 
     # ============================================================
-    # RL: extract z and features (U-Net has no layer-wise z, single z repeated)
+    # RL: extract z and features
     # ============================================================
 
     def extract_z(
         self,
-        ee_node_history: torch.Tensor,
-        object_node_history: torch.Tensor,
+        ee_node_history: torch.Tensor | None = None,
+        object_node_history: torch.Tensor | None = None,
+        joint_states_history: torch.Tensor | None = None,
+        *,
+        node_histories: torch.Tensor | None = None,
+        node_types: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """
-        Extract graph latent z for RL (high-frequency).
-
-        U-Net has no layer-wise structure; single z is expanded to [B, K, z_dim]
-        for compatibility with RL interface.
-
-        Args:
-            ee_node_history: [B, H, 7] - EE node history
-            object_node_history: [B, H, 7] - Object node history
-
-        Returns:
-            z_layers: [B, K, z_dim] - same z repeated K times
-        """
+        """Extract graph latent z for RL. Accepts old or new node API."""
         self.eval()
         with torch.no_grad():
-            B, H, node_dim = ee_node_history.shape
-            ee_flat = ee_node_history.reshape(B * H, node_dim)
-            obj_flat = object_node_history.reshape(B * H, node_dim)
-            ee_embed = self.node_embedding(ee_flat).view(B, H, -1)
-            obj_embed = self.node_embedding(obj_flat).view(B, H, -1)
-            node_features = torch.stack([ee_embed, obj_embed], dim=1)
+            dummy_obs = torch.zeros(1, 1, device=(
+                ee_node_history.device if ee_node_history is not None
+                else node_histories.device
+            ))
+            nh, nt = self._build_node_histories(
+                dummy_obs, ee_node_history, object_node_history, node_histories, node_types,
+            )
+            node_features = self._embed_node_histories(nh, nt)
             z = self._pool_node_latent(node_features)
+
+            if self._use_joint_film and joint_states_history is not None:
+                B = z.shape[0]
+                joint_flat = joint_states_history.reshape(B, -1)
+                joint_enc = self.joint_encoder(joint_flat)
+                z = torch.cat([z, joint_enc], dim=-1)
+
             K = getattr(self.cfg, "num_layers", 6)
-            z_layers = z.unsqueeze(1).expand(-1, K, -1).contiguous()
-            return z_layers
+            return z.unsqueeze(1).expand(-1, K, -1).contiguous()
 
     def extract_features(
         self,
@@ -290,36 +357,44 @@ class UnetPolicy(GraphDiTPolicy):
         object_node_history: torch.Tensor | None = None,
         joint_states_history: torch.Tensor | None = None,
         subtask_condition: torch.Tensor | None = None,
+        *,
+        node_histories: torch.Tensor | None = None,
+        node_types: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
-        """
-        Extract features for RL (U-Net version).
-        Uses graph encoder only; no transformer layers.
-        """
+        """Extract features for RL (U-Net version)."""
         self.eval()
         with torch.no_grad():
-            if ee_node_history is not None and object_node_history is not None:
-                B, H, node_dim = ee_node_history.shape
-                ee_flat = ee_node_history.reshape(B * H, node_dim)
-                obj_flat = object_node_history.reshape(B * H, node_dim)
-                ee_embed = self.node_embedding(ee_flat).view(B, H, -1)
-                obj_embed = self.node_embedding(obj_flat).view(B, H, -1)
-                node_features = torch.stack([ee_embed, obj_embed], dim=1)
-            else:
-                ee_node, object_node = self._extract_node_features(obs)
-                ee_embed = self.node_embedding(ee_node)
-                obj_embed = self.node_embedding(object_node)
-                node_features = torch.stack([ee_embed, obj_embed], dim=1).unsqueeze(2)
-
+            nh, nt = self._build_node_histories(
+                obs, ee_node_history, object_node_history, node_histories, node_types,
+            )
+            node_features = self._embed_node_histories(nh, nt)
             z = self._pool_node_latent(node_features)
+
+            if self._use_joint_film and joint_states_history is not None:
+                B_j = joint_states_history.shape[0]
+                joint_flat = joint_states_history.reshape(B_j, -1)
+                joint_enc = self.joint_encoder(joint_flat)
+                z = torch.cat([z, joint_enc], dim=-1)
+
             K = getattr(self.cfg, "num_layers", 6)
             z_layers = z.unsqueeze(1).expand(-1, K, -1).contiguous()
 
-            if ee_node_history is not None:
-                current_ee = ee_node_history[:, -1, :]
-                current_obj = object_node_history[:, -1, :]
+            # Edge features for RL residual policy (last timestep)
+            current_nodes = nh[:, :, -1, :]  # [B, N, 7]
+            if current_nodes.shape[1] == 2:
+                edge_raw = self._compute_edge_features_legacy(
+                    current_nodes[:, 0], current_nodes[:, 1],
+                )
             else:
-                current_ee, current_obj = self._extract_node_features(obs)
-            edge_raw = self._compute_edge_features(current_ee, current_obj)
+                edge_raw = self._compute_edge_features_dynamic(
+                    current_nodes.unsqueeze(2),  # [B, N, 1, 7]
+                )
+                edge_raw = edge_raw[:, :, :, 0, :]  # [B, N, N, edge_dim]
+                # Flatten upper triangle for embedding
+                N = edge_raw.shape[1]
+                idx = torch.triu_indices(N, N, offset=1)
+                edge_raw = edge_raw[:, idx[0], idx[1]]  # [B, num_edges, edge_dim]
+                edge_raw = edge_raw.mean(dim=1)  # [B, edge_dim]
             edge_embed = self.edge_embedding(edge_raw)
 
             nf = node_features.mean(dim=2) if node_features.dim() == 4 else node_features
@@ -341,44 +416,23 @@ class GraphUnetPolicy(GraphDiTPolicy):
     """
     Full Graph encoder + Conditional U-Net 1D backbone for Flow Matching.
 
-    Unlike UnetPolicy (MLP-only node encoder → z → U-Net), this class uses
-    the complete graph attention pipeline from DiT to produce a richer z:
+    Supports dynamic N-node graphs via ``node_histories`` kwarg or legacy
+    2-node API via ``ee_node_history`` + ``object_node_history``.
 
-        Node History [B,H,7]
-            → MLP_node
-            → GraphAttention × N (GRU edge encoder + Edge-Conditioned Modulation)
-            → TemporalAgg → MLP_z → z
+    Pipeline:
+        Node History [B,N,H,7] → MLP_node + type_embed
+            → GraphAttention × L (GRU edge + Edge-Conditioned Modulation)
+            → TemporalAgg → pool → MLP_z → z
             → U-Net(noisy_action, timestep, z) → velocity_pred
-
-    Key components from DiT that are retained here:
-    - GRU temporal edge encoder: captures edge dynamics across history
-    - Edge-Conditioned Modulation: gate/scale/shift on Value (ECC-style)
-    - Multihead Graph Attention with spatial + temporal bias
-    - AdaptiveLayerNorm conditioned on timestep for diffusion awareness
-
-    Key components from DiT that are replaced:
-    - Action self-attention → handled by U-Net's ConditionalResidualBlock1D
-    - Cross-attention (action × nodes) → replaced by z conditioning in U-Net
-    - Noise head (linear) → replaced by U-Net decoder
     """
 
     def __init__(self, cfg: GraphDiTPolicyCfg):
         super().__init__(cfg)
 
-        # ------------------------------------------------------------------
-        # Remove DiT-specific action processing components.
-        # Keep: node_embedding, edge_embedding, node_to_z,
-        #       node_temporal_aggregator, _compute_edge_features,
-        #       _pool_node_latent, timestep_embedding, subtask_encoder, etc.
-        # ------------------------------------------------------------------
-        del self.graph_dit_units       # replaced by graph_attention_layers below
-        del self.noise_head            # replaced by U-Net
-        del self.pred_horizon_pos_embed  # U-Net doesn't need action pos embed
+        del self.graph_dit_units
+        del self.noise_head
+        del self.pred_horizon_pos_embed
 
-        # ==================== Graph-only attention layers ====================
-        # Same GRU + Edge-Conditioned Modulation + Multihead Graph Attention
-        # as in GraphDiTUnit, but WITHOUT action self-attention and cross-attention.
-        # Only processes node features + edge features → enriched node features.
         max_history = max(cfg.action_history_length + cfg.pred_horizon, 20)
 
         self.graph_attention_layers = nn.ModuleList([
@@ -388,7 +442,6 @@ class GraphUnetPolicy(GraphDiTPolicy):
             )
             for _ in range(cfg.num_layers)
         ])
-        # Pre-norm (before graph attention) and post-norm (before FFN)
         self.graph_pre_norms = nn.ModuleList([
             AdaptiveLayerNorm(cfg.hidden_dim, cfg.hidden_dim)
             for _ in range(cfg.num_layers)
@@ -408,22 +461,107 @@ class GraphUnetPolicy(GraphDiTPolicy):
             for _ in range(cfg.num_layers)
         ])
 
-        # ==================== U-Net backbone ====================
+        self._use_joint_film = getattr(cfg, "use_joint_film", False)
         z_dim = getattr(cfg, "z_dim", 64)
+        joint_z_dim = 0
+        if self._use_joint_film:
+            jd = getattr(cfg, "joint_dim", None) or 6
+            hist_len = cfg.action_history_length
+            self.joint_encoder = nn.Sequential(
+                nn.Linear(jd * hist_len, cfg.hidden_dim),
+                nn.GELU(),
+                nn.Linear(cfg.hidden_dim, z_dim),
+            )
+            joint_z_dim = z_dim
+
         self.unet = ConditionalUnet1D(
             input_dim=cfg.action_dim,
-            global_cond_dim=z_dim,
+            global_cond_dim=z_dim + joint_z_dim,
             diffusion_step_embed_dim=cfg.hidden_dim,
             down_dims=[128, 256, 512],
             kernel_size=5,
             n_groups=8,
         )
 
-        # Re-initialize weights for newly created modules
         self._init_weights()
 
     # ------------------------------------------------------------------
-    # Core: graph encoder (reused by forward, extract_z, extract_features)
+    # Shared helpers (inherited from UnetPolicy concept, but re-defined
+    # because GraphUnetPolicy inherits from GraphDiTPolicy, not UnetPolicy)
+    # ------------------------------------------------------------------
+
+    def _build_node_histories(
+        self,
+        obs: torch.Tensor,
+        ee_node_history: torch.Tensor | None = None,
+        object_node_history: torch.Tensor | None = None,
+        node_histories: torch.Tensor | None = None,
+        node_types: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return (node_histories [B, N, H, 7], node_types [N])."""
+        if node_histories is not None:
+            N = node_histories.shape[1]
+            if node_types is None:
+                node_types = torch.zeros(N, dtype=torch.long, device=node_histories.device)
+            return node_histories, node_types
+
+        if ee_node_history is not None and object_node_history is not None:
+            nh = torch.stack([ee_node_history, object_node_history], dim=1)
+            nt = torch.tensor([0, 1], dtype=torch.long, device=nh.device)
+            return nh, nt
+
+        ee_node, object_node = self._extract_node_features(obs)
+        nh = torch.stack([ee_node.unsqueeze(1), object_node.unsqueeze(1)], dim=1)
+        nt = torch.tensor([0, 1], dtype=torch.long, device=nh.device)
+        return nh, nt
+
+    def _embed_node_histories(
+        self,
+        node_histories: torch.Tensor,
+        node_types: torch.Tensor,
+    ) -> torch.Tensor:
+        """[B, N, H, 7] → [B, N, H, D] with type embeddings."""
+        B, N, H, node_dim = node_histories.shape
+        flat = node_histories.reshape(B * N * H, node_dim)
+        embedded = self.node_embedding(flat).view(B, N, H, -1)
+        type_emb = self.node_type_embedding(node_types)
+        embedded = embedded + type_emb.view(1, N, 1, -1)
+        return embedded
+
+    def _compute_and_embed_edges(
+        self,
+        node_histories: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute raw edges and embed them.
+
+        Args:
+            node_histories: [B, N, H, 7]
+        Returns:
+            For N==2: [B, H, graph_edge_dim] (legacy format for attention layer)
+            For N>2:  [B, N, N, H, graph_edge_dim]
+        """
+        B, N, H, _ = node_histories.shape
+
+        if N == 2:
+            # Legacy path: single edge [B, H, edge_dim]
+            edge_raw = self._compute_edge_features_legacy(
+                node_histories[:, 0], node_histories[:, 1],
+            )  # [B, H, 2]
+            edge_embed = self.edge_embedding(
+                edge_raw.reshape(-1, edge_raw.shape[-1])
+            ).view(B, H, -1)
+            return edge_embed
+        else:
+            # Dynamic: [B, N, N, H, edge_dim]
+            edge_raw = self._compute_edge_features_dynamic(node_histories)
+            edge_dim = edge_raw.shape[-1]
+            edge_embed = self.edge_embedding(
+                edge_raw.reshape(-1, edge_dim)
+            ).view(B, N, N, H, -1)
+            return edge_embed
+
+    # ------------------------------------------------------------------
+    # Core graph encoder
     # ------------------------------------------------------------------
 
     def _encode_graph(
@@ -432,16 +570,14 @@ class GraphUnetPolicy(GraphDiTPolicy):
         edge_embed: torch.Tensor,
         condition: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Run N layers of graph attention to enrich node features, then pool to z.
+        """Run L layers of graph attention, then pool to z.
 
         Args:
-            node_features: [B, 2, H, D] - embedded node history
-            edge_embed:    [B, H, edge_dim] - embedded edge history
-            condition:     [B, hidden_dim] or None (timestep + subtask for AdaLN)
+            node_features: [B, N, H, D]
+            edge_embed:    [B, H, edge_dim] (N==2) or [B, N, N, H, edge_dim] (N>2)
+            condition:     [B, hidden_dim] or None
         Returns:
-            node_features: [B, 2, H, D] - enriched node features
-            z:             [B, z_dim]    - graph latent
+            (enriched node_features, z)
         """
         B = node_features.shape[0]
         device = node_features.device
@@ -451,15 +587,11 @@ class GraphUnetPolicy(GraphDiTPolicy):
             condition = torch.zeros(B, self.cfg.hidden_dim, device=device, dtype=dtype)
 
         for i in range(len(self.graph_attention_layers)):
-            # Pre-norm with AdaLN (timestep-aware normalization)
             residual = node_features
             node_normed = self.graph_pre_norms[i](node_features, condition)
-
-            # Graph attention: GRU edge encoder → Edge-Conditioned Modulation → MHA
             node_features = self.graph_attention_layers[i](node_normed, edge_embed)
             node_features = node_features + residual
 
-            # Post-norm + FFN
             B_n, N, H_n, D = node_features.shape
             residual = node_features
             node_flat = node_features.view(B_n, N * H_n, D)
@@ -468,61 +600,11 @@ class GraphUnetPolicy(GraphDiTPolicy):
             node_flat = self.graph_ffns[i](node_flat)
             node_features = node_flat.view(B_n, N, H_n, D) + residual
 
-        # Pool: [B, 2, H, D] → TemporalAgg → [B, 2, D] → MLP → [B, z_dim]
         z = self._pool_node_latent(node_features)
         return node_features, z
 
     # ------------------------------------------------------------------
-    # Helper: embed nodes + compute/embed edges
-    # ------------------------------------------------------------------
-
-    def _embed_nodes_and_edges(
-        self,
-        obs: torch.Tensor,
-        ee_node_history: torch.Tensor | None,
-        object_node_history: torch.Tensor | None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Embed nodes and compute + embed edge features.
-
-        Returns:
-            node_features: [B, 2, H, D]
-            edge_embed:    [B, H, edge_dim]
-        """
-        if ee_node_history is not None and object_node_history is not None:
-            B, H, node_dim = ee_node_history.shape
-            ee_flat = ee_node_history.reshape(-1, node_dim)
-            obj_flat = object_node_history.reshape(-1, node_dim)
-            ee_embed = self.node_embedding(ee_flat).view(B, H, -1)
-            obj_embed = self.node_embedding(obj_flat).view(B, H, -1)
-            # [B, H, 2, D] → [B, 2, H, D]
-            node_features = torch.stack([ee_embed, obj_embed], dim=2).transpose(1, 2)
-
-            # Temporal edge features: _compute_edge_features handles [B, H, 7]
-            edge_raw = self._compute_edge_features(
-                ee_node_history, object_node_history
-            )  # [B, H, 2]
-        else:
-            ee_node, object_node = self._extract_node_features(obs)
-            ee_embed = self.node_embedding(ee_node).unsqueeze(1)   # [B, 1, D]
-            obj_embed = self.node_embedding(object_node).unsqueeze(1)  # [B, 1, D]
-            node_features = torch.stack([ee_embed, obj_embed], dim=1)  # [B, 2, 1, D]
-            edge_raw = self._compute_edge_features(
-                ee_node, object_node
-            ).unsqueeze(1)  # [B, 1, 2]
-
-        B = node_features.shape[0]
-        H = node_features.shape[2]
-
-        # Embed raw edges [B, H, 2] → [B, H, graph_edge_dim]
-        edge_embed = self.edge_embedding(
-            edge_raw.reshape(-1, edge_raw.shape[-1])
-        ).view(B, H, -1)
-
-        return node_features, edge_embed
-
-    # ------------------------------------------------------------------
-    # Forward pass
+    # Forward
     # ------------------------------------------------------------------
 
     def forward(
@@ -532,36 +614,23 @@ class GraphUnetPolicy(GraphDiTPolicy):
         action_history: torch.Tensor | None = None,
         ee_node_history: torch.Tensor | None = None,
         object_node_history: torch.Tensor | None = None,
+        node_histories: torch.Tensor | None = None,
+        node_types: torch.Tensor | None = None,
         joint_states_history: torch.Tensor | None = None,
         subtask_condition: torch.Tensor | None = None,
         timesteps: torch.Tensor | None = None,
         return_dict: bool = False,
     ) -> torch.Tensor | dict:
-        """
-        Forward pass: graph encode → pool to z → U-Net denoise.
-
-        Args:
-            obs: [B, obs_dim]
-            noisy_action: [B, pred_horizon, action_dim] (required)
-            timesteps: [B] diffusion timesteps (required)
-            ee_node_history: [B, H, 7] (optional, falls back to obs)
-            object_node_history: [B, H, 7] (optional, falls back to obs)
-            subtask_condition: [B, num_subtasks] (optional)
-            (action_history, joint_states_history are accepted for API compat
-             but not used – the U-Net handles action denoising directly)
-        Returns:
-            velocity_pred: [B, pred_horizon, action_dim]
-        """
         if noisy_action is None or timesteps is None:
             raise ValueError("GraphUnetPolicy.forward requires noisy_action and timesteps")
 
-        # 1. Embed nodes + edges
-        node_features, edge_embed = self._embed_nodes_and_edges(
-            obs, ee_node_history, object_node_history,
+        nh, nt = self._build_node_histories(
+            obs, ee_node_history, object_node_history, node_histories, node_types,
         )
+        node_features = self._embed_node_histories(nh, nt)
+        edge_embed = self._compute_and_embed_edges(nh)
 
-        # 2. Build condition for AdaLN (timestep + optional subtask)
-        ts_embed = self._get_timestep_embed(timesteps)  # [B, hidden_dim]
+        ts_embed = self._get_timestep_embed(timesteps)
         condition = ts_embed
 
         if subtask_condition is not None and hasattr(self, "subtask_encoder"):
@@ -570,16 +639,20 @@ class GraphUnetPolicy(GraphDiTPolicy):
                 torch.cat([ts_embed, subtask_embed], dim=-1)
             )
 
-        # 3. Graph attention layers (GRU edge → Edge-Conditioned Modulation → MHA)
         _, z = self._encode_graph(node_features, edge_embed, condition)
 
-        # 4. U-Net: denoise action trajectory
-        if noisy_action.dim() == 2:
-            noisy_action = noisy_action.unsqueeze(1)  # [B, 1, A] backward compat
+        if self._use_joint_film and joint_states_history is not None:
+            B_j = joint_states_history.shape[0]
+            joint_flat = joint_states_history.reshape(B_j, -1)
+            joint_enc = self.joint_encoder(joint_flat)
+            z = torch.cat([z, joint_enc], dim=-1)
 
-        x = noisy_action.transpose(1, 2)          # [B, action_dim, pred_horizon]
+        if noisy_action.dim() == 2:
+            noisy_action = noisy_action.unsqueeze(1)
+
+        x = noisy_action.transpose(1, 2)
         noise_pred = self.unet(x, ts_embed, global_cond=z)
-        noise_pred = noise_pred.transpose(1, 2)    # [B, pred_horizon, action_dim]
+        noise_pred = noise_pred.transpose(1, 2)
 
         if return_dict:
             return {"noise_pred": noise_pred}
@@ -591,43 +664,35 @@ class GraphUnetPolicy(GraphDiTPolicy):
 
     def extract_z(
         self,
-        ee_node_history: torch.Tensor,
-        object_node_history: torch.Tensor,
+        ee_node_history: torch.Tensor | None = None,
+        object_node_history: torch.Tensor | None = None,
+        joint_states_history: torch.Tensor | None = None,
+        *,
+        node_histories: torch.Tensor | None = None,
+        node_types: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """
-        Extract graph latent z for RL (high-frequency).
-
-        Runs full graph attention pipeline (GRU + Edge Modulation) to produce
-        a richer z compared to UnetPolicy's MLP-only pooling.
-
-        Args:
-            ee_node_history: [B, H, 7]
-            object_node_history: [B, H, 7]
-        Returns:
-            z_layers: [B, K, z_dim] – same z repeated K times for layer compat
-        """
+        """Extract graph latent z for RL. Accepts old or new node API."""
         self.eval()
         with torch.no_grad():
-            B, H, node_dim = ee_node_history.shape
-            ee_flat = ee_node_history.reshape(-1, node_dim)
-            obj_flat = object_node_history.reshape(-1, node_dim)
-            ee_embed = self.node_embedding(ee_flat).view(B, H, -1)
-            obj_embed = self.node_embedding(obj_flat).view(B, H, -1)
-            node_features = torch.stack([ee_embed, obj_embed], dim=2).transpose(1, 2)
-
-            edge_raw = self._compute_edge_features(
-                ee_node_history, object_node_history,
-            )  # [B, H, 2]
-            edge_embed = self.edge_embedding(
-                edge_raw.reshape(-1, edge_raw.shape[-1])
-            ).view(B, H, -1)
-
-            # Graph encoder (no timestep condition for RL feature extraction)
+            dummy_obs = torch.zeros(1, 1, device=(
+                ee_node_history.device if ee_node_history is not None
+                else node_histories.device
+            ))
+            nh, nt = self._build_node_histories(
+                dummy_obs, ee_node_history, object_node_history, node_histories, node_types,
+            )
+            node_features = self._embed_node_histories(nh, nt)
+            edge_embed = self._compute_and_embed_edges(nh)
             _, z = self._encode_graph(node_features, edge_embed, condition=None)
 
+            if self._use_joint_film and joint_states_history is not None:
+                B = z.shape[0]
+                joint_flat = joint_states_history.reshape(B, -1)
+                joint_enc = self.joint_encoder(joint_flat)
+                z = torch.cat([z, joint_enc], dim=-1)
+
             K = getattr(self.cfg, "num_layers", 6)
-            z_layers = z.unsqueeze(1).expand(-1, K, -1).contiguous()
-            return z_layers
+            return z.unsqueeze(1).expand(-1, K, -1).contiguous()
 
     def extract_features(
         self,
@@ -637,33 +702,45 @@ class GraphUnetPolicy(GraphDiTPolicy):
         object_node_history: torch.Tensor | None = None,
         joint_states_history: torch.Tensor | None = None,
         subtask_condition: torch.Tensor | None = None,
+        *,
+        node_histories: torch.Tensor | None = None,
+        node_types: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
-        """
-        Extract features for RL (full graph attention version).
-
-        Returns a dict compatible with GraphUnetResidualRLPolicy.
-        """
+        """Extract features for RL (full graph attention version)."""
         self.eval()
         with torch.no_grad():
-            node_features, edge_embed = self._embed_nodes_and_edges(
-                obs, ee_node_history, object_node_history,
+            nh, nt = self._build_node_histories(
+                obs, ee_node_history, object_node_history, node_histories, node_types,
             )
-
-            # Graph encoder (no timestep condition for RL)
+            node_features = self._embed_node_histories(nh, nt)
+            edge_embed = self._compute_and_embed_edges(nh)
             node_features_out, z = self._encode_graph(
                 node_features, edge_embed, condition=None,
             )
 
+            if self._use_joint_film and joint_states_history is not None:
+                B_j = joint_states_history.shape[0]
+                joint_flat = joint_states_history.reshape(B_j, -1)
+                joint_enc = self.joint_encoder(joint_flat)
+                z = torch.cat([z, joint_enc], dim=-1)
+
             K = getattr(self.cfg, "num_layers", 6)
             z_layers = z.unsqueeze(1).expand(-1, K, -1).contiguous()
 
-            # Current edge features (for RL residual policy)
-            if ee_node_history is not None:
-                current_ee = ee_node_history[:, -1, :]
-                current_obj = object_node_history[:, -1, :]
+            # Edge features for RL (summarized)
+            current_nodes = nh[:, :, -1, :]  # [B, N, 7]
+            if current_nodes.shape[1] == 2:
+                edge_raw = self._compute_edge_features_legacy(
+                    current_nodes[:, 0], current_nodes[:, 1],
+                )
             else:
-                current_ee, current_obj = self._extract_node_features(obs)
-            edge_raw = self._compute_edge_features(current_ee, current_obj)
+                edge_raw_full = self._compute_edge_features_dynamic(
+                    current_nodes.unsqueeze(2),
+                )  # [B, N, N, 1, edge_dim]
+                edge_raw_full = edge_raw_full[:, :, :, 0, :]  # [B, N, N, edge_dim]
+                N = edge_raw_full.shape[1]
+                idx = torch.triu_indices(N, N, offset=1)
+                edge_raw = edge_raw_full[:, idx[0], idx[1]].mean(dim=1)
             edge_feat = self.edge_embedding(edge_raw)
 
             nf = (

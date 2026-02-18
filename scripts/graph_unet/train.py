@@ -71,6 +71,7 @@ class HDF5DemoDataset(Dataset):
         single_batch_test: bool = False,
         single_batch_size: int = 16,
         skip_first_steps: int = 10,
+        node_configs: list[dict] | None = None,
     ):
         """Initialize dataset.
 
@@ -93,6 +94,7 @@ class HDF5DemoDataset(Dataset):
         self.single_batch_test = single_batch_test
         self.single_batch_size = single_batch_size
         self.skip_first_steps = skip_first_steps
+        self.node_configs = node_configs
 
         # Observation key dimensions and offsets
         self.obs_key_dims = {}
@@ -271,81 +273,93 @@ class HDF5DemoDataset(Dataset):
                     action_history_seq, axis=0
                 )  # [T, history_len, action_dim]
 
-                # Build node history sequences (EE and Object): [T, history_len, 7]
-                ee_node_history_seq = []
-                object_node_history_seq = []
-                for i in range(T):
-                    ee_hist = []
-                    obj_hist = []
-                    for j in range(max(0, i - self.action_history_length + 1), i + 1):
-                        obs_j = obs_seq[j]
-                        # Extract node features
-                        obj_pos = obs_j[
-                            self.obs_key_offsets.get(
-                                "object_position", 12
-                            ) : self.obs_key_offsets.get("object_position", 12)
-                            + 3
-                        ]
-                        obj_ori = obs_j[
-                            self.obs_key_offsets.get(
-                                "object_orientation", 15
-                            ) : self.obs_key_offsets.get("object_orientation", 15)
-                            + 4
-                        ]
-                        ee_pos = obs_j[
-                            self.obs_key_offsets.get(
-                                "ee_position", 19
-                            ) : self.obs_key_offsets.get("ee_position", 19)
-                            + 3
-                        ]
-                        ee_ori = obs_j[
-                            self.obs_key_offsets.get(
-                                "ee_orientation", 22
-                            ) : self.obs_key_offsets.get("ee_orientation", 22)
-                            + 4
-                        ]
-
-                        # Ensure correct shapes
-                        obj_pos = np.pad(obj_pos, (0, max(0, 3 - len(obj_pos))))[:3]
-                        obj_ori = np.pad(obj_ori, (0, max(0, 4 - len(obj_ori))))[:4]
-                        ee_pos = np.pad(ee_pos, (0, max(0, 3 - len(ee_pos))))[:3]
-                        ee_ori = np.pad(ee_ori, (0, max(0, 4 - len(ee_ori))))[:4]
-
-                        ee_hist.append(
-                            np.concatenate([ee_pos, ee_ori]).astype(np.float32)
+                # ====================================================
+                # Build node history sequences
+                # ====================================================
+                if self.node_configs is not None:
+                    # Dynamic N-node path: build [T, N, history_len, 7]
+                    N = len(self.node_configs)
+                    node_histories_seq = []  # will be [T, N, H, 7]
+                    for i in range(T):
+                        per_node_hist = [[] for _ in range(N)]
+                        for j in range(max(0, i - self.action_history_length + 1), i + 1):
+                            obs_j = obs_seq[j]
+                            for n_idx, nc in enumerate(self.node_configs):
+                                pos_key = nc["pos_key"]
+                                ori_key = nc["ori_key"]
+                                pos_off = self.obs_key_offsets.get(pos_key, 0)
+                                ori_off = self.obs_key_offsets.get(ori_key, 0)
+                                pos = obs_j[pos_off : pos_off + 3]
+                                ori = obs_j[ori_off : ori_off + 4]
+                                pos = np.pad(pos, (0, max(0, 3 - len(pos))))[:3]
+                                ori = np.pad(ori, (0, max(0, 4 - len(ori))))[:4]
+                                per_node_hist[n_idx].append(
+                                    np.concatenate([pos, ori]).astype(np.float32)
+                                )
+                        # Pad history
+                        for n_idx in range(N):
+                            while len(per_node_hist[n_idx]) < self.action_history_length:
+                                per_node_hist[n_idx].insert(
+                                    0,
+                                    per_node_hist[n_idx][0].copy()
+                                    if per_node_hist[n_idx]
+                                    else np.zeros(7, dtype=np.float32),
+                                )
+                        # [N, H, 7]
+                        frame = np.stack(
+                            [np.stack(per_node_hist[n], axis=0) for n in range(N)],
+                            axis=0,
                         )
-                        obj_hist.append(
-                            np.concatenate([obj_pos, obj_ori]).astype(np.float32)
-                        )
+                        node_histories_seq.append(frame)
+                    node_histories_seq = np.stack(node_histories_seq, axis=0)  # [T, N, H, 7]
 
-                    # Pad history if needed
-                    while len(ee_hist) < self.action_history_length:
-                        ee_hist.insert(
-                            0,
-                            (
-                                ee_hist[0].copy()
-                                if ee_hist
-                                else np.zeros(7, dtype=np.float32)
-                            ),
-                        )
-                        obj_hist.insert(
-                            0,
-                            (
-                                obj_hist[0].copy()
-                                if obj_hist
-                                else np.zeros(7, dtype=np.float32)
-                            ),
-                        )
+                    # Build node_types from config
+                    self._node_types = np.array(
+                        [nc.get("type", 0) for nc in self.node_configs], dtype=np.int64
+                    )
 
-                    ee_node_history_seq.append(np.stack(ee_hist, axis=0))
-                    object_node_history_seq.append(np.stack(obj_hist, axis=0))
-
-                ee_node_history_seq = np.stack(
-                    ee_node_history_seq, axis=0
-                )  # [T, history_len, 7]
-                object_node_history_seq = np.stack(
-                    object_node_history_seq, axis=0
-                )  # [T, history_len, 7]
+                    # For backward compat fields (normalization, etc.), extract first two as ee/object
+                    ee_node_history_seq = node_histories_seq[:, 0, :, :]  # [T, H, 7]
+                    object_node_history_seq = node_histories_seq[:, 1, :, :]  # [T, H, 7]
+                else:
+                    # Legacy 2-node path: build ee + object separately [T, H, 7]
+                    node_histories_seq = None
+                    ee_node_history_seq = []
+                    object_node_history_seq = []
+                    for i in range(T):
+                        ee_hist = []
+                        obj_hist = []
+                        for j in range(max(0, i - self.action_history_length + 1), i + 1):
+                            obs_j = obs_seq[j]
+                            obj_pos = obs_j[
+                                self.obs_key_offsets.get("object_position", 12)
+                                : self.obs_key_offsets.get("object_position", 12) + 3
+                            ]
+                            obj_ori = obs_j[
+                                self.obs_key_offsets.get("object_orientation", 15)
+                                : self.obs_key_offsets.get("object_orientation", 15) + 4
+                            ]
+                            ee_pos = obs_j[
+                                self.obs_key_offsets.get("ee_position", 19)
+                                : self.obs_key_offsets.get("ee_position", 19) + 3
+                            ]
+                            ee_ori = obs_j[
+                                self.obs_key_offsets.get("ee_orientation", 22)
+                                : self.obs_key_offsets.get("ee_orientation", 22) + 4
+                            ]
+                            obj_pos = np.pad(obj_pos, (0, max(0, 3 - len(obj_pos))))[:3]
+                            obj_ori = np.pad(obj_ori, (0, max(0, 4 - len(obj_ori))))[:4]
+                            ee_pos = np.pad(ee_pos, (0, max(0, 3 - len(ee_pos))))[:3]
+                            ee_ori = np.pad(ee_ori, (0, max(0, 4 - len(ee_ori))))[:4]
+                            ee_hist.append(np.concatenate([ee_pos, ee_ori]).astype(np.float32))
+                            obj_hist.append(np.concatenate([obj_pos, obj_ori]).astype(np.float32))
+                        while len(ee_hist) < self.action_history_length:
+                            ee_hist.insert(0, ee_hist[0].copy() if ee_hist else np.zeros(7, dtype=np.float32))
+                            obj_hist.insert(0, obj_hist[0].copy() if obj_hist else np.zeros(7, dtype=np.float32))
+                        ee_node_history_seq.append(np.stack(ee_hist, axis=0))
+                        object_node_history_seq.append(np.stack(obj_hist, axis=0))
+                    ee_node_history_seq = np.stack(ee_node_history_seq, axis=0)  # [T, H, 7]
+                    object_node_history_seq = np.stack(object_node_history_seq, axis=0)  # [T, H, 7]
 
                 # Build joint states history: [T, history_len, joint_dim]
                 # NOTE: Only using joint_pos (removed joint_vel to test if it's noise)
@@ -422,6 +436,8 @@ class HDF5DemoDataset(Dataset):
                     "joint_states_history_seq": joint_states_history_seq,  # [T, history_len, joint_dim]
                     "subtask_condition_seq": subtask_condition_seq,  # [T, num_subtasks] or None
                 }
+                if node_histories_seq is not None:
+                    demo_data["node_histories_seq"] = node_histories_seq  # [T, N, H, 7]
                 self.demos.append(demo_data)
 
                 # Collect for normalization
@@ -660,6 +676,22 @@ class HDF5DemoDataset(Dataset):
             ) / self.action_stats["std"]
 
         # Normalize node features: [T, hist_len, 7]
+        has_node_histories = "node_histories_seq" in demo
+        if has_node_histories:
+            node_histories_seq = demo["node_histories_seq"].copy()  # [T, N, H, 7]
+            if len(self.node_stats) > 0:
+                # Per-node normalization: use ee stats for type-0, object stats for type-1
+                for n_idx in range(node_histories_seq.shape[1]):
+                    ntype = self._node_types[n_idx] if hasattr(self, "_node_types") else n_idx
+                    if ntype == 0 and "ee_mean" in self.node_stats:
+                        node_histories_seq[:, n_idx] = (
+                            node_histories_seq[:, n_idx] - self.node_stats["ee_mean"]
+                        ) / self.node_stats["ee_std"]
+                    elif ntype == 1 and "object_mean" in self.node_stats:
+                        node_histories_seq[:, n_idx] = (
+                            node_histories_seq[:, n_idx] - self.node_stats["object_mean"]
+                        ) / self.node_stats["object_std"]
+
         if len(self.node_stats) > 0:
             ee_node_history_seq = (
                 ee_node_history_seq - self.node_stats["ee_mean"]
@@ -674,24 +706,14 @@ class HDF5DemoDataset(Dataset):
                 joint_states_history_seq - self.joint_stats["mean"]
             ) / self.joint_stats["std"]
 
-        return {
-            "obs_seq": torch.from_numpy(obs_seq).float(),  # [T, obs_dim]
-            "action_seq": torch.from_numpy(action_seq).float(),  # [T, action_dim]
-            "action_trajectory_seq": torch.from_numpy(
-                action_trajectory_seq
-            ).float(),  # [T, pred_horizon, action_dim]
-            "action_history_seq": torch.from_numpy(
-                action_history_seq
-            ).float(),  # [T, hist_len, action_dim]
-            "ee_node_history_seq": torch.from_numpy(
-                ee_node_history_seq
-            ).float(),  # [T, hist_len, 7]
-            "object_node_history_seq": torch.from_numpy(
-                object_node_history_seq
-            ).float(),  # [T, hist_len, 7]
-            "joint_states_history_seq": torch.from_numpy(
-                joint_states_history_seq
-            ).float(),  # [T, hist_len, joint_dim]
+        result = {
+            "obs_seq": torch.from_numpy(obs_seq).float(),
+            "action_seq": torch.from_numpy(action_seq).float(),
+            "action_trajectory_seq": torch.from_numpy(action_trajectory_seq).float(),
+            "action_history_seq": torch.from_numpy(action_history_seq).float(),
+            "ee_node_history_seq": torch.from_numpy(ee_node_history_seq).float(),
+            "object_node_history_seq": torch.from_numpy(object_node_history_seq).float(),
+            "joint_states_history_seq": torch.from_numpy(joint_states_history_seq).float(),
             "subtask_condition_seq": (
                 torch.from_numpy(subtask_condition_seq).float()
                 if subtask_condition_seq is not None
@@ -699,6 +721,10 @@ class HDF5DemoDataset(Dataset):
             ),
             "length": T,
         }
+        if has_node_histories:
+            result["node_histories_seq"] = torch.from_numpy(node_histories_seq).float()
+            result["node_types"] = torch.from_numpy(self._node_types).long()
+        return result
 
     def get_obs_stats(self):
         return self.obs_stats
@@ -745,6 +771,7 @@ def demo_collate_fn(batch):
     joint_dim = batch[0]["joint_states_history_seq"].shape[-1]
     has_subtask = batch[0]["subtask_condition_seq"] is not None
     num_subtasks = batch[0]["subtask_condition_seq"].shape[-1] if has_subtask else 0
+    has_node_histories = "node_histories_seq" in batch[0]
 
     # Initialize padded tensors
     obs_seq = torch.zeros(B, max_T, obs_dim)
@@ -756,16 +783,20 @@ def demo_collate_fn(batch):
     joint_states_history_seq = torch.zeros(B, max_T, hist_len, joint_dim)
     subtask_condition_seq = torch.zeros(B, max_T, num_subtasks) if has_subtask else None
 
-    # Create masks:
-    # - mask: [B, max_T] - True for valid timesteps (demo-level padding)
-    # - trajectory_mask: [B, max_T, pred_horizon] - True for valid horizon steps (handles "half-cut" data)
+    if has_node_histories:
+        num_nodes = batch[0]["node_histories_seq"].shape[1]
+        node_histories_seq = torch.zeros(B, max_T, num_nodes, hist_len, 7)
+        node_types = batch[0]["node_types"]  # [N] — same across batch
+    else:
+        node_histories_seq = None
+        node_types = None
+
     mask = torch.zeros(B, max_T, dtype=torch.bool)
     trajectory_mask = torch.zeros(B, max_T, pred_horizon, dtype=torch.bool)
 
-    # Fill in data
     for i, item in enumerate(batch):
         T = item["length"]
-        mask[i, :T] = True  # Valid timesteps
+        mask[i, :T] = True
 
         obs_seq[i, :T] = item["obs_seq"]
         action_seq[i, :T] = item["action_seq"]
@@ -776,13 +807,12 @@ def demo_collate_fn(batch):
         joint_states_history_seq[i, :T] = item["joint_states_history_seq"]
         if has_subtask and item["subtask_condition_seq"] is not None:
             subtask_condition_seq[i, :T] = item["subtask_condition_seq"]
+        if has_node_histories:
+            node_histories_seq[i, :T] = item["node_histories_seq"]
 
-        # CRITICAL: Fill trajectory_mask for "half-cut" data handling
-        # For each timestep t, mark which horizon steps k are valid (t+k < T)
         if "trajectory_mask_seq" in item:
             trajectory_mask[i, :T] = torch.from_numpy(item["trajectory_mask_seq"])
         else:
-            # Fallback: if trajectory_mask_seq not available, create it
             for t in range(T):
                 for k in range(pred_horizon):
                     if t + k < T:
@@ -790,19 +820,23 @@ def demo_collate_fn(batch):
                     else:
                         trajectory_mask[i, t, k] = False
 
-    return {
-        "obs_seq": obs_seq,  # [B, max_T, obs_dim]
-        "action_seq": action_seq,  # [B, max_T, action_dim]
-        "action_trajectory_seq": action_trajectory_seq,  # [B, max_T, pred_horizon, action_dim]
-        "action_history_seq": action_history_seq,  # [B, max_T, hist_len, action_dim]
-        "ee_node_history_seq": ee_node_history_seq,  # [B, max_T, hist_len, 7]
-        "object_node_history_seq": object_node_history_seq,  # [B, max_T, hist_len, 7]
-        "joint_states_history_seq": joint_states_history_seq,  # [B, max_T, hist_len, joint_dim]
-        "subtask_condition_seq": subtask_condition_seq,  # [B, max_T, num_subtasks] or None
-        "lengths": torch.tensor(lengths),  # [B]
-        "mask": mask,  # [B, max_T] - demo-level padding mask
-        "trajectory_mask": trajectory_mask,  # [B, max_T, pred_horizon] - horizon-level mask for "half-cut" data
+    result = {
+        "obs_seq": obs_seq,
+        "action_seq": action_seq,
+        "action_trajectory_seq": action_trajectory_seq,
+        "action_history_seq": action_history_seq,
+        "ee_node_history_seq": ee_node_history_seq,
+        "object_node_history_seq": object_node_history_seq,
+        "joint_states_history_seq": joint_states_history_seq,
+        "subtask_condition_seq": subtask_condition_seq,
+        "lengths": torch.tensor(lengths),
+        "mask": mask,
+        "trajectory_mask": trajectory_mask,
     }
+    if has_node_histories:
+        result["node_histories_seq"] = node_histories_seq  # [B, max_T, N, hist_len, 7]
+        result["node_types"] = node_types  # [N]
+    return result
 
 
 def train_graph_unet_policy(
@@ -830,30 +864,10 @@ def train_graph_unet_policy(
     skip_first_steps: int = 10,
     num_inference_steps: int = 40,
     policy_type: str = "unet",
+    use_joint_film: bool = False,
+    node_configs: list[dict] | None = None,
 ):
-    """Train Graph-Unet Policy with Action Chunking.
-
-    Args:
-        task_name: Environment task name.
-        dataset_path: Path to HDF5 dataset.
-        obs_keys: List of observation keys.
-        obs_dim: Observation dimension.
-        action_dim: Action dimension.
-        hidden_dims: Hidden layer dimensions.
-        batch_size: Batch size for training.
-        num_epochs: Number of training epochs.
-        learning_rate: Learning rate.
-        weight_decay: Weight decay for optimizer.
-        device: Device to train on.
-        save_dir: Directory to save checkpoints.
-        log_dir: Directory to save logs.
-        resume_checkpoint: Path to checkpoint to resume from (optional).
-        pred_horizon: Prediction horizon for action chunking (default: 16).
-        exec_horizon: Execution horizon for receding horizon control (default: 8).
-        lr_schedule: Learning rate schedule: "constant" (stable) or "cosine" (warmup + cosine annealing).
-        num_inference_steps: Number of ODE integration steps for flow matching inference (default: 40).
-            More steps = smoother predictions but slower. Recommended: 30 for good balance.
-    """
+    """Train Graph-Unet Policy with Action Chunking."""
 
     # Create directories with timestamp and mode suffix
     from datetime import datetime
@@ -931,6 +945,7 @@ def train_graph_unet_policy(
         single_batch_test=single_batch_test,
         single_batch_size=single_batch_size,
         skip_first_steps=skip_first_steps,
+        node_configs=node_configs,
     )
 
     # Get normalization stats for saving
@@ -1044,13 +1059,18 @@ def train_graph_unet_policy(
         num_layers=num_layers,
         num_heads=num_heads,
         joint_dim=joint_dim,
-        num_subtasks=num_subtasks,  # Use actual number from dataset (0 = no subtasks)
+        use_joint_film=use_joint_film,
+        num_subtasks=num_subtasks,
         action_history_length=action_history_length,
-        pred_horizon=pred_horizon,  # ACTION CHUNKING: predict this many future steps
-        exec_horizon=exec_horizon,  # RHC: execute this many steps before re-planning
+        pred_horizon=pred_horizon,
+        exec_horizon=exec_horizon,
         device=device,
-        obs_structure=obs_structure,  # CRITICAL: Pass dynamic obs_structure instead of hardcoded indices
-        num_inference_steps=num_inference_steps,  # Flow matching inference steps (default: 40)
+        obs_structure=obs_structure,
+        num_inference_steps=num_inference_steps,
+        num_nodes=len(node_configs) if node_configs else 2,
+        num_node_types=len(set(nc.get("type", 0) for nc in node_configs)) if node_configs else 2,
+        graph_pool_mode="mean" if node_configs and len(node_configs) > 2 else "concat",
+        node_configs=node_configs,
     )
 
     if num_subtasks > 0:
@@ -1172,58 +1192,54 @@ def train_graph_unet_policy(
             )  # [B, max_T, hist_len, action_dim]
             ee_node_history_seq = batch["ee_node_history_seq"].to(
                 device, non_blocking=True
-            )  # [B, max_T, hist_len, 7]
+            )
             object_node_history_seq = batch["object_node_history_seq"].to(
                 device, non_blocking=True
-            )  # [B, max_T, hist_len, 7]
+            )
             joint_states_history_seq = batch["joint_states_history_seq"].to(
                 device, non_blocking=True
-            )  # [B, max_T, hist_len, joint_dim]
+            )
             subtask_condition_seq = batch["subtask_condition_seq"]
             if subtask_condition_seq is not None:
                 subtask_condition_seq = subtask_condition_seq.to(
                     device, non_blocking=True
-                )  # [B, max_T, num_subtasks]
-            lengths = batch["lengths"]  # [B] - original lengths
-            mask = batch["mask"].to(
-                device, non_blocking=True
-            )  # [B, max_T] - True for valid timesteps
-            trajectory_mask = batch["trajectory_mask"].to(
-                device, non_blocking=True
-            )  # [B, max_T, pred_horizon] - horizon-level mask
+                )
+            # Dynamic graph: node_histories [B, max_T, N, H, 7]
+            has_nh = "node_histories_seq" in batch
+            if has_nh:
+                node_histories_seq = batch["node_histories_seq"].to(device, non_blocking=True)
+                node_types = batch["node_types"].to(device, non_blocking=True)
+            else:
+                node_histories_seq = None
+                node_types = None
+
+            lengths = batch["lengths"]
+            mask = batch["mask"].to(device, non_blocking=True)
+            trajectory_mask = batch["trajectory_mask"].to(device, non_blocking=True)
 
             B, max_T = obs_seq.shape[:2]
             total_valid_timesteps = mask.sum().item()
             epoch_total_timesteps += total_valid_timesteps
 
-            # Flatten batch for per-timestep processing: [B * max_T, ...]
-            # This allows us to process all timesteps in parallel
-            obs_flat = obs_seq.reshape(B * max_T, -1)  # [B*max_T, obs_dim]
-            actions_flat = action_trajectory_seq.reshape(
-                B * max_T, pred_horizon, -1
-            )  # [B*max_T, pred_horizon, action_dim]
-            action_history_flat = action_history_seq.reshape(
-                B * max_T, action_history_length, -1
-            )  # [B*max_T, hist_len, action_dim]
-            ee_node_history_flat = ee_node_history_seq.reshape(
-                B * max_T, action_history_length, -1
-            )  # [B*max_T, hist_len, 7]
-            object_node_history_flat = object_node_history_seq.reshape(
-                B * max_T, action_history_length, -1
-            )  # [B*max_T, hist_len, 7]
+            obs_flat = obs_seq.reshape(B * max_T, -1)
+            actions_flat = action_trajectory_seq.reshape(B * max_T, pred_horizon, -1)
+            action_history_flat = action_history_seq.reshape(B * max_T, action_history_length, -1)
+            ee_node_history_flat = ee_node_history_seq.reshape(B * max_T, action_history_length, -1)
+            object_node_history_flat = object_node_history_seq.reshape(B * max_T, action_history_length, -1)
             joint_states_history_flat = joint_states_history_seq.reshape(
                 B * max_T, action_history_length, -1
-            )  # [B*max_T, hist_len, joint_dim]
+            )
+            node_histories_flat = None
+            if node_histories_seq is not None:
+                N_nodes = node_histories_seq.shape[2]
+                node_histories_flat = node_histories_seq.reshape(
+                    B * max_T, N_nodes, action_history_length, -1
+                )
             subtask_condition_flat = None
             if subtask_condition_seq is not None:
-                subtask_condition_flat = subtask_condition_seq.reshape(
-                    B * max_T, -1
-                )  # [B*max_T, num_subtasks]
-            trajectory_mask_flat = trajectory_mask.reshape(
-                B * max_T, pred_horizon
-            )  # [B*max_T, pred_horizon] - horizon-level mask
+                subtask_condition_flat = subtask_condition_seq.reshape(B * max_T, -1)
+            trajectory_mask_flat = trajectory_mask.reshape(B * max_T, pred_horizon)
 
-            # Forward pass - compute loss for ALL timesteps, then mask out padding
             loss_dict = policy.loss(
                 obs_flat,
                 actions_flat,
@@ -1232,7 +1248,9 @@ def train_graph_unet_policy(
                 object_node_history=object_node_history_flat,
                 joint_states_history=joint_states_history_flat,
                 subtask_condition=subtask_condition_flat,
-                mask=trajectory_mask_flat,  # CRITICAL: Pass horizon-level mask for "half-cut" data handling
+                mask=trajectory_mask_flat,
+                node_histories=node_histories_flat,
+                node_types=node_types,
             )
             loss = loss_dict["total_loss"]
 
@@ -1495,6 +1513,21 @@ def main():
         help="Number of ODE integration steps for flow matching inference (default: 30). More steps = smoother but slower.",
     )
 
+    # Joint-states FiLM conditioning
+    parser.add_argument(
+        "--use_joint_film",
+        action="store_true",
+        help="Encode joint_states_history and inject into U-Net via FiLM (concat with z).",
+    )
+
+    # Dynamic graph: node_configs as JSON string
+    parser.add_argument(
+        "--node_configs",
+        type=str,
+        default=None,
+        help='JSON list of node configs, e.g. \'[{"name":"left_ee","type":0,"pos_key":"left_ee_position","ori_key":"left_ee_orientation"}]\'',
+    )
+
     # Paths
     parser.add_argument(
         "--save_dir",
@@ -1512,21 +1545,36 @@ def main():
     # Device
     parser.add_argument("--device", type=str, default="cuda", help="Device (cuda/cpu)")
 
+    # Observation keys override (JSON list)
+    parser.add_argument(
+        "--obs_keys",
+        type=str,
+        default=None,
+        help='JSON list of obs keys. If not set, uses default lift keys.',
+    )
+
     args = parser.parse_args()
 
-    # Observation keys (should match your dataset)
-    # For reach task, these keys match the observations in reach_env_cfg.py
-    # Note: Removed "target_object_position" (7 dims) as it's redundant with object_position + object_orientation
-    # In reach task, target is always the current object position, so command is not needed
-    obs_keys = [
-        "joint_pos",
-        "joint_vel",
-        "object_position",
-        "object_orientation",
-        "ee_position",
-        "ee_orientation",
-        "actions",  # last action for conditioning
-    ]
+    # Parse JSON arguments
+    import json
+    if args.node_configs is not None:
+        args.node_configs = json.loads(args.node_configs)
+    if args.obs_keys is not None:
+        args.obs_keys = json.loads(args.obs_keys)
+
+    # Observation keys: from CLI or default (lift task)
+    if args.obs_keys is not None:
+        obs_keys = args.obs_keys
+    else:
+        obs_keys = [
+            "joint_pos",
+            "joint_vel",
+            "object_position",
+            "object_orientation",
+            "ee_position",
+            "ee_orientation",
+            "actions",
+        ]
 
     # Start training
     train_graph_unet_policy(
@@ -1554,6 +1602,8 @@ def main():
         skip_first_steps=args.skip_first_steps,
         num_inference_steps=args.num_inference_steps,
         policy_type=args.policy_type,
+        use_joint_film=args.use_joint_film,
+        node_configs=getattr(args, "node_configs", None),
     )
 
 

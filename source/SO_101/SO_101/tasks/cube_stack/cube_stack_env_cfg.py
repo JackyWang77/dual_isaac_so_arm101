@@ -88,13 +88,6 @@ class ObservationsCfg:
             func=mdp.joint_vel_rel,
             params={"asset_cfg": SceneEntityCfg("left_arm")},
         )
-        left_obj_rel = ObsTerm(
-            func=mdp.object_pos_in_arm_frame,
-            params={
-                "arm_cfg": SceneEntityCfg("left_arm"),
-                "object_cfg": SceneEntityCfg("cube_1"),
-            },
-        )
         right_joint_pos = ObsTerm(
             func=mdp.joint_pos_rel,
             params={"asset_cfg": SceneEntityCfg("right_arm")},
@@ -103,12 +96,21 @@ class ObservationsCfg:
             func=mdp.joint_vel_rel,
             params={"asset_cfg": SceneEntityCfg("right_arm")},
         )
-        right_obj_rel = ObsTerm(
-            func=mdp.object_pos_in_arm_frame,
-            params={
-                "arm_cfg": SceneEntityCfg("right_arm"),
-                "object_cfg": SceneEntityCfg("cube_1"),
-            },
+        left_ee_position = ObsTerm(
+            func=mdp.ee_position_w,
+            params={"ee_frame_cfg": SceneEntityCfg("ee_left")},
+        )
+        left_ee_orientation = ObsTerm(
+            func=mdp.ee_orientation_w,
+            params={"ee_frame_cfg": SceneEntityCfg("ee_left")},
+        )
+        right_ee_position = ObsTerm(
+            func=mdp.ee_position_w,
+            params={"ee_frame_cfg": SceneEntityCfg("ee_right")},
+        )
+        right_ee_orientation = ObsTerm(
+            func=mdp.ee_orientation_w,
+            params={"ee_frame_cfg": SceneEntityCfg("ee_right")},
         )
         cube_1_pos = ObsTerm(
             func=mdp.object_position_w,

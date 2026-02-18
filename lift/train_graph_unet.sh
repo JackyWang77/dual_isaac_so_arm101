@@ -1,31 +1,32 @@
 #!/bin/bash
-# Train Graph-Unet Policy (Graph encoder + U-Net 1D backbone)
+# Train GraphUnetPolicy (Full Graph Attention + U-Net) — Lift task
+cd "$(dirname "$0")/.."
 
-# Mode selection (default: flow_matching)
 MODE="${1:-flow_matching}"
+JOINT_FILM="${2:-}"
 
-# Validate mode (only flow_matching supported)
 if [ "$MODE" != "flow_matching" ]; then
-    echo "❌ Error: Invalid mode '$MODE'"
-    echo ""
-    echo "Usage:"
-    echo "  $0 [flow_matching]"
-    echo ""
-    echo "Examples:"
-    echo "  $0                        # Train with Flow Matching (default)"
-    echo "  $0 flow_matching          # Train with Flow Matching"
+    echo "Usage: $0 [flow_matching] [joint]"
     exit 1
 fi
 
+EXTRA_ARGS=""
+SUFFIX="lift_joint"
+if [ "$JOINT_FILM" = "joint" ]; then
+    EXTRA_ARGS="--use_joint_film"
+    SUFFIX="lift_joint_film"
+fi
+
 echo "========================================"
-echo "Training Graph-Unet Policy"
-echo "Mode: $MODE"
-echo "LR Schedule: constant (fixed)"
+echo "Training GraphUnetPolicy — Lift"
+echo "Mode: $MODE | Joint FiLM: ${JOINT_FILM:-off}"
+echo "Save: ./logs/graph_unet_full/$SUFFIX"
 echo "========================================"
 
 python scripts/graph_unet/train.py \
     --task SO-ARM101-Lift-Cube-v0 \
     --dataset ./datasets/lift_annotated_dataset.hdf5 \
+    --policy_type graph_unet \
     --obs_dim 32 \
     --action_dim 6 \
     --action_history_length 10 \
@@ -41,5 +42,6 @@ python scripts/graph_unet/train.py \
     --pred_horizon 20 \
     --exec_horizon 10 \
     --device cuda \
-    --save_dir ./logs/graph_unet/lift_joint \
-    --log_dir ./logs/graph_unet/lift_joint
+    --save_dir "./logs/graph_unet_full/$SUFFIX" \
+    --log_dir "./logs/graph_unet_full/$SUFFIX" \
+    $EXTRA_ARGS

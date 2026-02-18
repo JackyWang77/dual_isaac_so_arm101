@@ -31,7 +31,7 @@ import gymnasium as gym
 import SO_101.tasks  # noqa: F401  # Register environments
 import torch
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
-from SO_101.policies.graph_unet_policy import UnetPolicy
+from SO_101.policies.graph_unet_policy import UnetPolicy, GraphUnetPolicy
 from SO_101.policies.graph_unet_residual_rl_policy import (
     GraphUnetBackboneAdapter,
     GraphUnetResidualRLPolicy,
@@ -46,29 +46,21 @@ def play_graph_rl_policy(
     num_episodes: int = 10,
     device: str = "cuda",
     deterministic: bool = True,
+    policy_type: str = "unet",
 ):
-    """Play trained Graph-Unet + Residual RL policy (residual RL is Unet-only).
-
-    Args:
-        task_name: Environment task name.
-        checkpoint_path: Path to trained RL policy checkpoint.
-        pretrained_checkpoint: Path to pretrained Graph-Unet checkpoint.
-        num_envs: Number of parallel environments.
-        num_episodes: Number of episodes to run.
-        device: Device to run on.
-        deterministic: If True, use deterministic actions.
-    """
+    """Play trained Graph-Unet + Residual RL policy."""
     print(f"[Play] ===== Residual RL Policy Playback (Graph-Unet) =====")
     print(f"[Play] Task: {task_name}")
     print(f"[Play] RL Checkpoint: {checkpoint_path}")
     print(f"[Play] Graph-Unet Checkpoint: {pretrained_checkpoint}")
     print(f"[Play] Num envs: {num_envs}")
-    OBJ_HEIGHT_IDX = 14  # object_position.z
-    SUCCESS_HEIGHT = 0.10  # 成功阈值 (m)，terminated 时用高度判断
+    OBJ_HEIGHT_IDX = 14
+    SUCCESS_HEIGHT = 0.10
 
-    # Load pretrained Graph-Unet
-    print(f"\n[Play] Loading pretrained Graph-Unet: {pretrained_checkpoint}")
-    backbone_policy = UnetPolicy.load(pretrained_checkpoint, device=device)
+    # Load pretrained backbone
+    PolicyClass = GraphUnetPolicy if policy_type == "graph_unet" else UnetPolicy
+    print(f"\n[Play] Loading pretrained backbone ({PolicyClass.__name__}): {pretrained_checkpoint}")
+    backbone_policy = PolicyClass.load(pretrained_checkpoint, device=device)
     backbone_policy.eval()
     for p in backbone_policy.parameters():
         p.requires_grad = False
@@ -80,8 +72,9 @@ def play_graph_rl_policy(
     # Load RL policy
     print(f"\n[Play] Loading RL policy: {checkpoint_path}")
     policy = GraphUnetResidualRLPolicy.load(checkpoint_path, backbone=backbone_adapter, device=device)
+    policy.num_diffusion_steps = 10  # train=2 (fast), play=10 (smoother)
     policy.eval()
-    print(f"[Play] RL policy loaded")
+    print(f"[Play] RL policy loaded (diffusion_steps=10)")
 
     # Load normalization stats from Graph-Unet checkpoint (same as train script)
     checkpoint = torch.load(pretrained_checkpoint, map_location=device, weights_only=False)
@@ -191,6 +184,10 @@ def play_graph_rl_policy(
     print(f"\n[Play] Starting playback (deterministic={deterministic})...")
     print(f"[Play] Press Ctrl+C to stop\n")
 
+    # EMA smoothing for joints (gripper excluded)
+    ema_alpha = 0.5
+    ema_smoothed_joints = None
+
     # Main loop
     step_count = 0
     try:
@@ -244,11 +241,20 @@ def play_graph_rl_policy(
                         torch.tensor(env.action_space.high, device=action.device, dtype=action.dtype)
                     )
 
+            # EMA smoothing for joints only (gripper excluded)
+            if action.shape[-1] >= 6:
+                joints = action[:, :5]
+                gripper_continuous = action[:, 5:6]
+                if ema_smoothed_joints is None:
+                    ema_smoothed_joints = joints.clone()
+                else:
+                    ema_smoothed_joints = ema_alpha * joints + (1 - ema_alpha) * ema_smoothed_joints
+                action = torch.cat([ema_smoothed_joints, gripper_continuous], dim=-1)
+
             # Binarize gripper action (same as play.py)
             if action.shape[-1] >= 6:
-                gripper_continuous = action[:, 5]
                 action[:, 5] = torch.where(
-                    gripper_continuous > -0.2,
+                    action[:, 5] > -0.2,
                     torch.tensor(1.0, device=action.device, dtype=action.dtype),
                     torch.tensor(-1.0, device=action.device, dtype=action.dtype)
                 )
@@ -309,6 +315,8 @@ def play_graph_rl_policy(
                 joint_state_history[done_envs] = 0
                 episode_rewards[done_envs] = 0
                 episode_lengths[done_envs] = 0
+                if ema_smoothed_joints is not None:
+                    ema_smoothed_joints[done_envs] = 0
 
             obs = next_obs
             step_count += 1
@@ -367,6 +375,11 @@ def main():
     parser.add_argument(
         "--deterministic", action="store_true", help="Use deterministic actions"
     )
+    parser.add_argument(
+        "--policy_type", type=str, default="unet",
+        choices=["unet", "graph_unet"],
+        help="Policy class for the pretrained backbone (default: unet)",
+    )
 
     args = parser.parse_args()
 
@@ -378,6 +391,7 @@ def main():
         num_episodes=args.num_episodes,
         device=args.device,
         deterministic=args.deterministic,
+        policy_type=args.policy_type,
     )
 
 

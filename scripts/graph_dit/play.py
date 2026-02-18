@@ -432,7 +432,7 @@ def play_graph_dit_policy(
     # ==========================================================================
     # EMA SMOOTHING for action smoothing (joints only, gripper excluded)
     # ==========================================================================
-    ema_alpha = 1  # EMA weight: higher = more responsive, lower = smoother
+    ema_alpha = 0.5  # EMA weight: higher = more responsive, lower = smoother
     ema_smoothed_joints = None  # Will be initialized on first action [num_envs, joint_dim]
     print(f"[Play] EMA smoothing enabled: alpha={ema_alpha} (joints only, gripper excluded)")
 
@@ -797,7 +797,7 @@ def play_graph_dit_policy(
             )  # [num_envs, action_dim] normalized raw for buffer
 
             # EMA smoothing for joints only (gripper excluded)
-            # NOTE: With ema_alpha=1.0, this is effectively disabled (no smoothing)
+            # EMA: new = alpha * current + (1-alpha) * prev; alpha=0.5 is moderate smoothing
             if action_dim >= 6:
                 joints = actions[:, :5]  # [num_envs, 5]
                 gripper = actions[:, 5:6]  # [num_envs, 1]

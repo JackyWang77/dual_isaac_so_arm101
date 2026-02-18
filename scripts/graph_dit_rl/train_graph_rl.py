@@ -266,6 +266,9 @@ class GraphDiTRLTrainer:
             else:
                 raise AttributeError(f"Cannot determine num_envs from environment: {type(env)}")
 
+        # EMA smoothing for joints
+        self._ema_smoothed_joints = None
+
         # Buffer
         self.buffer = RolloutBuffer(self.num_envs, steps_per_env, device)
 
@@ -424,9 +427,14 @@ class GraphDiTRLTrainer:
                 action_dim = action.shape[-1]
                 action_for_sim = action.clone()
                 if action_dim >= 6:
-                    gripper_continuous = action_for_sim[:, 5]
+                    joints = action_for_sim[:, :5]
+                    if self._ema_smoothed_joints is None:
+                        self._ema_smoothed_joints = joints.clone()
+                    else:
+                        self._ema_smoothed_joints = 0.5 * joints + 0.5 * self._ema_smoothed_joints
+                    action_for_sim[:, :5] = self._ema_smoothed_joints
                     action_for_sim[:, 5] = torch.where(
-                        gripper_continuous > -0.2,
+                        action_for_sim[:, 5] > -0.2,
                         torch.tensor(1.0, device=action.device, dtype=action.dtype),
                         torch.tensor(-1.0, device=action.device, dtype=action.dtype)
                     )
@@ -481,6 +489,8 @@ class GraphDiTRLTrainer:
                 self.joint_state_history[done_envs] = 0
                 ep_rewards[done_envs] = 0
                 ep_lengths[done_envs] = 0
+                if self._ema_smoothed_joints is not None:
+                    self._ema_smoothed_joints[done_envs] = 0
 
             obs = next_obs
             self.total_steps += self.num_envs

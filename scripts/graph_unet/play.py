@@ -40,6 +40,13 @@ parser.add_argument(
     default=None,
     help="Max episode length in seconds (default: use task config, e.g. 3.0 for lift). Shorter = faster reset.",
 )
+parser.add_argument(
+    "--policy_type",
+    type=str,
+    default="unet",
+    choices=["unet", "graph_unet"],
+    help="Policy class to use (default: unet)",
+)
 
 # Append AppLauncher CLI args (this will add --device automatically)
 AppLauncher.add_app_launcher_args(parser)
@@ -61,7 +68,7 @@ import numpy as np
 import SO_101.tasks  # noqa: F401  # Register environments
 import torch
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
-from SO_101.policies.graph_unet_policy import UnetPolicy
+from SO_101.policies.graph_unet_policy import UnetPolicy, GraphUnetPolicy
 
 # Try to import visualization utilities (if available)
 try:
@@ -81,6 +88,7 @@ def play_graph_unet_policy(
     device: str = "cuda",
     num_diffusion_steps: int | None = None,
     episode_length_s: float | None = None,
+    policy_type: str = "unet",
 ):
     """Play trained Graph-Unet policy.
     
@@ -227,11 +235,11 @@ def play_graph_unet_policy(
     
     # Load policy and normalization stats
     print(f"\n[Play] Loading policy from: {checkpoint_path}")
-    # weights_only=False is needed for PyTorch 2.6+ to load custom config classes
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     
-    # Load policy
-    policy = UnetPolicy.load(checkpoint_path, device=device)
+    PolicyClass = GraphUnetPolicy if policy_type == "graph_unet" else UnetPolicy
+    print(f"[Play] Policy type: {PolicyClass.__name__}")
+    policy = PolicyClass.load(checkpoint_path, device=device)
     policy.eval()
     
     # Policy outputs 6-dim (5 arm + 1 gripper); gripper mapped to -1/1 only for env.step
@@ -431,7 +439,7 @@ def play_graph_unet_policy(
     # ==========================================================================
     # EMA SMOOTHING for action smoothing (joints only, gripper excluded)
     # ==========================================================================
-    ema_alpha = 1  # EMA weight: higher = more responsive, lower = smoother
+    ema_alpha = 0.5  # EMA weight: higher = more responsive, lower = smoother
     ema_smoothed_joints = None  # Will be initialized on first action [num_envs, joint_dim]
     print(f"[Play] EMA smoothing enabled: alpha={ema_alpha} (joints only, gripper excluded)")
 
@@ -770,7 +778,7 @@ def play_graph_unet_policy(
             )  # [num_envs, action_dim] normalized raw for buffer
 
             # EMA smoothing for joints only (gripper excluded)
-            # NOTE: With ema_alpha=1.0, this is effectively disabled (no smoothing)
+            # EMA: new = alpha * current + (1-alpha) * prev; alpha=0.5 is moderate smoothing
             if action_dim >= 6:
                 joints = actions[:, :5]  # [num_envs, 5]
                 gripper = actions[:, 5:6]  # [num_envs, 1]
@@ -787,6 +795,16 @@ def play_graph_unet_policy(
                     actions[:, 5] > -0.2, 1.0, -1.0
                 )  # Isaac reads -1/1; model sees raw in history
             
+            # DEBUG: print gripper + joint info every 50 steps (env 0 only)
+            if step_count % 50 == 0:
+                g_raw = actions[0, 5].item()
+                g_mapped = action_for_env[0, 5].item()
+                jp = obs_tensor[0, 0:6].cpu().numpy()
+                print(
+                    f"[DBG step={step_count}] gripper_raw={g_raw:+.4f} → mapped={g_mapped:+.1f} | "
+                    f"joint_pos={np.array2string(jp, precision=3, separator=',')}"
+                )
+
             # Update history buffers (shift and add new)
             # IMPORTANT: Store normalized actions in history buffer, as policy expects normalized action_history
             for env_id in range(num_envs):
@@ -933,6 +951,7 @@ def main():
         device=args_cli.device,
         num_diffusion_steps=args_cli.num_diffusion_steps,
         episode_length_s=getattr(args_cli, "episode_length_s", None),
+        policy_type=getattr(args_cli, "policy_type", "unet"),
     )
 
 
