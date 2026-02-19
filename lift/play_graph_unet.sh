@@ -28,4 +28,5 @@ python scripts/graph_unet/play.py \
     --policy_type graph_unet \
     --num_envs "$NUM_ENVS" \
     --num_episodes "$NUM_EPISODES" \
+    --num_diffusion_steps 10 \
     --headless true

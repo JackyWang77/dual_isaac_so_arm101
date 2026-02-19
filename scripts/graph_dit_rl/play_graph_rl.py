@@ -38,6 +38,17 @@ from SO_101.policies.graph_unet_residual_rl_policy import (
 )
 
 
+def _detect_checkpoint_type(path: str) -> str:
+    """Detect if checkpoint is IL (GraphUnetPolicy) or RL (GraphUnetResidualRLPolicy)."""
+    ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    cfg = ckpt.get("cfg")
+    if cfg is None:
+        return "unknown"
+    if hasattr(cfg, "node_dim"):
+        return "il"
+    return "rl"
+
+
 def play_graph_rl_policy(
     task_name: str,
     checkpoint_path: str,
@@ -49,6 +60,12 @@ def play_graph_rl_policy(
     policy_type: str = "unet",
 ):
     """Play trained Graph-Unet + Residual RL policy."""
+    # Auto-detect and swap if user passed (IL, RL) instead of (RL, IL)
+    t1, t2 = _detect_checkpoint_type(checkpoint_path), _detect_checkpoint_type(pretrained_checkpoint)
+    if t1 == "il" and t2 == "rl":
+        checkpoint_path, pretrained_checkpoint = pretrained_checkpoint, checkpoint_path
+        print("[Play] Detected swapped args (IL first, RL second) - auto-corrected to (RL, IL)")
+
     print(f"[Play] ===== Residual RL Policy Playback (Graph-Unet) =====")
     print(f"[Play] Task: {task_name}")
     print(f"[Play] RL Checkpoint: {checkpoint_path}")
@@ -72,7 +89,7 @@ def play_graph_rl_policy(
     # Load RL policy
     print(f"\n[Play] Loading RL policy: {checkpoint_path}")
     policy = GraphUnetResidualRLPolicy.load(checkpoint_path, backbone=backbone_adapter, device=device)
-    policy.num_diffusion_steps = 10  # train=2 (fast), play=10 (smoother)
+    policy.num_diffusion_steps = 10  # must match train
     policy.eval()
     print(f"[Play] RL policy loaded (diffusion_steps=10)")
 
@@ -184,8 +201,8 @@ def play_graph_rl_policy(
     print(f"\n[Play] Starting playback (deterministic={deterministic})...")
     print(f"[Play] Press Ctrl+C to stop\n")
 
-    # EMA smoothing for joints (gripper excluded)
-    ema_alpha = 0.5
+    # EMA smoothing for joints (gripper excluded); 1.0=no smoothing (graph_unet prefers raw)
+    ema_alpha = 1.0
     ema_smoothed_joints = None
 
     # Main loop
@@ -290,12 +307,13 @@ def play_graph_rl_policy(
             episode_rewards += reward
             episode_lengths += 1
 
-            # Handle resets（obs = step 前的状态，用于高度判断）
+            # Handle resets: Isaac Lab 在 reset 之后才计算 obs，所以 next_obs 对 done env 是 reset 后的新 episode 初始 obs（cube 在地面）
+            # 必须用 obs（step 前 = 终止前最后一帧）判断 success
             done_envs = done.nonzero(as_tuple=False).squeeze(-1)
             if len(done_envs) > 0:
                 policy.reset_envs(done_envs)
                 for i in done_envs.tolist():
-                    obj_height = obs[i, OBJ_HEIGHT_IDX].item()  # obs = step 前状态
+                    obj_height = obs[i, OBJ_HEIGHT_IDX].item()  # obs = 终止前最后一帧
                     is_truncated = bool(truncated[i].item() if truncated.dim() > 0 else truncated.item())
                     if is_truncated:
                         is_success = False

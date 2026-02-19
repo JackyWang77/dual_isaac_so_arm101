@@ -866,6 +866,7 @@ def train_graph_unet_policy(
     policy_type: str = "unet",
     use_joint_film: bool = False,
     node_configs: list[dict] | None = None,
+    graph_edge_dim: int = 128,
 ):
     """Train Graph-Unet Policy with Action Chunking."""
 
@@ -1071,6 +1072,7 @@ def train_graph_unet_policy(
         num_node_types=len(set(nc.get("type", 0) for nc in node_configs)) if node_configs else 2,
         graph_pool_mode="mean" if node_configs and len(node_configs) > 2 else "concat",
         node_configs=node_configs,
+        graph_edge_dim=graph_edge_dim,
     )
 
     if num_subtasks > 0:
@@ -1452,6 +1454,10 @@ def main():
     parser.add_argument(
         "--num_heads", type=int, default=8, help="Number of attention heads"
     )
+    parser.add_argument(
+        "--graph_edge_dim", type=int, default=128,
+        help="Edge embedding dimension for graph attention (controls GRU size)",
+    )
 
     # Training arguments
     parser.add_argument(
@@ -1604,6 +1610,7 @@ def main():
         policy_type=args.policy_type,
         use_joint_film=args.use_joint_film,
         node_configs=getattr(args, "node_configs", None),
+        graph_edge_dim=args.graph_edge_dim,
     )
 
 

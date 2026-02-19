@@ -37,6 +37,10 @@ parser.add_argument("--seed", type=int, default=42)
 # Note: --device is added by AppLauncher, don't add it manually
 parser.add_argument("--log_dir", type=str, default="./logs/graph_unet_rl", help="Log directory for residual RL (Unet)")
 parser.add_argument("--save_interval", type=int, default=50)
+parser.add_argument("--best_sr_window", type=int, default=200,
+                    help="Rolling window for best-model SR (100: ±10%% CI, 200: ±7%%)")
+parser.add_argument("--best_sr_require_consistent", action="store_true",
+                    help="Only save best when current SR >= sr_window - 15%% (avoid lucky flukes)")
 
 # Rollout config
 parser.add_argument("--steps_per_env", type=int, default=160, help="Steps per env per iteration (>150 留缓冲，episode 3s=150步; 超时=判负)")
@@ -238,6 +242,8 @@ class GraphDiTRLTrainer:
         max_grad_norm: float = 1.0,
         action_history_length: int = 4,  # From Graph-DiT config
         action_dim_env: int = 6,  # Environment action dim (usually 6, includes gripper)
+        best_sr_window: int = 200,  # Rolling window for best-model selection (200: ±7% CI)
+        best_sr_require_consistent: bool = False,  # Require current SR >= sr_window - 15%
     ):
         self.env = env
         self.policy = policy
@@ -296,6 +302,8 @@ class GraphDiTRLTrainer:
         self.episode_lengths = []
         self.episode_successes = []
         self.best_sr = -1.0  # For best-model-by-SR saving
+        self.best_sr_window = best_sr_window
+        self.best_sr_require_consistent = best_sr_require_consistent
 
         # Initialize env buffers
         policy.init_env_buffers(self.num_envs)
@@ -345,6 +353,7 @@ class GraphDiTRLTrainer:
             print(f"[Trainer] OBJ_HEIGHT_IDX = {self.OBJ_HEIGHT_IDX} (default)")
         self.SUCCESS_HEIGHT = 0.10  # 与 play / play_rl 一致
         print(f"[Trainer] Success: timeout=失败, 否则 height>={self.SUCCESS_HEIGHT}m=成功 (与 play 一致)")
+        print(f"[Trainer] Best-model: SR_{self.best_sr_window}ep window, consistent_check={self.best_sr_require_consistent}")
 
     def set_normalization_stats(
         self,
@@ -431,7 +440,8 @@ class GraphDiTRLTrainer:
                     if self._ema_smoothed_joints is None:
                         self._ema_smoothed_joints = joints.clone()
                     else:
-                        self._ema_smoothed_joints = 0.5 * joints + 0.5 * self._ema_smoothed_joints
+                        ema_alpha = 1.0  # 1.0=no smoothing (graph_unet prefers raw)
+                        self._ema_smoothed_joints = ema_alpha * joints + (1 - ema_alpha) * self._ema_smoothed_joints
                     action_for_sim[:, :5] = self._ema_smoothed_joints
                     action_for_sim[:, 5] = torch.where(
                         action_for_sim[:, 5] > -0.2,
@@ -474,6 +484,8 @@ class GraphDiTRLTrainer:
                     self.episode_rewards.append(ep_rewards[i].item())
                     self.episode_lengths.append(ep_lengths[i].item())
                     # 超时判负：truncated(timeout)=0，否则 height>=0.1=成功
+                    # Isaac Lab 在 reset 之后才计算 obs，next_obs 对 done env 是 reset 后的新 episode 初始 obs
+                    # 必须用 obs（step 前 = 终止前最后一帧）判断 success
                     obj_height = obs[i, self.OBJ_HEIGHT_IDX].item()
                     is_truncated = bool(truncated[i].item() if hasattr(truncated[i], "item") else truncated[i])
                     if is_truncated:
@@ -546,8 +558,10 @@ class GraphDiTRLTrainer:
 
         if len(self.episode_successes) > 0:
             stats["success_rate_100"] = np.mean(self.episode_successes[-100:])
+            stats["success_rate_window"] = np.mean(self.episode_successes[-self.best_sr_window:])
         else:
             stats["success_rate_100"] = 0.0
+            stats["success_rate_window"] = 0.0
 
         if len(delta_norms_all) > 0:
             stats["delta_norm_mean"] = np.mean(delta_norms_all)
@@ -648,10 +662,16 @@ class GraphDiTRLTrainer:
             # Log
             self._log(iteration, rollout_stats, update_stats)
 
-            # Save best by success rate (use rolling 100-ep SR to avoid noisy single-rollout SR)
-            sr_100 = rollout_stats.get("success_rate_100", 0.0)
-            if sr_100 > self.best_sr:
-                self.best_sr = sr_100
+            # Save best by success rate (use rolling N-ep SR; 200ep: ±7% CI)
+            sr_window = rollout_stats.get("success_rate_window", 0.0)
+            sr_current = rollout_stats.get("success_rate", 0.0)
+            # Require enough episodes in buffer for window to be valid
+            n_eps = len(self.episode_successes)
+            window_valid = n_eps >= self.best_sr_window
+            # Optional: require current SR not far below window (avoid saving lucky fluke)
+            consistent = (not self.best_sr_require_consistent) or (sr_current >= sr_window - 0.15)
+            if window_valid and consistent and sr_window > self.best_sr:
+                self.best_sr = sr_window
                 self._save_best(iteration)
 
             # Save interval
@@ -689,6 +709,7 @@ class GraphDiTRLTrainer:
 
         _scalar("main/success_rate", rollout_stats.get("success_rate", 0), step)
         _scalar("main/success_rate_100", rollout_stats.get("success_rate_100", 0), step)
+        _scalar("main/success_rate_window", rollout_stats.get("success_rate_window", 0), step)
         _scalar("main/num_episodes", rollout_stats.get("num_episodes", 0), step)
         _scalar("main/ep_reward_mean", rollout_stats.get("ep_reward_mean", 0), step)
         _scalar("main/ep_length_mean", rollout_stats.get("ep_length_mean", 0), step)
@@ -703,6 +724,7 @@ class GraphDiTRLTrainer:
 
         sr = rollout_stats.get("success_rate", 0) * 100
         sr_100 = rollout_stats.get("success_rate_100", 0) * 100
+        sr_win = rollout_stats.get("success_rate_window", 0) * 100
         num_eps = rollout_stats.get("num_episodes", 0)
         reward = rollout_stats.get("ep_reward_mean", 0)
         ev = update_stats.get("explained_variance", -999)
@@ -715,7 +737,7 @@ class GraphDiTRLTrainer:
             print(f"[Iter {iteration:4d}] ⚠️  {warning}")
         print(
             f"[Iter {iteration:4d}] "
-            f"SR={sr:5.1f}% (100ep:{sr_100:5.1f}%) [{num_eps:2d}ep] | "
+            f"SR={sr:5.1f}% (100:{sr_100:4.1f}% {self.best_sr_window}ep:{sr_win:4.1f}%) [{num_eps:2d}ep] | "
             f"Rew={reward:6.1f} | "
             f"EV={ev:5.2f} | "
             f"Δ={delta:.3f} | "
@@ -725,10 +747,10 @@ class GraphDiTRLTrainer:
         )
 
     def _save_best(self, iteration: int):
-        """按 success_rate_100（最近 100 episode 平均）保存当前最佳模型，避免单轮 SR 波动大"""
+        """按 success_rate_window（最近 N episode 平均）保存当前最佳模型"""
         path = os.path.join(self.log_dir, "best_model.pt")
         self.policy.save(path)
-        print(f"[Trainer] Best model saved (SR_100={self.best_sr*100:.1f}%): {path}")
+        print(f"[Trainer] Best model saved (SR_{self.best_sr_window}ep={self.best_sr*100:.1f}%): {path}")
 
     def _save(self, iteration: int, final: bool = False):
         """保存 checkpoint"""
@@ -892,6 +914,7 @@ def main():
         backbone=backbone,
         pred_horizon=getattr(backbone_policy.cfg, "pred_horizon", 16),
         exec_horizon=getattr(backbone_policy.cfg, "exec_horizon", 8),
+        num_diffusion_steps=10,
     )
     policy.to(device)
 
@@ -1004,6 +1027,8 @@ def main():
         max_grad_norm=args.max_grad_norm,
         action_history_length=action_history_length,
         action_dim_env=action_dim_env,  # Pass environment action dim (6) for history buffer
+        best_sr_window=getattr(args, "best_sr_window", 200),
+        best_sr_require_consistent=getattr(args, "best_sr_require_consistent", False),
     )
     
     # Set normalization stats in trainer (same as Graph-DiT play.py)

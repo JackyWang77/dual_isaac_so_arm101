@@ -439,7 +439,7 @@ def play_graph_unet_policy(
     # ==========================================================================
     # EMA SMOOTHING for action smoothing (joints only, gripper excluded)
     # ==========================================================================
-    ema_alpha = 0.5  # EMA weight: higher = more responsive, lower = smoother
+    ema_alpha = 1.0  # EMA weight: 1=no smoothing (for testing), 0.5=default smoother
     ema_smoothed_joints = None  # Will be initialized on first action [num_envs, joint_dim]
     print(f"[Play] EMA smoothing enabled: alpha={ema_alpha} (joints only, gripper excluded)")
 

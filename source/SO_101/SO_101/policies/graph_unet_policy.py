@@ -443,19 +443,20 @@ class GraphUnetPolicy(GraphDiTPolicy):
             for _ in range(cfg.num_layers)
         ])
         self.graph_pre_norms = nn.ModuleList([
-            AdaptiveLayerNorm(cfg.hidden_dim, cfg.hidden_dim)
+            nn.LayerNorm(cfg.hidden_dim)
             for _ in range(cfg.num_layers)
         ])
         self.graph_post_norms = nn.ModuleList([
-            AdaptiveLayerNorm(cfg.hidden_dim, cfg.hidden_dim)
+            nn.LayerNorm(cfg.hidden_dim)
             for _ in range(cfg.num_layers)
         ])
+        ffn_expand = 2
         self.graph_ffns = nn.ModuleList([
             nn.Sequential(
-                nn.Linear(cfg.hidden_dim, cfg.hidden_dim * 4),
+                nn.Linear(cfg.hidden_dim, cfg.hidden_dim * ffn_expand),
                 nn.GELU(),
                 nn.Dropout(0.1),
-                nn.Linear(cfg.hidden_dim * 4, cfg.hidden_dim),
+                nn.Linear(cfg.hidden_dim * ffn_expand, cfg.hidden_dim),
                 nn.Dropout(0.1),
             )
             for _ in range(cfg.num_layers)
@@ -575,28 +576,20 @@ class GraphUnetPolicy(GraphDiTPolicy):
         Args:
             node_features: [B, N, H, D]
             edge_embed:    [B, H, edge_dim] (N==2) or [B, N, N, H, edge_dim] (N>2)
-            condition:     [B, hidden_dim] or None
+            condition:     unused, kept for API compatibility
         Returns:
             (enriched node_features, z)
         """
-        B = node_features.shape[0]
-        device = node_features.device
-        dtype = node_features.dtype
-
-        if condition is None:
-            condition = torch.zeros(B, self.cfg.hidden_dim, device=device, dtype=dtype)
-
         for i in range(len(self.graph_attention_layers)):
             residual = node_features
-            node_normed = self.graph_pre_norms[i](node_features, condition)
+            node_normed = self.graph_pre_norms[i](node_features)
             node_features = self.graph_attention_layers[i](node_normed, edge_embed)
             node_features = node_features + residual
 
             B_n, N, H_n, D = node_features.shape
             residual = node_features
-            node_flat = node_features.view(B_n, N * H_n, D)
-            node_flat = self.graph_post_norms[i](node_flat, condition)
-            node_flat = node_flat.view(B_n * N * H_n, D)
+            node_flat = node_features.view(B_n * N * H_n, D)
+            node_flat = self.graph_post_norms[i](node_flat)
             node_flat = self.graph_ffns[i](node_flat)
             node_features = node_flat.view(B_n, N, H_n, D) + residual
 
