@@ -19,8 +19,9 @@ echo "Playing GraphUnetPolicy - Stack"
 echo "Checkpoint: $CHECKPOINT"
 echo "========================================"
 
-NUM_ENVS="${NUM_ENVS:-50}"
+NUM_ENVS="${NUM_ENVS:-10}"
 NUM_EPISODES="${NUM_EPISODES:-1000}"
+EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-8}"
 
 python scripts/graph_unet/play.py \
     --task SO-ARM101-Dual-Cube-Stack-Play-v0 \
@@ -28,4 +29,5 @@ python scripts/graph_unet/play.py \
     --policy_type graph_unet \
     --num_envs "$NUM_ENVS" \
     --num_episodes "$NUM_EPISODES" \
-    --headless true
+    --episode_length_s "$EPISODE_LENGTH_S" \
+    # --headless true

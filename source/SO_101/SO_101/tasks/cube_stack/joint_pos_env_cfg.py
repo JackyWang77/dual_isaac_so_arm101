@@ -158,3 +158,14 @@ class DualSoArm101CubeStackJointPosEnvCfg(CubeStackEnvCfg):
                 ),
             ],
         )
+
+
+@configclass
+class DualSoArm101CubeStackJointPosEnvCfg_PLAY(DualSoArm101CubeStackJointPosEnvCfg):
+    """Play config for joint position policy: fewer envs, no obs noise, obs=64, action=12."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 2
+        self.scene.env_spacing = 2.5
+        self.observations.policy.enable_corruption = False

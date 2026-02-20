@@ -311,7 +311,8 @@ class CubeStackEnvCfg(ManagerBasedRLEnvCfg):
 
     def __post_init__(self):
         self.decimation = 2
-        self.episode_length_s = 5.0  # stack can take longer than lift
+        # Demos: mean~239 steps (4.8s), max~395 (7.9s) at 50Hz; 8s covers p95+
+        self.episode_length_s = 8.0
         self.viewer.eye = (2.5, 2.5, 1.5)
         self.sim.dt = 0.01
         self.sim.render_interval = self.decimation

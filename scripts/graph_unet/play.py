@@ -69,6 +69,7 @@ import SO_101.tasks  # noqa: F401  # Register environments
 import torch
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
 from SO_101.policies.graph_unet_policy import UnetPolicy, GraphUnetPolicy
+from SO_101.policies.dual_arm_unet_policy import DualArmUnetPolicy
 
 # Try to import visualization utilities (if available)
 try:
@@ -236,8 +237,15 @@ def play_graph_unet_policy(
     # Load policy and normalization stats
     print(f"\n[Play] Loading policy from: {checkpoint_path}")
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    
-    PolicyClass = GraphUnetPolicy if policy_type == "graph_unet" else UnetPolicy
+    cfg = checkpoint.get("cfg", None)
+
+    # Policy class from checkpoint cfg: arm_action_dim set → DualArmUnetPolicy
+    if cfg is not None and getattr(cfg, "arm_action_dim", None) is not None:
+        PolicyClass = DualArmUnetPolicy
+    elif policy_type == "graph_unet":
+        PolicyClass = GraphUnetPolicy
+    else:
+        PolicyClass = UnetPolicy
     print(f"[Play] Policy type: {PolicyClass.__name__}")
     policy = PolicyClass.load(checkpoint_path, device=device)
     policy.eval()
@@ -246,7 +254,6 @@ def play_graph_unet_policy(
     print(f"[Play] Using Graph-Unet for all action dimensions (including gripper)")
     
     # Determine mode and set default diffusion steps if not provided
-    cfg = checkpoint.get("cfg", None)
     if cfg is not None:
         mode = getattr(cfg, "mode", "flow_matching")
         print(f"[Play] Policy mode: {mode.upper()}")
@@ -344,7 +351,41 @@ def play_graph_unet_policy(
         joint_mean = None
         joint_std = None
 
+    # Load obs_key_offsets for dynamic extraction (matches train's obs_keys order)
+    obs_key_offsets = checkpoint.get("obs_key_offsets", None)
+    obs_key_dims = checkpoint.get("obs_key_dims", None)
+    if obs_key_offsets is not None:
+        print(f"[Play] Loaded obs_key_offsets for dynamic extraction")
+    else:
+        print(f"[Play] No obs_key_offsets in checkpoint, using fallback indices")
+
     # Get config values from policy
+    node_configs = getattr(policy.cfg, "node_configs", None)
+    use_node_histories = (
+        node_configs is not None and len(node_configs) > 2
+    )
+    if use_node_histories:
+        print(f"[Play] Using {len(node_configs)}-node graph (node_histories)")
+    else:
+        print(f"[Play] Using 2-node graph (ee + object_node_history)")
+
+    # obs_key_offsets: from checkpoint (train's dataset), or fallback for old checkpoints
+    _obs_offsets = obs_key_offsets if obs_key_offsets else {
+        "left_joint_pos": 0, "left_joint_vel": 6, "right_joint_pos": 12, "right_joint_vel": 18,
+        "left_ee_position": 24, "left_ee_orientation": 27,
+        "right_ee_position": 31, "right_ee_orientation": 34,
+        "cube_1_pos": 38, "cube_1_ori": 41, "cube_2_pos": 45, "cube_2_ori": 48,
+        "object_position": 12, "object_orientation": 15,
+        "ee_position": 19, "ee_orientation": 22,
+        "joint_pos": 0,
+    }
+    _obs_dims = obs_key_dims if obs_key_dims else {
+        "left_ee_position": 3, "left_ee_orientation": 4, "right_ee_position": 3, "right_ee_orientation": 4,
+        "cube_1_pos": 3, "cube_1_ori": 4, "cube_2_pos": 3, "cube_2_ori": 4,
+        "object_position": 3, "object_orientation": 4, "ee_position": 3, "ee_orientation": 4,
+        "left_joint_pos": 6, "right_joint_pos": 6, "joint_pos": 6,
+    }
+
     action_history_length = (
         policy.cfg.action_history_length
         if hasattr(policy.cfg, "action_history_length")
@@ -411,8 +452,9 @@ def play_graph_unet_policy(
                 success_mask = success_mask & (~drop_mask)
         return success_mask
 
-    # 成功率：与 play_graph_rl / train 一致，仅用 truncated + 高度（Isaac Lab log 为标量不可用）
-    OBJ_HEIGHT_IDX = 14  # object_position.z
+    # 成功率：与 play_graph_rl / train 一致，仅用 truncated + 高度
+    _obj_pos_key = "cube_1_pos" if "cube_1_pos" in _obs_offsets else "object_position"
+    OBJ_HEIGHT_IDX = _obs_offsets.get(_obj_pos_key, 12) + 2  # z index
     SUCCESS_HEIGHT = 0.10  # 成功阈值 (m)
     print(f"[Play] Success: timeout=失败, 否则 height>={SUCCESS_HEIGHT}m=成功 (与 play_graph_rl 一致)")
 
@@ -421,12 +463,30 @@ def play_graph_unet_policy(
         torch.zeros(action_history_length, action_dim, device=device)
         for _ in range(num_envs)
     ]
-    ee_node_history_buffers = [
-        torch.zeros(action_history_length, 7, device=device) for _ in range(num_envs)
-    ]
-    object_node_history_buffers = [
-        torch.zeros(action_history_length, 7, device=device) for _ in range(num_envs)
-    ]
+    ee_node_history_buffers = (
+        None
+        if use_node_histories
+        else [
+            torch.zeros(action_history_length, 7, device=device)
+            for _ in range(num_envs)
+        ]
+    )
+    object_node_history_buffers = (
+        None
+        if use_node_histories
+        else [
+            torch.zeros(action_history_length, 7, device=device)
+            for _ in range(num_envs)
+        ]
+    )
+    node_history_buffers = (
+        [
+            torch.zeros(len(node_configs), action_history_length, 7, device=device)
+            for _ in range(num_envs)
+        ]
+        if use_node_histories
+        else None
+    )
     joint_state_history_buffers = (
         [
             torch.zeros(action_history_length, joint_dim, device=device)
@@ -465,38 +525,64 @@ def play_graph_unet_policy(
     step_count = 0
     
     def _extract_node_features_from_obs(obs_tensor):
-        """Extract EE and Object node features from concatenated obs.
-        
-        Note: Assumes obs_keys order is:
-        joint_pos, joint_vel, object_position, object_orientation, 
-        ee_position, ee_orientation, actions
-        (target_object_position is skipped even if present in data)
-        """
-        # Compute offsets dynamically (same as in HDF5Dataset)
-        # joint_pos: 0-6, joint_vel: 6-12
-        # object_position: 12-15, object_orientation: 15-19
-        # ee_position: 19-22, ee_orientation: 22-26
-        # actions: 26-32 (for joint states)
-        obj_pos = obs_tensor[:, 12:15]  # [batch, 3] - object_position
-        obj_ori = obs_tensor[:, 15:19]  # [batch, 4] - object_orientation
-        ee_pos = obs_tensor[:, 19:22]  # [batch, 3] - ee_position
-        ee_ori = obs_tensor[:, 22:26]  # [batch, 4] - ee_orientation
-        
-        ee_node = torch.cat([ee_pos, ee_ori], dim=-1)  # [batch, 7]
-        object_node = torch.cat([obj_pos, obj_ori], dim=-1)  # [batch, 7]
+        """Extract EE and Object node features using obs_key_offsets from checkpoint."""
+        def _slice(key, size):
+            off = _obs_offsets.get(key, 0)
+            return obs_tensor[:, off : off + size]
+        if "left_ee_position" in _obs_offsets:
+            ee_pos = _slice("left_ee_position", 3)
+            ee_ori = _slice("left_ee_orientation", 4)
+            obj_pos = _slice("right_ee_position", 3)
+            obj_ori = _slice("right_ee_orientation", 4)
+        else:
+            obj_pos = _slice("object_position", 3)
+            obj_ori = _slice("object_orientation", 4)
+            ee_pos = _slice("ee_position", 3)
+            ee_ori = _slice("ee_orientation", 4)
+        ee_node = torch.cat([ee_pos, ee_ori], dim=-1)
+        object_node = torch.cat([obj_pos, obj_ori], dim=-1)
         return ee_node, object_node
-    
-    def _extract_joint_states_from_obs(obs_tensor):
-        """Extract joint position from concatenated obs.
-        
-        NOTE: Only using joint_pos (removed joint_vel to test if it's noise).
 
-        Assumes layout:
-            joint_pos: 0-6
-        """
-        joint_pos = obs_tensor[:, 0:6]
-        # Only return joint_pos (no joint_vel)
-        return joint_pos
+    def _extract_node_features_multi(obs_tensor):
+        """Extract all node features for N-node graph using obs_key_offsets."""
+        nodes = []
+        for nc in node_configs:
+            pos_off = _obs_offsets.get(nc["pos_key"], 0)
+            ori_off = _obs_offsets.get(nc["ori_key"], 0)
+            pos_dim = _obs_dims.get(nc["pos_key"], 3)
+            ori_dim = _obs_dims.get(nc["ori_key"], 4)
+            pos = obs_tensor[:, pos_off : pos_off + pos_dim]
+            ori = obs_tensor[:, ori_off : ori_off + ori_dim]
+            if pos_dim < 3:
+                pos = torch.nn.functional.pad(pos, (0, 3 - pos_dim))
+            elif pos_dim > 3:
+                pos = pos[:, :3]
+            if ori_dim < 4:
+                ori = torch.nn.functional.pad(ori, (0, 4 - ori_dim))
+            elif ori_dim > 4:
+                ori = ori[:, :4]
+            nodes.append(torch.cat([pos, ori], dim=-1))
+        return torch.stack(nodes, dim=1)
+
+    def _extract_joint_states_from_obs(obs_tensor):
+        """Extract joint position using obs_key_offsets from checkpoint."""
+        if joint_dim == 12 and "left_joint_pos" in _obs_offsets and "right_joint_pos" in _obs_offsets:
+            left_dim = _obs_dims.get("left_joint_pos", 6)
+            right_dim = _obs_dims.get("right_joint_pos", 6)
+            left_jp = obs_tensor[:, _obs_offsets["left_joint_pos"] : _obs_offsets["left_joint_pos"] + left_dim]
+            right_jp = obs_tensor[:, _obs_offsets["right_joint_pos"] : _obs_offsets["right_joint_pos"] + right_dim]
+            if left_dim < 6:
+                left_jp = torch.nn.functional.pad(left_jp, (0, 6 - left_dim))
+            elif left_dim > 6:
+                left_jp = left_jp[:, :6]
+            if right_dim < 6:
+                right_jp = torch.nn.functional.pad(right_jp, (0, 6 - right_dim))
+            elif right_dim > 6:
+                right_jp = right_jp[:, :6]
+            return torch.cat([left_jp, right_jp], dim=-1)
+        off = _obs_offsets.get("joint_pos", 0)
+        dim = _obs_dims.get("joint_pos", 6)
+        return obs_tensor[:, off : off + dim]
     
     with torch.inference_mode():
         while simulation_app.is_running() and episode_count < num_episodes:
@@ -544,13 +630,13 @@ def play_graph_unet_policy(
                             ],
                             dim=1,
                         )  # Should be 32 dims
-                    elif obs_tensor_raw.shape[1] == 32:
-                        # Already correct (training format)
+                    elif obs_tensor_raw.shape[1] in (32, 64):
+                        # 32: single-arm lift/reach; 64: dual-arm stack
                         obs_tensor = obs_tensor_raw
                     else:
                         # Unknown dimension, use as is (might cause issues)
                         print(
-                            f"[Play] Warning: Unexpected obs dim {obs_tensor_raw.shape[1]}, expected 32 or 39"
+                            f"[Play] Warning: Unexpected obs dim {obs_tensor_raw.shape[1]}, expected 32, 39, or 64"
                         )
                         obs_tensor = obs_tensor_raw
                 else:
@@ -626,12 +712,14 @@ def play_graph_unet_policy(
                 obs_tensor_normalized = obs_tensor
             
             # Extract current node features (before normalization for node history)
-            # obs_tensor is now 32 dims (after removing target_object_position)
-            # Indices: joint_pos[0:6], joint_vel[6:12], object_position[12:15], object_orientation[15:19],
-            #          ee_position[19:22], ee_orientation[22:26], actions[26:32]
-            ee_node_current, object_node_current = _extract_node_features_from_obs(
-                obs_tensor
-            )  # [num_envs, 7]
+            if use_node_histories:
+                node_features_current = _extract_node_features_multi(
+                    obs_tensor
+                )  # [num_envs, N, 7]
+            else:
+                ee_node_current, object_node_current = _extract_node_features_from_obs(
+                    obs_tensor
+                )  # [num_envs, 7]
             
             # Extract current joint states (position + velocity) from raw obs
             if joint_dim is not None:
@@ -641,56 +729,79 @@ def play_graph_unet_policy(
 
             # Build action, node, and joint histories for batch
             action_history_batch = []
-            ee_node_history_batch = []
-            object_node_history_batch = []
             joint_state_history_batch = [] if joint_dim is not None else None
             
             for env_id in range(num_envs):
-                # Get histories for this environment
                 action_history_batch.append(
                     action_history_buffers[env_id].clone()
-                )  # [history_length, action_dim]
-                ee_node_history_batch.append(
-                    ee_node_history_buffers[env_id].clone()
-                )  # [history_length, 7]
-                object_node_history_batch.append(
-                    object_node_history_buffers[env_id].clone()
-                )  # [history_length, 7]
+                )
                 if joint_dim is not None and joint_state_history_batch is not None:
                     joint_state_history_batch.append(
                         joint_state_history_buffers[env_id].clone()
-                    )  # [H, joint_dim]
+                    )
             
-            # Stack into batch format
             action_history_tensor = torch.stack(action_history_batch, dim=0).to(
                 device
-            )  # [num_envs, history_length, action_dim] - 6-dim (5 arm + 1 gripper); buffer keeps raw (unmapped) action
-            ee_node_history_tensor = torch.stack(ee_node_history_batch, dim=0).to(
-                device
-            )  # [num_envs, history_length, 7]
-            object_node_history_tensor = torch.stack(
-                object_node_history_batch, dim=0
-            ).to(
-                device
-            )  # [num_envs, history_length, 7]
+            )
             if joint_dim is not None and joint_state_history_batch is not None:
                 joint_states_history_tensor = torch.stack(
                     joint_state_history_batch, dim=0
-                ).to(
-                    device
-                )  # [num_envs, H, joint_dim]
+                ).to(device)
             else:
                 joint_states_history_tensor = None
-
-            # CRITICAL FIX: Normalize node features (same as during training)
-            # This is essential for Transformer attention to work properly
-            if ee_node_mean is not None and ee_node_std is not None:
-                ee_node_history_tensor = (
-                    ee_node_history_tensor - ee_node_mean
-                ) / ee_node_std
-                object_node_history_tensor = (
-                    object_node_history_tensor - object_node_mean
-                ) / object_node_std
+            
+            # Node histories: either 4-node (node_histories) or 2-node (ee + object)
+            if use_node_histories:
+                node_histories_tensor = torch.stack(
+                    [node_history_buffers[env_id].clone() for env_id in range(num_envs)],
+                    dim=0,
+                ).to(device)  # [num_envs, N, H, 7]
+                node_types_tensor = torch.tensor(
+                    [nc.get("type", 0) for nc in node_configs],
+                    dtype=torch.long,
+                    device=device,
+                )
+                # Normalize per node type (ee_mean for type 0, object_mean for type 1)
+                if ee_node_mean is not None and ee_node_std is not None:
+                    for n_idx in range(node_histories_tensor.shape[1]):
+                        ntype = node_types_tensor[n_idx].item()
+                        if ntype == 0:
+                            node_histories_tensor[:, n_idx] = (
+                                node_histories_tensor[:, n_idx] - ee_node_mean
+                            ) / ee_node_std
+                        elif (
+                            ntype == 1
+                            and object_node_mean is not None
+                            and object_node_std is not None
+                        ):
+                            node_histories_tensor[:, n_idx] = (
+                                node_histories_tensor[:, n_idx] - object_node_mean
+                            ) / object_node_std
+                ee_node_history_tensor = None
+                object_node_history_tensor = None
+            else:
+                ee_node_history_batch = [
+                    ee_node_history_buffers[env_id].clone() for env_id in range(num_envs)
+                ]
+                object_node_history_batch = [
+                    object_node_history_buffers[env_id].clone()
+                    for env_id in range(num_envs)
+                ]
+                ee_node_history_tensor = torch.stack(
+                    ee_node_history_batch, dim=0
+                ).to(device)
+                object_node_history_tensor = torch.stack(
+                    object_node_history_batch, dim=0
+                ).to(device)
+                node_histories_tensor = None
+                node_types_tensor = None
+                if ee_node_mean is not None and ee_node_std is not None:
+                    ee_node_history_tensor = (
+                        ee_node_history_tensor - ee_node_mean
+                    ) / ee_node_std
+                    object_node_history_tensor = (
+                        object_node_history_tensor - object_node_mean
+                    ) / object_node_std
 
             # CRITICAL FIX: Normalize joint states (same as during training)
             if (
@@ -719,16 +830,21 @@ def play_graph_unet_policy(
             if needs_replan:
                 # Predict action trajectory: Graph-Unet outputs 6-dim (5 arm + 1 gripper); buffer keeps raw (unmapped)
                 # Output: [num_envs, pred_horizon, 6] (normalized)
-                action_trajectory_normalized = policy.predict(
-                    obs_tensor_normalized,
-                    action_history=action_history_tensor,  # [num_envs, history_length, 6]
-                    ee_node_history=ee_node_history_tensor,
-                    object_node_history=object_node_history_tensor,
+                predict_kw = dict(
+                    obs=obs_tensor_normalized,
+                    action_history=action_history_tensor,
                     joint_states_history=joint_states_history_tensor,
                     subtask_condition=subtask_condition,
                     num_diffusion_steps=num_diffusion_steps,
                     deterministic=True,
-                )  # [num_envs, pred_horizon, 6]
+                )
+                if use_node_histories:
+                    predict_kw["node_histories"] = node_histories_tensor
+                    predict_kw["node_types"] = node_types_tensor
+                else:
+                    predict_kw["ee_node_history"] = ee_node_history_tensor
+                    predict_kw["object_node_history"] = object_node_history_tensor
+                action_trajectory_normalized = policy.predict(**predict_kw)
 
                 # Denormalize full 6-dim; buffer stores this raw; env gets gripper mapped to -1/1 only at step
                 if action_mean is not None and action_std is not None:
@@ -800,11 +916,18 @@ def play_graph_unet_policy(
                     actions_out[:, idx] = ema_smoothed_joints[:, i]
                 actions = actions_out
 
+            # CRITICAL: Action order mismatch - Train uses [left_6, right_6], Env expects [right_6, left_6]
+            # Policy outputs train order; reorder before env.step
+            if action_dim == 12:
+                action_for_env = torch.cat([actions[:, 6:12], actions[:, 0:6]], dim=1)
+            else:
+                action_for_env = actions.clone()
+
             # Gripper mapping for Isaac Sim: same logic for both arms: > -0.2 -> 1 (open), else -1 (close)
-            action_for_env = actions.clone()
+            # After reorder, action_for_env = [right_6, left_6], grippers at 5 and 11
             for g_idx in gripper_indices:
                 action_for_env[:, g_idx] = torch.where(
-                    actions[:, g_idx] > -0.2, 1.0, -1.0
+                    action_for_env[:, g_idx] > -0.2, 1.0, -1.0
                 )
 
             # DEBUG: print gripper + joint info every 50 steps (env 0 only)
@@ -831,21 +954,29 @@ def play_graph_unet_policy(
                 )
                 
                 # Shift node histories
-                ee_node_history_buffers[env_id] = torch.cat(
-                    [
-                    ee_node_history_buffers[env_id][1:],
-                        ee_node_current[env_id : env_id + 1],
-                    ],
-                    dim=0,
-                )
-
-                object_node_history_buffers[env_id] = torch.cat(
-                    [
-                    object_node_history_buffers[env_id][1:],
-                        object_node_current[env_id : env_id + 1],
-                    ],
-                    dim=0,
-                )
+                if use_node_histories:
+                    node_history_buffers[env_id] = torch.cat(
+                        [
+                            node_history_buffers[env_id][:, 1:, :],
+                            node_features_current[env_id : env_id + 1].transpose(0, 1),
+                        ],
+                        dim=1,
+                    )  # [N, H, 7]
+                else:
+                    ee_node_history_buffers[env_id] = torch.cat(
+                        [
+                            ee_node_history_buffers[env_id][1:],
+                            ee_node_current[env_id : env_id + 1],
+                        ],
+                        dim=0,
+                    )
+                    object_node_history_buffers[env_id] = torch.cat(
+                        [
+                            object_node_history_buffers[env_id][1:],
+                            object_node_current[env_id : env_id + 1],
+                        ],
+                        dim=0,
+                    )
 
                 if joint_dim is not None and joint_state_history_buffers is not None:
                     joint_state_history_buffers[env_id] = torch.cat(
@@ -898,8 +1029,11 @@ def play_graph_unet_policy(
 
                         # Reset history buffers for this environment
                         action_history_buffers[i].zero_()
-                        ee_node_history_buffers[i].zero_()
-                        object_node_history_buffers[i].zero_()
+                        if use_node_histories:
+                            node_history_buffers[i].zero_()
+                        else:
+                            ee_node_history_buffers[i].zero_()
+                            object_node_history_buffers[i].zero_()
                         if (
                             joint_dim is not None
                             and joint_state_history_buffers is not None

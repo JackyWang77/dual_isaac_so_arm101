@@ -27,7 +27,7 @@ from isaaclab.utils import configclass
 
 
 def _quat_to_axis(quat: torch.Tensor, axis: str = "z") -> torch.Tensor:
-    """从四元数提取某轴的方向向量。Isaac Lab 四元数格式 (w, x, y, z)。"""
+
     quat = quat / (torch.norm(quat, dim=-1, keepdim=True) + 1e-8)
     w, x, y, z = quat[..., 0], quat[..., 1], quat[..., 2], quat[..., 3]
     if axis == "z":
@@ -668,6 +668,12 @@ class GraphDiTPolicyCfg:
     Rule of thumb: exec_horizon = pred_horizon // 2
     This provides temporal consistency while allowing course correction.
     """
+    
+    # Dual-arm UNet (DualArmUnetPolicy)
+    arm_action_dim: int | None = None
+    """Per-arm action dimension (e.g. 6 for left/right). Set when action_dim=12 and using DualArmUnetPolicy."""
+    cross_arm_heads: int = 4
+    """Number of attention heads for CrossArmAttention at bottleneck."""
     
     # Edge-Conditioned Modulation (ECC-style)
     use_edge_modulation: bool = True

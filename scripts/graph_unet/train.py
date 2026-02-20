@@ -39,6 +39,7 @@ import torch
 import torch.optim as optim
 from SO_101.policies.graph_dit_policy import GraphDiTPolicyCfg
 from SO_101.policies.graph_unet_policy import GraphUnetPolicy, UnetPolicy
+from SO_101.policies.dual_arm_unet_policy import DualArmUnetPolicy
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.tensorboard import SummaryWriter
@@ -522,25 +523,6 @@ class HDF5DemoDataset(Dataset):
                 f"  ✅ Single batch dataset created: {len(self.demos)} identical demos"
             )
 
-        # ============================================================================
-        # 🚑 SINGLE BATCH TEST MODE: Overfitting test for debugging
-        # ============================================================================
-        if self.single_batch_test:
-            if len(self.demos) == 0:
-                raise ValueError(
-                    "[SINGLE BATCH TEST] No demos loaded! Cannot create single batch test."
-                )
-            print(f"\n🚑 [SINGLE BATCH TEST MODE] Enabled!")
-            print(f"  Original demos: {len(self.demos)}")
-            print(f"  Using ONLY first demo: {self.demos[0]['demo_key']}")
-            print(f"  Replicating {self.single_batch_size} times to fill batch")
-            # Keep only first demo and replicate it
-            first_demo = self.demos[0]
-            self.demos = [first_demo] * self.single_batch_size
-            print(
-                f"  ✅ Single batch dataset created: {len(self.demos)} identical demos"
-            )
-
         print(f"\n[HDF5DemoDataset] Dataset Statistics:")
         print(f"  Total demos: {len(self.demos)}")
         print(
@@ -553,53 +535,6 @@ class HDF5DemoDataset(Dataset):
             f"  Action stats: mean shape={self.action_stats.get('mean', np.array([])).shape}"
         )
         print(f"  Joint stats: mean shape={self.joint_stats['mean'].shape}")
-
-        # ============================================================================
-        # 🔍 NORMALIZATION STATS CHECK: Detect potential issues
-        # ============================================================================
-        print(f"\n🔍 [NORMALIZATION STATS CHECK]:")
-        if len(self.action_stats) > 0:
-            action_mean = self.action_stats["mean"]
-            action_std = self.action_stats["std"]
-            print(
-                f"  Action Mean: min={action_mean.min():.6f}, max={action_mean.max():.6f}, mean={action_mean.mean():.6f}"
-            )
-            print(
-                f"  Action Std:  min={action_std.min():.6f}, max={action_std.max():.6f}, mean={action_std.mean():.6f}"
-            )
-
-            # Check for anomalies
-            if (action_std < 1e-6).any():
-                print(
-                    f"  ⚠️  WARNING: Action Std has values < 1e-6! This may cause numerical issues!"
-                )
-            if (action_std > 100).any():
-                print(
-                    f"  ⚠️  WARNING: Action Std has values > 100! Normalization may be too aggressive!"
-                )
-            if (action_std < 0.01).any():
-                print(
-                    f"  ⚠️  WARNING: Action Std has very small values (< 0.01). Check if this dimension is constant!"
-                )
-
-        if len(self.obs_stats) > 0:
-            obs_mean = self.obs_stats["mean"]
-            obs_std = self.obs_stats["std"]
-            print(
-                f"  Obs Mean: min={obs_mean.min():.6f}, max={obs_mean.max():.6f}, mean={obs_mean.mean():.6f}"
-            )
-            print(
-                f"  Obs Std:  min={obs_std.min():.6f}, max={obs_std.max():.6f}, mean={obs_std.mean():.6f}"
-            )
-
-            if (obs_std < 1e-6).any():
-                print(
-                    f"  ⚠️  WARNING: Obs Std has values < 1e-6! This may cause numerical issues!"
-                )
-            if (obs_std > 100).any():
-                print(
-                    f"  ⚠️  WARNING: Obs Std has values > 100! Normalization may be too aggressive!"
-                )
 
         # ============================================================================
         # 🔍 NORMALIZATION STATS CHECK: Detect potential issues
@@ -977,6 +912,16 @@ def train_graph_unet_policy(
     action_stats = dataset.get_action_stats()
     node_stats = dataset.get_node_stats()
     joint_stats = dataset.get_joint_stats()
+    obs_key_offsets = (
+        dict(dataset.obs_key_offsets)
+        if hasattr(dataset, "obs_key_offsets") and dataset.obs_key_offsets
+        else None
+    )
+    obs_key_dims = (
+        dict(dataset.obs_key_dims)
+        if hasattr(dataset, "obs_key_dims") and dataset.obs_key_dims
+        else None
+    )
 
     # Get actual dimensions from first demo
     sample = dataset[0]
@@ -1073,10 +1018,13 @@ def train_graph_unet_policy(
     else:
         print(f"[Train] ⚠️  Dataset doesn't have obs_key_offsets, using default hardcoded indices")
 
+    # Dual-arm: action_dim=12 + node_configs → DualArmUnetPolicy (shared graph encoder, two UNets + cross-arm attn)
+    is_dual_arm = action_dim == 12 and node_configs is not None
+
     # Create policy configuration
     # IMPORTANT: num_subtasks must match the actual subtask_condition dimension in data
     # If dataset has subtasks, use that number; otherwise disable subtask conditioning
-    cfg = GraphDiTPolicyCfg(
+    cfg_kwargs = dict(
         obs_dim=obs_dim,
         action_dim=action_dim,
         hidden_dim=hidden_dims[0] if hidden_dims else 256,
@@ -1097,6 +1045,10 @@ def train_graph_unet_policy(
         node_configs=node_configs,
         graph_edge_dim=graph_edge_dim,
     )
+    if is_dual_arm:
+        cfg_kwargs["arm_action_dim"] = action_dim // 2
+        cfg_kwargs["cross_arm_heads"] = 4
+    cfg = GraphDiTPolicyCfg(**cfg_kwargs)
 
     if num_subtasks > 0:
         print(
@@ -1109,7 +1061,12 @@ def train_graph_unet_policy(
         )
 
     # Create policy network
-    PolicyClass = GraphUnetPolicy if policy_type == "graph_unet" else UnetPolicy
+    if is_dual_arm:
+        PolicyClass = DualArmUnetPolicy
+    elif policy_type == "graph_unet":
+        PolicyClass = GraphUnetPolicy
+    else:
+        PolicyClass = UnetPolicy
     print(f"\n[Train] Creating {PolicyClass.__name__} Policy...")
     policy = PolicyClass(cfg).to(device)
 
@@ -1402,8 +1359,10 @@ def train_graph_unet_policy(
                     "cfg": cfg,
                     "obs_stats": obs_stats,
                     "action_stats": action_stats,
-                    "node_stats": node_stats,  # CRITICAL: For node feature normalization
-                    "joint_stats": joint_stats,  # CRITICAL: For joint state normalization
+                    "node_stats": node_stats,
+                    "joint_stats": joint_stats,
+                    "obs_key_offsets": obs_key_offsets,  # For play: dynamic obs extraction
+                    "obs_key_dims": obs_key_dims,
                     "epoch": epoch,
                     "loss": avg_loss,
                 },
@@ -1422,8 +1381,10 @@ def train_graph_unet_policy(
             "cfg": cfg,
             "obs_stats": obs_stats,
             "action_stats": action_stats,
-            "node_stats": node_stats,  # CRITICAL: For node feature normalization
-            "joint_stats": joint_stats,  # CRITICAL: For joint state normalization
+            "node_stats": node_stats,
+            "joint_stats": joint_stats,
+            "obs_key_offsets": obs_key_offsets,
+            "obs_key_dims": obs_key_dims,
             "epoch": num_epochs - 1,
             "loss": final_loss,
         },

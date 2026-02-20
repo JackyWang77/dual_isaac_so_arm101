@@ -12,6 +12,7 @@ from . import dual_cube_stack_ik_rel_mimic_env  # noqa: F401
 from . import dual_cube_stack_ik_rel_mimic_env_cfg
 from . import dual_cube_stack_joint_states_mimic_env  # noqa: F401
 from . import dual_cube_stack_joint_states_mimic_env_cfg
+from . import joint_pos_env_cfg
 
 _MIMIC_CFG = dual_cube_stack_ik_rel_mimic_env_cfg.DualCubeStackIKRelMimicEnvCfg
 _MIMIC_ENTRY = f"{__name__}.dual_cube_stack_ik_rel_mimic_env:DualCubeStackIKRelMimicEnv"
@@ -32,7 +33,7 @@ gym.register(
     id="SO-ARM101-Dual-Cube-Stack-Play-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.joint_env_cfg:DualSoArm101CubeStackEnvCfg_PLAY",
+        "env_cfg_entry_point": f"{__name__}.joint_pos_env_cfg:DualSoArm101CubeStackJointPosEnvCfg_PLAY",
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:CubeStackPPORecurrentRunnerCfg",
     },
     disable_env_checker=True,
