@@ -1030,11 +1030,12 @@ def train_graph_unet_policy(
         f"[Train] (Each demo has ~{sample_T} timesteps, so effective batch ≈ {demo_batch_size * sample_T} timesteps)"
     )
 
+    # num_workers=0 avoids "Bus error" / shm exhaustion in Docker/restricted envs
     dataloader = DataLoader(
         dataset,
         batch_size=demo_batch_size,
         shuffle=True,
-        num_workers=4,
+        num_workers=0,
         pin_memory=True,
         drop_last=True,
         collate_fn=demo_collate_fn,  # CRITICAL: Use demo-level collate function
