@@ -162,10 +162,16 @@ class HDF5DemoDataset(Dataset):
                     if key in obs_container:
                         obs_dict[key] = np.array(obs_container[key])
 
-                # Load original actions from HDF5 (will be replaced with joint_pos[t+5])
-                # Original actions from teleoperation may have large gaps, so we use joint_pos[t+5] instead
+                # Fix duplicated EE data: annotated dataset may have 2x length (recorded twice per step)
                 actions_full = np.array(demo["actions"]).astype(np.float32)
                 T_full = len(actions_full)
+                for key in list(obs_dict.keys()):
+                    arr = obs_dict[key]
+                    if len(arr.shape) >= 1 and arr.shape[0] == 2 * T_full:
+                        obs_dict[key] = arr[::2]  # Downsample duplicate rows
+
+                # Load original actions from HDF5 (will be replaced with joint_pos[t+5])
+                # Original actions from teleoperation may have large gaps, so we use joint_pos[t+5] instead
 
                 # Skip first N steps (noisy human actions during demo collection)
                 skip = min(
@@ -201,17 +207,31 @@ class HDF5DemoDataset(Dataset):
                 # CRITICAL FIX: Replace actions with joint_pos[t+5] for smoother actions
                 # Teleoperation data has large gaps between action and current joint_pos,
                 # so using joint_pos[t+5] as action produces smoother, more learnable actions
-                jp_start = self.obs_key_offsets.get("joint_pos", 0)
-                jp_dim = self.obs_key_dims.get("joint_pos", 6)
-                
-                # Extract joint_pos sequence from obs_seq
+                # Dual arm: left_joint_pos (6) + right_joint_pos (6) = 12; Single arm: joint_pos (6)
+                is_dual_arm = "left_joint_pos" in self.obs_key_offsets and "right_joint_pos" in self.obs_key_offsets
+                if is_dual_arm:
+                    jp_left_start = self.obs_key_offsets["left_joint_pos"]
+                    jp_left_dim = self.obs_key_dims["left_joint_pos"]
+                    jp_right_start = self.obs_key_offsets["right_joint_pos"]
+                    jp_right_dim = self.obs_key_dims["right_joint_pos"]
+                    jp_dim = jp_left_dim + jp_right_dim
+                else:
+                    jp_start = self.obs_key_offsets.get("joint_pos", 0)
+                    jp_dim = self.obs_key_dims.get("joint_pos", 6)
+
                 joint_pos_seq = []
                 for i in range(T):
                     obs_i = obs_seq[i]
-                    joint_pos = obs_i[jp_start : jp_start + jp_dim]
-                    joint_pos = np.pad(
-                        joint_pos, (0, max(0, jp_dim - len(joint_pos)))
-                    )[:jp_dim]
+                    if is_dual_arm:
+                        left_jp = obs_i[jp_left_start : jp_left_start + jp_left_dim]
+                        right_jp = obs_i[jp_right_start : jp_right_start + jp_right_dim]
+                        joint_pos = np.concatenate([
+                            np.pad(left_jp, (0, max(0, jp_left_dim - len(left_jp))))[:jp_left_dim],
+                            np.pad(right_jp, (0, max(0, jp_right_dim - len(right_jp))))[:jp_right_dim],
+                        ]).astype(np.float32)
+                    else:
+                        joint_pos = obs_i[jp_start : jp_start + jp_dim]
+                        joint_pos = np.pad(joint_pos, (0, max(0, jp_dim - len(joint_pos))))[:jp_dim]
                     joint_pos_seq.append(joint_pos.astype(np.float32))
                 joint_pos_seq = np.stack(joint_pos_seq, axis=0)  # [T, joint_pos_dim]
                 
@@ -363,19 +383,22 @@ class HDF5DemoDataset(Dataset):
 
                 # Build joint states history: [T, history_len, joint_dim]
                 # NOTE: Only using joint_pos (removed joint_vel to test if it's noise)
-                jp_start = self.obs_key_offsets.get("joint_pos", 0)
-                jp_dim = self.obs_key_dims.get("joint_pos", 6)
-
+                # Reuse is_dual_arm, jp_* from above
                 joint_states_history_seq = []
                 for i in range(T):
                     joint_hist = []
                     for j in range(max(0, i - self.action_history_length + 1), i + 1):
                         obs_j = obs_seq[j]
-                        joint_pos = obs_j[jp_start : jp_start + jp_dim]
-                        joint_pos = np.pad(
-                            joint_pos, (0, max(0, jp_dim - len(joint_pos)))
-                        )[:jp_dim]
-                        # Only use joint_pos (no joint_vel)
+                        if is_dual_arm:
+                            left_jp = obs_j[jp_left_start : jp_left_start + jp_left_dim]
+                            right_jp = obs_j[jp_right_start : jp_right_start + jp_right_dim]
+                            joint_pos = np.concatenate([
+                                np.pad(left_jp, (0, max(0, jp_left_dim - len(left_jp))))[:jp_left_dim],
+                                np.pad(right_jp, (0, max(0, jp_right_dim - len(right_jp))))[:jp_right_dim],
+                            ]).astype(np.float32)
+                        else:
+                            joint_pos = obs_j[jp_start : jp_start + jp_dim]
+                            joint_pos = np.pad(joint_pos, (0, max(0, jp_dim - len(joint_pos))))[:jp_dim]
                         joint_hist.append(joint_pos.astype(np.float32))
 
                     while len(joint_hist) < self.action_history_length:
@@ -1027,11 +1050,10 @@ def train_graph_unet_policy(
     # Infer joint_dim from dataset (only joint_pos, joint_vel removed to test if it's noise)
     joint_dim = 0
     if hasattr(dataset, "obs_key_dims"):
-        if "joint_pos" in dataset.obs_key_dims:
-            joint_dim += dataset.obs_key_dims["joint_pos"]
-        # NOTE: joint_vel removed - testing if it's noise
-        # if "joint_vel" in dataset.obs_key_dims:
-        #     joint_dim += dataset.obs_key_dims["joint_vel"]
+        if "left_joint_pos" in dataset.obs_key_dims and "right_joint_pos" in dataset.obs_key_dims:
+            joint_dim = dataset.obs_key_dims["left_joint_pos"] + dataset.obs_key_dims["right_joint_pos"]
+        elif "joint_pos" in dataset.obs_key_dims:
+            joint_dim = dataset.obs_key_dims["joint_pos"]
     if joint_dim == 0:
         joint_dim = None
 

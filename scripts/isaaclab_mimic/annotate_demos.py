@@ -177,11 +177,50 @@ class PreStepSubtaskTermsObservationsRecorderCfg(RecorderTermCfg):
     class_type: type[RecorderTerm] = PreStepSubtaskTermsObservationsRecorder
 
 
+class PreStepEELeftRightRecorder(RecorderTerm):
+    """Recorder term that records ee observation terms during replay.
+
+    Extracts left_ee_position, left_ee_orientation, right_ee_position,
+    right_ee_orientation from obs_buf['policy'] so the annotated dataset has
+    exactly the same EE values as the env observation (same keys and format).
+    """
+
+    # Observation keys for EE pose (must match cube_stack ObservationsCfg.PolicyCfg)
+    EE_OBS_KEYS = (
+        "left_ee_position",
+        "left_ee_orientation",
+        "right_ee_position",
+        "right_ee_orientation",
+    )
+
+    def record_pre_step(self):
+        policy = self._env.obs_buf.get("policy")
+        if policy is None:
+            return None, None
+        if not isinstance(policy, dict):
+            return None, None
+        out = {}
+        for key in self.EE_OBS_KEYS:
+            if key in policy:
+                out[key] = policy[key].clone()
+        if not out:
+            return None, None
+        return "obs", out
+
+
+@configclass
+class PreStepEELeftRightRecorderCfg(RecorderTermCfg):
+    """Configuration for the ee_left/ee_right recorder term."""
+
+    class_type: type[RecorderTerm] = PreStepEELeftRightRecorder
+
+
 @configclass
 class MimicRecorderManagerCfg(ActionStateRecorderManagerCfg):
     """Mimic specific recorder terms."""
 
     record_pre_step_datagen_info = PreStepDatagenInfoRecorderCfg()
+    record_pre_step_ee_left_right = PreStepEELeftRightRecorderCfg()
     record_pre_step_subtask_start_signals = (
         PreStepSubtaskStartsObservationsRecorderCfg()
     )

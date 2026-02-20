@@ -777,33 +777,44 @@ def play_graph_unet_policy(
                 actions_normalized_list, dim=0
             )  # [num_envs, action_dim] normalized raw for buffer
 
-            # EMA smoothing for joints only (gripper excluded)
-            # EMA: new = alpha * current + (1-alpha) * prev; alpha=0.5 is moderate smoothing
-            if action_dim >= 6:
-                joints = actions[:, :5]  # [num_envs, 5]
-                gripper = actions[:, 5:6]  # [num_envs, 1]
+            # EMA smoothing for joints only (grippers excluded)
+            # Single arm (6): joints 0-4, gripper 5 | Dual arm (12): right joints 0-4, gripper 5, left joints 6-10, gripper 11
+            if action_dim == 6:
+                joint_indices = [0, 1, 2, 3, 4]
+                gripper_indices = [5]
+            elif action_dim == 12:
+                joint_indices = [0, 1, 2, 3, 4, 6, 7, 8, 9, 10]
+                gripper_indices = [5, 11]
+            else:
+                joint_indices = list(range(action_dim))
+                gripper_indices = []
+
+            if joint_indices:
+                joints = actions[:, joint_indices]
                 if ema_smoothed_joints is None:
                     ema_smoothed_joints = joints.clone()
                 else:
                     ema_smoothed_joints = ema_alpha * joints + (1 - ema_alpha) * ema_smoothed_joints
-                actions = torch.cat([ema_smoothed_joints, gripper], dim=-1)  # [num_envs, 6] raw
+                actions_out = actions.clone()
+                for i, idx in enumerate(joint_indices):
+                    actions_out[:, idx] = ema_smoothed_joints[:, i]
+                actions = actions_out
 
-            # Gripper mapping for Isaac Sim only: <= -0.2 -> -1, > -0.2 -> 1; buffer keeps raw (actions_normalized)
+            # Gripper mapping for Isaac Sim: same logic for both arms: > -0.2 -> 1 (open), else -1 (close)
             action_for_env = actions.clone()
-            if action_dim >= 6:
-                action_for_env[:, 5] = torch.where(
-                    actions[:, 5] > -0.2, 1.0, -1.0
-                )  # Isaac reads -1/1; model sees raw in history
-            
-            # DEBUG: print gripper + joint info every 50 steps (env 0 only)
-            if step_count % 50 == 0:
-                g_raw = actions[0, 5].item()
-                g_mapped = action_for_env[0, 5].item()
-                jp = obs_tensor[0, 0:6].cpu().numpy()
-                print(
-                    f"[DBG step={step_count}] gripper_raw={g_raw:+.4f} → mapped={g_mapped:+.1f} | "
-                    f"joint_pos={np.array2string(jp, precision=3, separator=',')}"
+            for g_idx in gripper_indices:
+                action_for_env[:, g_idx] = torch.where(
+                    actions[:, g_idx] > -0.2, 1.0, -1.0
                 )
+
+            # DEBUG: print gripper + joint info every 50 steps (env 0 only)
+            if step_count % 50 == 0 and gripper_indices:
+                g_info = " | ".join(
+                    f"g{i}_raw={actions[0, i].item():+.4f}→{action_for_env[0, i].item():+.1f}"
+                    for i in gripper_indices
+                )
+                jp = obs_tensor[0, : min(12, obs_tensor.shape[1])].cpu().numpy()
+                print(f"[DBG step={step_count}] {g_info} | joint_pos={np.array2string(jp, precision=3, separator=',')}")
 
             # Update history buffers (shift and add new)
             # IMPORTANT: Store normalized actions in history buffer, as policy expects normalized action_history

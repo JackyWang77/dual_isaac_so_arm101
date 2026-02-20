@@ -29,7 +29,7 @@ echo "========================================"
 
 python scripts/graph_unet/train.py \
     --task SO-ARM101-Dual-Cube-Stack-v0 \
-    --dataset ./datasets/dual_cube_stack_joint_states_mimic_dataset_100.hdf5 \
+    --dataset ./datasets/dual_cube_stack_annotated_dataset.hdf5 \
     --policy_type graph_unet \
     --obs_dim 64 \
     --action_dim 12 \
