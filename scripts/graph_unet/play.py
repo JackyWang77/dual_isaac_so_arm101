@@ -69,7 +69,7 @@ import SO_101.tasks  # noqa: F401  # Register environments
 import torch
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
 from SO_101.policies.graph_unet_policy import UnetPolicy, GraphUnetPolicy
-from SO_101.policies.dual_arm_unet_policy import DualArmUnetPolicy
+from SO_101.policies.dual_arm_unet_policy import DualArmUnetPolicy, DualArmUnetPolicyMLP
 
 # Try to import visualization utilities (if available)
 try:
@@ -239,9 +239,13 @@ def play_graph_unet_policy(
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     cfg = checkpoint.get("cfg", None)
 
-    # Policy class from checkpoint cfg: arm_action_dim set → DualArmUnetPolicy
+    # Policy class from checkpoint cfg: arm_action_dim set → dual-arm (graph or MLP)
     if cfg is not None and getattr(cfg, "arm_action_dim", None) is not None:
-        PolicyClass = DualArmUnetPolicy
+        node_configs = getattr(cfg, "node_configs", None)
+        if node_configs is not None and len(node_configs) > 2:
+            PolicyClass = DualArmUnetPolicy  # graph encoder
+        else:
+            PolicyClass = DualArmUnetPolicyMLP  # MLP encoder
     elif policy_type == "graph_unet":
         PolicyClass = GraphUnetPolicy
     else:

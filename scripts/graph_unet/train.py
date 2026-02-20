@@ -39,7 +39,7 @@ import torch
 import torch.optim as optim
 from SO_101.policies.graph_dit_policy import GraphDiTPolicyCfg
 from SO_101.policies.graph_unet_policy import GraphUnetPolicy, UnetPolicy
-from SO_101.policies.dual_arm_unet_policy import DualArmUnetPolicy
+from SO_101.policies.dual_arm_unet_policy import DualArmUnetPolicy, DualArmUnetPolicyMLP
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.tensorboard import SummaryWriter
@@ -1018,8 +1018,9 @@ def train_graph_unet_policy(
     else:
         print(f"[Train] ⚠️  Dataset doesn't have obs_key_offsets, using default hardcoded indices")
 
-    # Dual-arm: action_dim=12 + node_configs → DualArmUnetPolicy (shared graph encoder, two UNets + cross-arm attn)
-    is_dual_arm = action_dim == 12 and node_configs is not None
+    # Dual-arm: action_dim=12 → dual-arm policy (graph or MLP encoder)
+    is_dual_arm = action_dim == 12
+    is_dual_arm_graph = is_dual_arm and node_configs is not None  # graph encoder (DualArmUnetPolicy)
 
     # Create policy configuration
     # IMPORTANT: num_subtasks must match the actual subtask_condition dimension in data
@@ -1060,9 +1061,11 @@ def train_graph_unet_policy(
             f"[Train] No subtask info found, subtask conditioning disabled (num_subtasks=0)"
         )
 
-    # Create policy network
-    if is_dual_arm:
-        PolicyClass = DualArmUnetPolicy
+    # Create policy network (policy_type 优先: unet→MLP, graph_unet→graph)
+    if is_dual_arm and policy_type == "unet":
+        PolicyClass = DualArmUnetPolicyMLP  # MLP encoder + dual UNets (train_unet.sh)
+    elif is_dual_arm_graph:
+        PolicyClass = DualArmUnetPolicy  # graph encoder + dual UNets (train_graph_unet.sh)
     elif policy_type == "graph_unet":
         PolicyClass = GraphUnetPolicy
     else:

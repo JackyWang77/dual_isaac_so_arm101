@@ -22,6 +22,7 @@ from SO_101.policies.graph_unet_policy import (
     Conv1dBlock,
     ConditionalResidualBlock1D,
     GraphUnetPolicy,
+    UnetPolicy,
     _safe_n_groups,
 )
 
@@ -395,6 +396,171 @@ class DualArmUnetPolicy(GraphUnetPolicy):
         out_r = self.unet_right.decode(bottleneck_r, skips_r, ts_embed, z_right) # [B, 6, T]
 
         # 7. 合并输出
+        out_l = out_l.transpose(1, 2)  # [B, T, 6]
+        out_r = out_r.transpose(1, 2)  # [B, T, 6]
+        noise_pred = torch.cat([out_l, out_r], dim=-1)  # [B, T, 12]
+
+        if return_dict:
+            return {"noise_pred": noise_pred}
+        return noise_pred
+
+
+# ==============================================================================
+# 4. DualArmUnetPolicyMLP — 双臂 MLP-UNet（无 graph attention）
+# ==============================================================================
+
+class DualArmUnetPolicyMLP(UnetPolicy):
+    """
+    双臂 Flow Matching 策略（MLP 版，无 graph attention）。
+
+    继承 UnetPolicy（共享 MLP node encoder + pool），替换单 U-Net 为双臂结构：
+
+        MLP Node Encoder (shared)
+                ↓ z [B, z_dim]
+        ┌────────────────────────┐
+        │  UNet_left  (6-dim)    │ ←── z + left_joint_enc
+        │  UNet_right (6-dim)    │ ←── z + right_joint_enc
+        │       ↕ CrossArmAttn  │  ← bottleneck 处软连接
+        └────────────────────────┘
+                ↓
+        concat [left, right] → [B, pred_horizon, 12]
+
+    与 DualArmUnetPolicy 结构相同，区别仅 encoder：MLP pool vs Graph attention。
+    """
+
+    def __init__(self, cfg: GraphDiTPolicyCfg):
+        super().__init__(cfg)
+
+        arm_dim = getattr(cfg, "arm_action_dim", cfg.action_dim // 2)
+        assert cfg.action_dim == arm_dim * 2, (
+            f"DualArmUnetPolicyMLP: action_dim ({cfg.action_dim}) must be 2 × arm_action_dim ({arm_dim})"
+        )
+        self.arm_dim = arm_dim
+
+        z_dim = getattr(cfg, "z_dim", 64)
+        cross_heads = getattr(cfg, "cross_arm_heads", 4)
+
+        jd_per_arm = arm_dim
+        hist_len = cfg.action_history_length
+        arm_joint_z_dim = z_dim // 2
+
+        self.left_joint_encoder = nn.Sequential(
+            nn.Linear(jd_per_arm * hist_len, cfg.hidden_dim),
+            nn.GELU(),
+            nn.Linear(cfg.hidden_dim, arm_joint_z_dim),
+        )
+        self.right_joint_encoder = nn.Sequential(
+            nn.Linear(jd_per_arm * hist_len, cfg.hidden_dim),
+            nn.GELU(),
+            nn.Linear(cfg.hidden_dim, arm_joint_z_dim),
+        )
+
+        arm_cond_dim = z_dim + arm_joint_z_dim
+        down_dims = (128, 256, 512)
+        mid_dim = down_dims[-1]
+
+        self.unet_left = SplitConditionalUnet1D(
+            input_dim=arm_dim,
+            global_cond_dim=arm_cond_dim,
+            diffusion_step_embed_dim=cfg.hidden_dim,
+            down_dims=down_dims,
+            kernel_size=5,
+            n_groups=8,
+        )
+        self.unet_right = SplitConditionalUnet1D(
+            input_dim=arm_dim,
+            global_cond_dim=arm_cond_dim,
+            diffusion_step_embed_dim=cfg.hidden_dim,
+            down_dims=down_dims,
+            kernel_size=5,
+            n_groups=8,
+        )
+
+        self.cross_arm_attn = CrossArmAttention(dim=mid_dim, num_heads=cross_heads)
+
+        del self.unet
+        if hasattr(self, "joint_encoder"):
+            del self.joint_encoder
+
+    def _split_joint_history(
+        self, joint_states_history: torch.Tensor | None
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        if joint_states_history is None:
+            return None, None
+        jd = joint_states_history.shape[-1]
+        half = jd // 2
+        return joint_states_history[..., :half], joint_states_history[..., half:]
+
+    def _encode_arm_joint(
+        self,
+        encoder: nn.Module,
+        joint_hist: torch.Tensor | None,
+        B: int,
+        device: torch.device,
+        z_dim_half: int,
+    ) -> torch.Tensor:
+        if joint_hist is not None:
+            flat = joint_hist.reshape(B, -1)
+            return encoder(flat)
+        return torch.zeros(B, z_dim_half, device=device)
+
+    def forward(
+        self,
+        obs: torch.Tensor,
+        noisy_action: torch.Tensor | None = None,
+        action_history: torch.Tensor | None = None,
+        ee_node_history: torch.Tensor | None = None,
+        object_node_history: torch.Tensor | None = None,
+        node_histories: torch.Tensor | None = None,
+        node_types: torch.Tensor | None = None,
+        joint_states_history: torch.Tensor | None = None,
+        subtask_condition: torch.Tensor | None = None,
+        timesteps: torch.Tensor | None = None,
+        return_dict: bool = False,
+    ) -> torch.Tensor | dict:
+        if noisy_action is None or timesteps is None:
+            raise ValueError("DualArmUnetPolicyMLP.forward requires noisy_action and timesteps")
+
+        B = obs.shape[0]
+        device = obs.device
+
+        # 1. MLP encoder → z (复用 UnetPolicy 的 _embed + _pool)
+        nh, nt = self._build_node_histories(
+            obs, ee_node_history, object_node_history, node_histories, node_types,
+        )
+        node_features = self._embed_node_histories(nh, nt)
+        z = self._pool_node_latent(node_features)  # [B, z_dim]
+
+        # 2. 各臂 joint encoding
+        left_jh, right_jh = self._split_joint_history(joint_states_history)
+        z_dim_half = self.left_joint_encoder[-1].out_features
+        left_jenc = self._encode_arm_joint(self.left_joint_encoder, left_jh, B, device, z_dim_half)
+        right_jenc = self._encode_arm_joint(self.right_joint_encoder, right_jh, B, device, z_dim_half)
+
+        z_left = torch.cat([z, left_jenc], dim=-1)
+        z_right = torch.cat([z, right_jenc], dim=-1)
+
+        # 3. 拆分 noisy_action
+        if noisy_action.dim() == 2:
+            noisy_action = noisy_action.unsqueeze(1)
+        na_left = noisy_action[..., :self.arm_dim].transpose(1, 2)   # [B, 6, T]
+        na_right = noisy_action[..., self.arm_dim:].transpose(1, 2)  # [B, 6, T]
+
+        # 4. timestep embed
+        ts_embed = self._get_timestep_embed(timesteps)
+
+        # 5. Down path
+        skips_l, bottleneck_l = self.unet_left.encode(na_left, ts_embed, z_left)
+        skips_r, bottleneck_r = self.unet_right.encode(na_right, ts_embed, z_right)
+
+        # 6. CrossArmAttention at bottleneck
+        bottleneck_l, bottleneck_r = self.cross_arm_attn(bottleneck_l, bottleneck_r)
+
+        # 7. Up path
+        out_l = self.unet_left.decode(bottleneck_l, skips_l, ts_embed, z_left)   # [B, 6, T]
+        out_r = self.unet_right.decode(bottleneck_r, skips_r, ts_embed, z_right) # [B, 6, T]
+
+        # 8. 合并输出
         out_l = out_l.transpose(1, 2)  # [B, T, 6]
         out_r = out_r.transpose(1, 2)  # [B, T, 6]
         noise_pred = torch.cat([out_l, out_r], dim=-1)  # [B, T, 12]
