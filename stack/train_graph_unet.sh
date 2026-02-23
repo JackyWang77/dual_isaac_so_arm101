@@ -51,4 +51,5 @@ python scripts/graph_unet/train.py \
     --node_configs "$NODE_CONFIGS" \
     --save_dir "./logs/graph_unet_full/$SUFFIX" \
     --log_dir "./logs/graph_unet_full/$SUFFIX" \
+    --save_every 200 \
     $EXTRA_ARGS

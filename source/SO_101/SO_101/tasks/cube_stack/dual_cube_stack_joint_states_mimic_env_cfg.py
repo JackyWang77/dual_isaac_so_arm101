@@ -6,45 +6,10 @@
 #
 
 from isaaclab.envs.mimic_env_cfg import MimicEnvCfg, SubTaskConfig
-from isaaclab.managers import ObservationGroupCfg as ObsGroup
-from isaaclab.managers import ObservationTermCfg as ObsTerm
-from isaaclab.managers import SceneEntityCfg
 from isaaclab.utils import configclass
 
-from . import mdp
-from .cube_stack_env_cfg import TARGET_XY
+from .cube_stack_env_cfg import CubeStackSubtaskCfg
 from .joint_pos_env_cfg import DualSoArm101CubeStackJointPosEnvCfg
-
-
-@configclass
-class CubeStackSubtaskCfg(ObsGroup):
-    """Subtask signals for cube stack (pick_cube, stack_cube)."""
-
-    pick_cube = ObsTerm(
-        func=mdp.either_cube_placed_at_target,
-        params={
-            "target_xy": TARGET_XY,
-            "target_z": 0.006,
-            "target_eps_xy": 0.2,
-            "target_eps_z": 0.005,
-            "cube_1_cfg": SceneEntityCfg("cube_1"),
-            "cube_2_cfg": SceneEntityCfg("cube_2"),
-        },
-    )
-    stack_cube = ObsTerm(
-        func=mdp.two_cubes_stacked_aligned,
-        params={
-            "expected_height": 0.018,
-            "eps_z": 0.003,
-            "eps_xy": 0.009,
-            "cube_1_cfg": SceneEntityCfg("cube_1"),
-            "cube_2_cfg": SceneEntityCfg("cube_2"),
-        },
-    )
-
-    def __post_init__(self):
-        self.enable_corruption = False
-        self.concatenate_terms = False
 
 
 @configclass

@@ -427,16 +427,23 @@ class HDF5DemoDataset(Dataset):
                         if not self.subtask_order:
                             self.subtask_order = subtask_order
 
+                        # Align signal length with T (handle 2x duplication + skip like obs)
+                        T_full = T + skip
+                        sig_arrays = {}
+                        for name in self.subtask_order:
+                            if name in signals_group:
+                                arr = np.array(signals_group[name])
+                                if arr.shape[0] == 2 * T_full:
+                                    arr = arr[::2]  # downsample to T_full
+                                sig_arrays[name] = arr[skip : skip + T]
+
                         subtask_condition_seq = []
                         for i in range(T):
                             active_idx = None
                             for idx, name in enumerate(self.subtask_order):
-                                if (
-                                    name in signals_group
-                                    and not np.array(signals_group[name])[i]
-                                ):
+                                if name in sig_arrays and not sig_arrays[name][i]:
                                     active_idx = idx
-                                break
+                                    break
                             if active_idx is None:
                                 active_idx = len(self.subtask_order) - 1
                             cond = np.zeros(len(self.subtask_order), dtype=np.float32)
@@ -593,6 +600,7 @@ class HDF5DemoDataset(Dataset):
         Returns a dictionary with:
         - obs_seq: [T, obs_dim]
         - action_trajectory_seq: [T, pred_horizon, action_dim]
+        - trajectory_mask_seq: [T, pred_horizon] - True if future step valid, False if padding
         - action_history_seq: [T, history_len, action_dim]
         - ee_node_history_seq: [T, history_len, 7]
         - object_node_history_seq: [T, history_len, 7]
@@ -672,6 +680,7 @@ class HDF5DemoDataset(Dataset):
             "ee_node_history_seq": torch.from_numpy(ee_node_history_seq).float(),
             "object_node_history_seq": torch.from_numpy(object_node_history_seq).float(),
             "joint_states_history_seq": torch.from_numpy(joint_states_history_seq).float(),
+            "trajectory_mask_seq": torch.from_numpy(demo["trajectory_mask_seq"]).bool(),
             "subtask_condition_seq": (
                 torch.from_numpy(subtask_condition_seq).float()
                 if subtask_condition_seq is not None
@@ -769,7 +778,7 @@ def demo_collate_fn(batch):
             node_histories_seq[i, :T] = item["node_histories_seq"]
 
         if "trajectory_mask_seq" in item:
-            trajectory_mask[i, :T] = torch.from_numpy(item["trajectory_mask_seq"])
+            trajectory_mask[i, :T] = item["trajectory_mask_seq"]
         else:
             for t in range(T):
                 for k in range(pred_horizon):
@@ -825,6 +834,7 @@ def train_graph_unet_policy(
     use_joint_film: bool = False,
     node_configs: list[dict] | None = None,
     graph_edge_dim: int = 128,
+    save_every: int = 200,
 ):
     """Train Graph-Unet Policy with Action Chunking."""
 
@@ -1375,6 +1385,29 @@ def train_graph_unet_policy(
                 f"[Train] ✅ Saved best model (loss: {best_loss:.6f}, epoch: {epoch+1}) to: {best_path}"
             )
 
+        # Save periodic checkpoint every save_every epochs (for long runs)
+        if save_every > 0 and (epoch + 1) % save_every == 0:
+            ckpt_path = save_dir / f"checkpoint_{epoch+1}.pt"
+            ckpt = {
+                "policy_state_dict": policy.state_dict(),
+                "cfg": cfg,
+                "obs_stats": obs_stats,
+                "action_stats": action_stats,
+                "node_stats": node_stats,
+                "joint_stats": joint_stats,
+                "obs_key_offsets": obs_key_offsets,
+                "obs_key_dims": obs_key_dims,
+                "epoch": epoch,
+                "loss": avg_loss,
+                "best_loss": best_loss,
+            }
+            if optimizer is not None:
+                ckpt["optimizer_state_dict"] = optimizer.state_dict()
+            if scheduler is not None:
+                ckpt["scheduler_state_dict"] = scheduler.state_dict()
+            torch.save(ckpt, str(ckpt_path))
+            print(f"[Train] 📁 Saved checkpoint (epoch {epoch+1}) to: {ckpt_path}")
+
     # Save final model (after all epochs)
     final_loss = last_epoch_loss if last_epoch_loss is not None else best_loss
     final_path = save_dir / "final_model.pt"
@@ -1534,6 +1567,12 @@ def main():
     parser.add_argument(
         "--resume", type=str, default=None, help="Resume from checkpoint"
     )
+    parser.add_argument(
+        "--save_every",
+        type=int,
+        default=200,
+        help="Save checkpoint every N epochs (0=disable). Default 200.",
+    )
 
     # Device
     parser.add_argument("--device", type=str, default="cuda", help="Device (cuda/cpu)")
@@ -1598,6 +1637,7 @@ def main():
         use_joint_film=args.use_joint_film,
         node_configs=getattr(args, "node_configs", None),
         graph_edge_dim=args.graph_edge_dim,
+        save_every=args.save_every,
     )
 
 

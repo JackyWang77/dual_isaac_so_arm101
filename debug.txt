@@ -1,98 +1,12 @@
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[DBG step=300] g5_raw=-0.3325→-1.0 | g11_raw=-0.5907→-1.0 | joint_pos=[-5.445e-01, 3.575e-01,-6.159e-01, 1.658e+00, 6.284e-01,-8.725e-01,
- -1.442e+00, 2.254e-01,-1.022e+00, 2.510e-01,-4.490e-01,-1.431e-08]
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[DBG step=350] g5_raw=-0.3107→-1.0 | g11_raw=-0.6143→-1.0 | joint_pos=[-6.172e-01, 3.286e-01,-5.688e-01, 1.655e+00, 7.119e-01,-8.725e-01,
- -1.683e+00, 1.363e+00,-2.680e+00, 2.658e-01,-9.013e-01,-1.613e-07]
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
-[Play] Warning: Unexpected obs dim 64, expected 32 or 39
+[Play] Running 1000 episodes...
+[Play] Action history length: 10
+[Play] ACTION CHUNKING: pred_horizon=20, exec_horizon=10
+[Play] Inference frequency: every 10 steps (vs every step without chunking)
+[Play] Phase condition: 2 subtasks (pick/stack), from env or left gripper
+[Play] Success: timeout=失败, 否则 height>=0.1m=成功 (与 play_graph_rl 一致)
+[Play] EMA smoothing enabled: alpha=1.0 (joints only, gripper excluded)
+[Play] step=0 phase_src=obs_subtask_terms | pick=1/1 stack=0/1 | c1_z=0.015 c2_z=0.015
+[DBG step=0] g5_raw=-0.3442→-1.0 | g11_raw=-0.5697→-1.0 | joint_pos=[0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.]
+[Play] step=20 phase_src=obs_subtask_terms | pick=0/1 stack=1/1 | c1_z=0.006 c2_z=0.006
+[Play] step=40 phase_src=obs_subtask_terms | pick=0/1 stack=1/1 | c1_z=0.006 c2_z=0.006
+[DBG step=50] g5_raw=-0.1927→-1.0 | g11_raw=-0.7172→+1.0 | 

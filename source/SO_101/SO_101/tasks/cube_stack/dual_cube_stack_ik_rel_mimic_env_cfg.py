@@ -4,7 +4,7 @@
 from isaaclab.envs.mimic_env_cfg import MimicEnvCfg, SubTaskConfig
 from isaaclab.utils import configclass
 
-from .dual_cube_stack_joint_states_mimic_env_cfg import CubeStackSubtaskCfg
+from .cube_stack_env_cfg import CubeStackSubtaskCfg
 from .joint_env_cfg import DualSoArm101CubeStackEnvCfg
 
 

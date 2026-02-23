@@ -29,6 +29,53 @@ from . import mdp
 TARGET_XY = (0.117, -0.011)
 TARGET_Z_TABLE = 0.015
 
+# Gripper joint (jaw_joint): 与 joint_pos_env_cfg init_state / joint_env_cfg BinaryJoint 一致
+JAW_OPEN = 0.698
+JAW_CLOSED = 0.0
+
+# Subtask params: analyze_cube_stack_subtask_params.py 统计
+# pick + stack: 都用每个 demo 最后 N 步 (已叠放=目标位置)
+# pick target_xy = 叠放位置, target_z = 底座 z (桌面)
+PICK_TARGET_XY = (0.1623, -0.023)
+PICK_TARGET_Z = 0.006
+PICK_EPS_XY = 0.0603
+PICK_EPS_Z = 0.002
+STACK_EXPECTED_HEIGHT = 0.018
+STACK_EPS_Z = 0.001
+STACK_EPS_XY = 0.0073
+
+
+@configclass
+class CubeStackSubtaskCfg(ObsGroup):
+    """Subtask signals for cube stack (pick_cube, stack_cube)."""
+
+    # 参数来自 analyze_cube_stack_subtask_params.py 对 dual_cube_stack_annotated_dataset.hdf5 的统计
+    pick_cube = ObsTerm(
+        func=mdp.either_cube_placed_at_target,
+        params={
+            "target_xy": PICK_TARGET_XY,
+            "target_z": PICK_TARGET_Z,
+            "target_eps_xy": PICK_EPS_XY,
+            "target_eps_z": PICK_EPS_Z,
+            "cube_1_cfg": SceneEntityCfg("cube_1"),
+            "cube_2_cfg": SceneEntityCfg("cube_2"),
+        },
+    )
+    stack_cube = ObsTerm(
+        func=mdp.two_cubes_stacked_aligned,
+        params={
+            "expected_height": STACK_EXPECTED_HEIGHT,
+            "eps_z": STACK_EPS_Z,
+            "eps_xy": STACK_EPS_XY,
+            "cube_1_cfg": SceneEntityCfg("cube_1"),
+            "cube_2_cfg": SceneEntityCfg("cube_2"),
+        },
+    )
+
+    def __post_init__(self):
+        self.enable_corruption = False
+        self.concatenate_terms = False
+
 
 @configclass
 class CubeStackSceneCfg(InteractiveSceneCfg):

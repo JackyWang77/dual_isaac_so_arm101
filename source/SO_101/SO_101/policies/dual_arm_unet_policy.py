@@ -362,11 +362,12 @@ class DualArmUnetPolicy(GraphUnetPolicy):
         node_features = self._embed_node_histories(nh, nt)
         edge_embed = self._compute_and_embed_edges(nh)
         ts_embed = self._get_timestep_embed(timesteps)
-        condition = ts_embed
-        if subtask_condition is not None and hasattr(self, "subtask_encoder"):
+        _, z = self._encode_graph(node_features, edge_embed, condition=None)
+
+        # Option 1: inject subtask into z before U-Net (subtask 直接影响 action 生成)
+        if subtask_condition is not None and hasattr(self, "subtask_to_z"):
             subtask_embed = self.subtask_encoder(subtask_condition)
-            condition = self.condition_proj(torch.cat([ts_embed, subtask_embed], dim=-1))
-        _, z = self._encode_graph(node_features, edge_embed, condition)
+            z = z + self.subtask_to_z(subtask_embed)
 
         # 2. 各臂 joint encoding
         left_jh, right_jh = self._split_joint_history(joint_states_history)
@@ -530,6 +531,11 @@ class DualArmUnetPolicyMLP(UnetPolicy):
         )
         node_features = self._embed_node_histories(nh, nt)
         z = self._pool_node_latent(node_features)  # [B, z_dim]
+
+        # Option 1: inject subtask into z before U-Net
+        if subtask_condition is not None and hasattr(self, "subtask_to_z"):
+            subtask_embed = self.subtask_encoder(subtask_condition)
+            z = z + self.subtask_to_z(subtask_embed)
 
         # 2. 各臂 joint encoding
         left_jh, right_jh = self._split_joint_history(joint_states_history)

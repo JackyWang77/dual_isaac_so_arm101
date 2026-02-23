@@ -68,6 +68,17 @@ import numpy as np
 import SO_101.tasks  # noqa: F401  # Register environments
 import torch
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
+from SO_101.tasks.cube_stack.cube_stack_env_cfg import (
+    JAW_OPEN,
+    JAW_CLOSED,
+    PICK_TARGET_XY,
+    PICK_TARGET_Z,
+    PICK_EPS_XY,
+    PICK_EPS_Z,
+    STACK_EXPECTED_HEIGHT,
+    STACK_EPS_Z,
+    STACK_EPS_XY,
+)
 from SO_101.policies.graph_unet_policy import UnetPolicy, GraphUnetPolicy
 from SO_101.policies.dual_arm_unet_policy import DualArmUnetPolicy, DualArmUnetPolicyMLP
 
@@ -410,6 +421,9 @@ def play_graph_unet_policy(
     print(
         f"[Play] Inference frequency: every {exec_horizon} steps (vs every step without chunking)"
     )
+    num_subtasks_cfg = getattr(policy.cfg, "num_subtasks", 0)
+    if num_subtasks_cfg > 0:
+        print(f"[Play] Phase condition: {num_subtasks_cfg} subtasks (pick/stack), from env or left gripper")
     
     obs, info = env.reset()
     episode_count = 0
@@ -817,8 +831,98 @@ def play_graph_unet_policy(
                     joint_states_history_tensor - joint_mean
                 ) / joint_std
             
-            # Get subtask condition (optional)
+            # Phase / subtask condition: 与 Mimic 训练完全一致 (CubeStackSubtaskCfg)
+            # 触发条件: pick_cube=either_cube_placed_at_target, stack_cube=two_cubes_stacked_aligned
+            # 输出格式: one-hot, active_idx=第一个未完成的 subtask (与 train.py 一致)
             subtask_condition = None
+            phase_source = "none"
+            num_subtasks = getattr(policy.cfg, "num_subtasks", 0)
+            if num_subtasks > 0:
+                # 1) 优先从 env 获取 (Mimic env 有 get_subtask_term_signals)
+                try:
+                    base_env = env.unwrapped if hasattr(env, "unwrapped") else env
+                    if hasattr(base_env, "get_subtask_term_signals"):
+                        signals = base_env.get_subtask_term_signals()
+                        pick = signals.get("pick_cube")
+                        stack = signals.get("stack_cube")
+                        if pick is not None and stack is not None:
+                            if isinstance(pick, np.ndarray):
+                                pick = torch.from_numpy(pick).float().to(device)
+                                stack = torch.from_numpy(stack).float().to(device)
+                            # 与 train 一致: active_idx = 第一个 signal=False 的 subtask; 全 True 用 last
+                            pick_done = pick.bool()
+                            stack_done = stack.bool()
+                            active_is_pick = ~pick_done
+                            active_is_stack = pick_done & ~stack_done
+                            active_is_last = pick_done & stack_done
+                            cond = torch.zeros(num_envs, 2, device=device)
+                            cond[active_is_pick, 0] = 1.0
+                            cond[active_is_stack, 1] = 1.0
+                            cond[active_is_last, 1] = 1.0  # 全完成用 last (stack)
+                            subtask_condition = cond
+                            phase_source = "env"
+                except Exception as e:
+                    phase_source = f"env_err:{e}"
+                # 2) Play env 有 subtask_terms obs 时，直接读取 (与 Mimic 完全一致)
+                if subtask_condition is None and isinstance(obs, dict) and "subtask_terms" in obs:
+                    st = obs["subtask_terms"]
+                    pick = st.get("pick_cube") if isinstance(st, dict) else None
+                    stack = st.get("stack_cube") if isinstance(st, dict) else None
+                    if pick is not None and stack is not None:
+                        if isinstance(pick, np.ndarray):
+                            pick = torch.from_numpy(pick).float().to(device)
+                        elif not isinstance(pick, torch.Tensor):
+                            pick = torch.tensor(pick, device=device, dtype=torch.float32)
+                        else:
+                            pick = pick.to(device)
+                        if isinstance(stack, np.ndarray):
+                            stack = torch.from_numpy(stack).float().to(device)
+                        elif not isinstance(stack, torch.Tensor):
+                            stack = torch.tensor(stack, device=device, dtype=torch.float32)
+                        else:
+                            stack = stack.to(device)
+                        if pick.shape[0] == num_envs and stack.shape[0] == num_envs:
+                            pick_done = pick.bool()
+                            stack_done = stack.bool()
+                            active_is_pick = ~pick_done
+                            active_is_stack = pick_done & ~stack_done
+                            active_is_last = pick_done & stack_done
+                            cond = torch.zeros(num_envs, 2, device=device)
+                            cond[active_is_pick, 0] = 1.0
+                            cond[active_is_stack, 1] = 1.0
+                            cond[active_is_last, 1] = 1.0
+                            subtask_condition = cond
+                            phase_source = "obs_subtask_terms"
+                # 3) Fallback: 用 obs 复现 Mimic 的 MDP 逻辑 (与 CubeStackSubtaskCfg 参数一致)
+                if subtask_condition is None and num_subtasks >= 2 and "cube_1_pos" in _obs_offsets and "cube_2_pos" in _obs_offsets:
+                    c1 = obs_tensor[:, _obs_offsets["cube_1_pos"] : _obs_offsets["cube_1_pos"] + 3]
+                    c2 = obs_tensor[:, _obs_offsets["cube_2_pos"] : _obs_offsets["cube_2_pos"] + 3]
+                    target_xy = torch.tensor([PICK_TARGET_XY[0], PICK_TARGET_XY[1]], device=device, dtype=c1.dtype).unsqueeze(0).expand(num_envs, -1)
+                    target_z, target_eps_xy, target_eps_z = PICK_TARGET_Z, PICK_EPS_XY, PICK_EPS_Z
+                    expected_height, eps_z, eps_xy = STACK_EXPECTED_HEIGHT, STACK_EPS_Z, STACK_EPS_XY
+                    at_xy_1 = torch.norm(c1[:, :2] - target_xy, dim=1) < target_eps_xy
+                    at_z_1 = torch.abs(c1[:, 2] - target_z) < target_eps_z
+                    at_xy_2 = torch.norm(c2[:, :2] - target_xy, dim=1) < target_eps_xy
+                    at_z_2 = torch.abs(c2[:, 2] - target_z) < target_eps_z
+                    pick_cube = (at_xy_1 & at_z_1) | (at_xy_2 & at_z_2)
+                    z_ok_a = torch.abs((c1[:, 2] - c2[:, 2]) - expected_height) < eps_z
+                    xy_ok_a = torch.norm(c1[:, :2] - c2[:, :2], dim=1) < eps_xy
+                    z_ok_b = torch.abs((c2[:, 2] - c1[:, 2]) - expected_height) < eps_z
+                    xy_ok_b = torch.norm(c2[:, :2] - c1[:, :2], dim=1) < eps_xy
+                    stack_cube = (z_ok_a & xy_ok_a) | (z_ok_b & xy_ok_b)
+                    active_is_pick = ~pick_cube
+                    active_is_stack = pick_cube & ~stack_cube
+                    active_is_last = pick_cube & stack_cube
+                    cond = torch.zeros(num_envs, 2, device=device)
+                    cond[active_is_pick, 0] = 1.0
+                    cond[active_is_stack, 1] = 1.0
+                    cond[active_is_last, 1] = 1.0
+                    subtask_condition = cond
+                    phase_source = "obs_mimic"
+                elif subtask_condition is None and num_subtasks >= 1:
+                    subtask_condition = torch.zeros(num_envs, num_subtasks, device=device)
+                    subtask_condition[:, 0] = 1.0
+                    phase_source = "default"
             
             # ==========================================================================
             # RECEDING HORIZON CONTROL: Check if we need to re-plan
@@ -830,6 +934,21 @@ def play_graph_unet_policy(
             needs_replan = any(
                 len(action_buffers[env_id]) == 0 for env_id in range(num_envs)
             )
+
+            # DEBUG: 打印 phase 触发情况 (每 20 步或首次 re-plan 时)
+            if num_subtasks > 0 and needs_replan and (step_count % 20 == 0 or step_count < 5):
+                n_pick = int((subtask_condition[:, 0] > 0.5).sum().item()) if subtask_condition is not None else 0
+                n_stack = (
+                    int((subtask_condition[:, 1] > 0.5).sum().item())
+                    if subtask_condition is not None and subtask_condition.shape[1] >= 2
+                    else 0
+                )
+                pick_stack_info = ""
+                if phase_source in ("obs_mimic", "obs_subtask_terms") and "cube_1_pos" in _obs_offsets and obs_tensor.shape[0] > 0:
+                    c1 = obs_tensor[0, _obs_offsets["cube_1_pos"] : _obs_offsets["cube_1_pos"] + 3]
+                    c2 = obs_tensor[0, _obs_offsets["cube_2_pos"] : _obs_offsets["cube_2_pos"] + 3]
+                    pick_stack_info = f" | c1_z={c1[2].item():.3f} c2_z={c2[2].item():.3f}"
+                print(f"[Play] step={step_count} phase_src={phase_source} | pick={n_pick}/{num_envs} stack={n_stack}/{num_envs}{pick_stack_info}")
 
             if needs_replan:
                 # Predict action trajectory: Graph-Unet outputs 6-dim (5 arm + 1 gripper); buffer keeps raw (unmapped)

@@ -215,6 +215,11 @@ class UnetPolicy(GraphDiTPolicy):
             n_groups=8,
         )
 
+        # Option 1: subtask concat into z before U-Net
+        num_subtasks = getattr(cfg, "num_subtasks", 0)
+        if num_subtasks > 0 and hasattr(self, "subtask_encoder"):
+            self.subtask_to_z = nn.Linear(cfg.hidden_dim // 4, z_dim)
+
     # ------------------------------------------------------------------
     # Shared helper: build node_histories [B, N, H, 7] from any input API
     # ------------------------------------------------------------------
@@ -298,6 +303,11 @@ class UnetPolicy(GraphDiTPolicy):
         node_features = self._embed_node_histories(nh, nt)  # [B, N, H, D]
 
         z = self._pool_node_latent(node_features)
+
+        # Option 1: inject subtask into z before U-Net
+        if subtask_condition is not None and hasattr(self, "subtask_to_z"):
+            subtask_embed = self.subtask_encoder(subtask_condition)
+            z = z + self.subtask_to_z(subtask_embed)
 
         if self._use_joint_film and joint_states_history is not None:
             B_j = joint_states_history.shape[0]
@@ -484,6 +494,11 @@ class GraphUnetPolicy(GraphDiTPolicy):
             n_groups=8,
         )
 
+        # Option 1: subtask concat into z before U-Net (subtask_encoder from parent)
+        num_subtasks = getattr(cfg, "num_subtasks", 0)
+        if num_subtasks > 0 and hasattr(self, "subtask_encoder"):
+            self.subtask_to_z = nn.Linear(cfg.hidden_dim // 4, z_dim)
+
         self._init_weights()
 
     # ------------------------------------------------------------------
@@ -624,15 +639,12 @@ class GraphUnetPolicy(GraphDiTPolicy):
         edge_embed = self._compute_and_embed_edges(nh)
 
         ts_embed = self._get_timestep_embed(timesteps)
-        condition = ts_embed
+        _, z = self._encode_graph(node_features, edge_embed, condition=None)
 
-        if subtask_condition is not None and hasattr(self, "subtask_encoder"):
+        # Option 1: inject subtask into z before U-Net (subtask 直接影响 action 生成)
+        if subtask_condition is not None and hasattr(self, "subtask_to_z"):
             subtask_embed = self.subtask_encoder(subtask_condition)
-            condition = self.condition_proj(
-                torch.cat([ts_embed, subtask_embed], dim=-1)
-            )
-
-        _, z = self._encode_graph(node_features, edge_embed, condition)
+            z = z + self.subtask_to_z(subtask_embed)
 
         if self._use_joint_film and joint_states_history is not None:
             B_j = joint_states_history.shape[0]

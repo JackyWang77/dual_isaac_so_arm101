@@ -19,7 +19,7 @@ echo "Playing GraphUnetPolicy - Stack"
 echo "Checkpoint: $CHECKPOINT"
 echo "========================================"
 
-NUM_ENVS="${NUM_ENVS:-10}"
+NUM_ENVS="${NUM_ENVS:-1}"
 NUM_EPISODES="${NUM_EPISODES:-1000}"
 EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-8}"
 
