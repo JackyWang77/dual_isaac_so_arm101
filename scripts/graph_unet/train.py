@@ -74,6 +74,8 @@ class HDF5DemoDataset(Dataset):
         skip_first_steps: int = 10,
         node_configs: list[dict] | None = None,
         use_action_target: bool = False,
+        action_offset: int = 1,
+        apply_gripper_mapping: bool = True,
     ):
         """Initialize dataset.
 
@@ -86,7 +88,9 @@ class HDF5DemoDataset(Dataset):
             pred_horizon: Number of future action steps to predict per timestep (default: 16).
             skip_first_steps: Number of initial steps to skip per demo (default: 10).
                              Human-collected demos often have noisy initial actions.
-            use_action_target: If True, use original actions; if False, replace with joint_pos[t+5].
+            use_action_target: If True, use original actions; if False, replace with joint_pos[t+offset].
+            action_offset: When not use_action_target, use joint_pos[t+offset] (default 1).
+            apply_gripper_mapping: If True, map gripper (indices 5,11) >-0.6→1, <=-0.6→-1.
         """
         self.hdf5_path = hdf5_path
         self.obs_keys = obs_keys
@@ -99,6 +103,8 @@ class HDF5DemoDataset(Dataset):
         self.skip_first_steps = skip_first_steps
         self.node_configs = node_configs
         self.use_action_target = use_action_target
+        self.action_offset = action_offset
+        self.apply_gripper_mapping = apply_gripper_mapping
 
         # Observation key dimensions and offsets
         self.obs_key_dims = {}
@@ -240,19 +246,31 @@ class HDF5DemoDataset(Dataset):
 
                     actions_new = []
                     for i in range(T):
-                        target_idx = i + 5
+                        target_idx = i + self.action_offset
                         if target_idx < T:
                             actions_new.append(joint_pos_seq[target_idx])
                         else:
                             actions_new.append(joint_pos_seq[-1])
                     actions = np.stack(actions_new, axis=0).astype(np.float32)
                     if demo_key == demo_keys[0]:
-                        print(f"[HDF5DemoDataset] ✅ Replaced actions with joint_pos[t+5] for smoother actions")
+                        print(f"[HDF5DemoDataset] ✅ Replaced actions with joint_pos[t+{self.action_offset}]")
                 else:
-                    # Use original actions from HDF5 (no joint_pos[t+5] replacement)
+                    # Use original actions from HDF5 (no joint_pos replacement)
                     actions = actions.astype(np.float32)
                     if demo_key == demo_keys[0]:
                         print(f"[HDF5DemoDataset] ✅ Using original actions (use_action_target=True)")
+
+                # Gripper mapping: indices 5,11 (dual arm) or 5 (single) -> >-0.6→1, <=-0.6→-1
+                if self.apply_gripper_mapping and actions.shape[1] >= 6:
+                    gripper_indices = [5]
+                    if actions.shape[1] >= 12:
+                        gripper_indices = [5, 11]
+                    for gidx in gripper_indices:
+                        actions[:, gidx] = np.where(
+                            actions[:, gidx] > -0.6, 1.0, -1.0
+                        ).astype(np.float32)
+                    if demo_key == demo_keys[0]:
+                        print(f"[HDF5DemoDataset] ✅ Gripper mapping: joint >-0.6→1, <=-0.6→-1 (indices {gripper_indices})")
 
                 # Build action trajectory for each timestep: [T, pred_horizon, action_dim]
                 # ACTION CHUNKING: Each timestep predicts next pred_horizon actions
@@ -834,6 +852,8 @@ def train_graph_unet_policy(
     policy_type: str = "unet",
     use_joint_film: bool = False,
     use_action_target: bool = False,
+    action_offset: int = 1,
+    apply_gripper_mapping: bool = True,
     node_configs: list[dict] | None = None,
     graph_edge_dim: int = 128,
     save_every: int = 200,
@@ -918,6 +938,8 @@ def train_graph_unet_policy(
         skip_first_steps=skip_first_steps,
         node_configs=node_configs,
         use_action_target=use_action_target,
+        action_offset=action_offset,
+        apply_gripper_mapping=apply_gripper_mapping,
     )
 
     # Get normalization stats for saving
@@ -1551,7 +1573,18 @@ def main():
     parser.add_argument(
         "--use_action_target",
         action="store_true",
-        help="Use original actions from HDF5; if not set, replace with joint_pos[t+5] for smoother targets.",
+        help="Use original actions from HDF5; if not set, replace with joint_pos[t+offset].",
+    )
+    parser.add_argument(
+        "--action_offset",
+        type=int,
+        default=1,
+        help="When not use_action_target: use joint_pos[t+offset] as action (default 1 for t+1).",
+    )
+    parser.add_argument(
+        "--no_gripper_mapping",
+        action="store_true",
+        help="Disable gripper mapping (default: >-0.6→1, <=-0.6→-1 for indices 5,11).",
     )
 
     # Dynamic graph: node_configs as JSON string
@@ -1644,6 +1677,8 @@ def main():
         policy_type=args.policy_type,
         use_joint_film=args.use_joint_film,
         use_action_target=args.use_action_target,
+        action_offset=args.action_offset,
+        apply_gripper_mapping=not args.no_gripper_mapping,
         node_configs=getattr(args, "node_configs", None),
         graph_edge_dim=args.graph_edge_dim,
         save_every=args.save_every,

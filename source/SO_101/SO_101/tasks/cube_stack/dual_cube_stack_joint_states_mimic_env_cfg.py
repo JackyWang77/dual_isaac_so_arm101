@@ -68,3 +68,28 @@ class DualCubeStackJointStatesMimicEnvCfg(
             ),
         ]
         self.subtask_configs["dual_arm"] = subtask_configs
+
+
+@configclass
+class DualCubeStackJointStatesMimicEnvCfg_PLAY(DualCubeStackJointStatesMimicEnvCfg):
+    """Play config: 与 Mimic 收集数据环境完全一致，仅 gripper 改为 BinaryJoint（模型输出 1/-1）。
+    Model 输出 gripper 1=open, -1=close，直接喂给 BinaryJoint，无需额外映射。"""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.scene.num_envs = 2
+        self.scene.env_spacing = 2.5
+        # Gripper: BinaryJoint，与 lift_old 一致，action>=0→open(0.4), action<0→close(0.0002)
+        from . import mdp
+        self.actions.right_gripper_action = mdp.BinaryJointPositionActionCfg(
+            asset_name="right_arm",
+            joint_names=["jaw_joint"],
+            open_command_expr={"jaw_joint": 0.4},
+            close_command_expr={"jaw_joint": 0.0002},
+        )
+        self.actions.left_gripper_action = mdp.BinaryJointPositionActionCfg(
+            asset_name="left_arm",
+            joint_names=["jaw_joint"],
+            open_command_expr={"jaw_joint": 0.4},
+            close_command_expr={"jaw_joint": 0.0002},
+        )

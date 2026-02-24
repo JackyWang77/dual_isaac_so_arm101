@@ -10,12 +10,12 @@ if [ "$MODE" != "flow_matching" ]; then
     exit 1
 fi
 
-# Default: no joint film (causal confusion), use original action (not joint_pos[t+5])
-EXTRA_ARGS="--use_action_target"
-SUFFIX="stack_joint"
+# Default: joint_pos[t+1] + gripper映射(>-0.6→1, <=-0.6→-1)
+EXTRA_ARGS="--action_offset 1"
+SUFFIX="stack_joint_t1_gripper"
 if [ "$JOINT_FILM" = "joint" ]; then
-    EXTRA_ARGS="--use_joint_film --use_action_target"
-    SUFFIX="stack_joint_film"
+    EXTRA_ARGS="--use_joint_film --action_offset 1"
+    SUFFIX="stack_joint_film_t1_gripper"
 fi
 
 # Stack task: 4 nodes (2 EE + 2 objects)

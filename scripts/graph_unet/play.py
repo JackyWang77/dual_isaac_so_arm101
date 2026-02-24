@@ -434,13 +434,18 @@ def play_graph_unet_policy(
     if num_subtasks_cfg > 0:
         print(f"[Play] Phase condition: {num_subtasks_cfg} subtasks (pick/stack), signal will be injected")
 
-    # Gripper: model 输出 joint，需线性映射成 action (录制时 env 收到的是 action 格式)
-    # 统一映射 action = a*joint + b，左右手相同 (analyze_action_joint_gripper_mapping.py 拟合)
-    use_gripper_joint_to_action = "Stack" in task_name or "Cube-Stack" in task_name
+    # Gripper: joint_pos[t+5] 训练 → 需线性映射; use_action_target 训练 → 直接用 action
+    # Joint-States-Mimic-Play: BinaryJoint env，model 输出 1/-1 直接喂给 env，无需映射
+    use_action_direct = "Joint-States-Mimic-Play" in task_name
+    use_gripper_joint_to_action = (
+        ("Stack" in task_name or "Cube-Stack" in task_name) and not use_action_direct
+    )
     gripper_a, gripper_b = (1.7150, 0.8579) if use_gripper_joint_to_action else (None, None)
-    gripper_threshold = -0.2 if not use_gripper_joint_to_action else None
-    if gripper_a is not None:
-        print(f"[Play] Gripper: joint->action mapping action={gripper_a:.4f}*joint+{gripper_b:.4f} (左右手统一)")
+    gripper_threshold = -0.2 if not use_gripper_joint_to_action and not use_action_direct else None
+    if use_action_direct:
+        print(f"[Play] Action: 直接用 model 输出 (与数据收集 env 一致)")
+    elif gripper_a is not None:
+        print(f"[Play] Gripper: joint->action mapping action={gripper_a:.4f}*joint+{gripper_b:.4f}")
     else:
         print(f"[Play] Gripper: binary threshold={gripper_threshold}")
 

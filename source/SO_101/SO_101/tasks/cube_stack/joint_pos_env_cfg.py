@@ -46,7 +46,7 @@ class DualSoArm101CubeStackJointPosEnvCfg(CubeStackEnvCfg):
                 rot=(1.0, 0.0, 0.0, 0.0),
                 joint_pos={
                     **SO_ARM101_ROSCON_HIGH_PD_CFG.init_state.joint_pos,
-                    "jaw_joint": 0.698,
+                    "jaw_joint": 0.4,
                 },
             ),
         )
@@ -59,7 +59,7 @@ class DualSoArm101CubeStackJointPosEnvCfg(CubeStackEnvCfg):
                 rot=(1.0, 0.0, 0.0, 0.0),
                 joint_pos={
                     **SO_ARM101_ROSCON_HIGH_PD_CFG.init_state.joint_pos,
-                    "jaw_joint": 0.698,
+                    "jaw_joint": 0.4,
                 },
             ),
         )

@@ -30,7 +30,7 @@ TARGET_XY = (0.117, -0.011)
 TARGET_Z_TABLE = 0.015
 
 # Gripper joint (jaw_joint): 与 joint_pos_env_cfg init_state / joint_env_cfg BinaryJoint 一致
-JAW_OPEN = 0.698
+JAW_OPEN = 0.4  # 与 lift_old 一致
 JAW_CLOSED = 0.0
 
 # Subtask params: analyze_cube_stack_subtask_params.py 统计

@@ -52,7 +52,7 @@ class DualSoArm101CubeStackEnvCfg(CubeStackEnvCfg):
                 rot=(0.7071068, 0.0, 0.0, 0.7071068),
                 joint_pos={
                     **SO_ARM101_ROSCON_HIGH_PD_CFG.init_state.joint_pos,
-                    "jaw_joint": 0.698,
+                    "jaw_joint": 0.4,
                 },
             ),
         )
@@ -63,7 +63,7 @@ class DualSoArm101CubeStackEnvCfg(CubeStackEnvCfg):
                 rot=(0.7071068, 0.0, 0.0, 0.7071068),
                 joint_pos={
                     **SO_ARM101_ROSCON_HIGH_PD_CFG.init_state.joint_pos,
-                    "jaw_joint": 0.698,
+                    "jaw_joint": 0.4,
                 },
             ),
         )
@@ -139,13 +139,13 @@ class DualSoArm101CubeStackEnvCfg(CubeStackEnvCfg):
         self.actions.right_gripper_action = mdp.BinaryJointPositionActionCfg(
             asset_name="right_arm",
             joint_names=["jaw_joint"],
-            open_command_expr={"jaw_joint": 0.698},
+            open_command_expr={"jaw_joint": 0.4},
             close_command_expr={"jaw_joint": 0.0},
         )
         self.actions.left_gripper_action = mdp.BinaryJointPositionActionCfg(
             asset_name="left_arm",
             joint_names=["jaw_joint"],
-            open_command_expr={"jaw_joint": 0.698},
+            open_command_expr={"jaw_joint": 0.4},
             close_command_expr={"jaw_joint": 0.0},
         )
 
