@@ -24,10 +24,11 @@ NUM_EPISODES="${NUM_EPISODES:-1000}"
 EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-8}"
 
 python scripts/graph_unet/play.py \
-    --task SO-ARM101-Dual-Cube-Stack-Play-v0 \
+    --task SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-v0 \
     --checkpoint "$CHECKPOINT" \
     --policy_type graph_unet \
     --num_envs "$NUM_ENVS" \
     --num_episodes "$NUM_EPISODES" \
     --episode_length_s "$EPISODE_LENGTH_S" \
+    --num_diffusion_steps 10 \
     # --headless true

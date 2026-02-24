@@ -57,7 +57,7 @@ class DualCubeStackJointStatesMimicEnvCfg(
             SubTaskConfig(
                 object_ref="cube_1",
                 subtask_term_signal="stack_cube",
-                subtask_term_offset_range=(10, 20),
+                subtask_term_offset_range=(0, 0),  # last subtask: DataGenerator requires (0,0)
                 selection_strategy="nearest_neighbor_object",
                 selection_strategy_kwargs={"nn_k": 3},
                 action_noise=0.0,

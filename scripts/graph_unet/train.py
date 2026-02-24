@@ -73,6 +73,7 @@ class HDF5DemoDataset(Dataset):
         single_batch_size: int = 16,
         skip_first_steps: int = 10,
         node_configs: list[dict] | None = None,
+        use_action_target: bool = False,
     ):
         """Initialize dataset.
 
@@ -85,6 +86,7 @@ class HDF5DemoDataset(Dataset):
             pred_horizon: Number of future action steps to predict per timestep (default: 16).
             skip_first_steps: Number of initial steps to skip per demo (default: 10).
                              Human-collected demos often have noisy initial actions.
+            use_action_target: If True, use original actions; if False, replace with joint_pos[t+5].
         """
         self.hdf5_path = hdf5_path
         self.obs_keys = obs_keys
@@ -96,6 +98,7 @@ class HDF5DemoDataset(Dataset):
         self.single_batch_size = single_batch_size
         self.skip_first_steps = skip_first_steps
         self.node_configs = node_configs
+        self.use_action_target = use_action_target
 
         # Observation key dimensions and offsets
         self.obs_key_dims = {}
@@ -205,10 +208,7 @@ class HDF5DemoDataset(Dataset):
                     obs_seq.append(np.concatenate(obs_vec).astype(np.float32))
                 obs_seq = np.stack(obs_seq, axis=0)  # [T, obs_dim]
 
-                # CRITICAL FIX: Replace actions with joint_pos[t+5] for smoother actions
-                # Teleoperation data has large gaps between action and current joint_pos,
-                # so using joint_pos[t+5] as action produces smoother, more learnable actions
-                # Dual arm: left_joint_pos (6) + right_joint_pos (6) = 12; Single arm: joint_pos (6)
+                # Joint pos indices (needed for joint_states_history_seq and optionally for action replacement)
                 is_dual_arm = "left_joint_pos" in self.obs_key_offsets and "right_joint_pos" in self.obs_key_offsets
                 if is_dual_arm:
                     jp_left_start = self.obs_key_offsets["left_joint_pos"]
@@ -220,38 +220,39 @@ class HDF5DemoDataset(Dataset):
                     jp_start = self.obs_key_offsets.get("joint_pos", 0)
                     jp_dim = self.obs_key_dims.get("joint_pos", 6)
 
-                joint_pos_seq = []
-                for i in range(T):
-                    obs_i = obs_seq[i]
-                    if is_dual_arm:
-                        left_jp = obs_i[jp_left_start : jp_left_start + jp_left_dim]
-                        right_jp = obs_i[jp_right_start : jp_right_start + jp_right_dim]
-                        joint_pos = np.concatenate([
-                            np.pad(left_jp, (0, max(0, jp_left_dim - len(left_jp))))[:jp_left_dim],
-                            np.pad(right_jp, (0, max(0, jp_right_dim - len(right_jp))))[:jp_right_dim],
-                        ]).astype(np.float32)
-                    else:
-                        joint_pos = obs_i[jp_start : jp_start + jp_dim]
-                        joint_pos = np.pad(joint_pos, (0, max(0, jp_dim - len(joint_pos))))[:jp_dim]
-                    joint_pos_seq.append(joint_pos.astype(np.float32))
-                joint_pos_seq = np.stack(joint_pos_seq, axis=0)  # [T, joint_pos_dim]
-                
-                # Replace actions with joint_pos[t+5] (5 timesteps ahead)
-                # For timestep i, action = joint_pos[i+5] (if exists) or last available joint_pos
-                actions_new = []
-                for i in range(T):
-                    target_idx = i + 5
-                    if target_idx < T:
-                        # Use joint_pos 5 steps ahead as action
-                        actions_new.append(joint_pos_seq[target_idx])
-                    else:
-                        # Beyond sequence: use last available joint_pos
-                        actions_new.append(joint_pos_seq[-1])
-                actions = np.stack(actions_new, axis=0).astype(np.float32)  # [T, joint_pos_dim] (6 = 5 arm + 1 gripper)
-                # Keep full 6-dim (5 arm + 1 gripper) for Graph-Unet training; play will map gripper to -1/1 for Isaac Sim only
-                print(f"[HDF5DemoDataset] ✅ Replaced actions with joint_pos[t+5] for smoother actions")
-                print(f"[HDF5DemoDataset]    Original action_dim: {actions_full.shape[1] if len(actions_full.shape) > 1 else 1}")
-                print(f"[HDF5DemoDataset]    Action dim: {actions.shape[1]} (5 arm + 1 gripper)")
+                if not self.use_action_target:
+                    # Replace actions with joint_pos[t+5] for smoother actions (legacy)
+                    joint_pos_seq = []
+                    for i in range(T):
+                        obs_i = obs_seq[i]
+                        if is_dual_arm:
+                            left_jp = obs_i[jp_left_start : jp_left_start + jp_left_dim]
+                            right_jp = obs_i[jp_right_start : jp_right_start + jp_right_dim]
+                            joint_pos = np.concatenate([
+                                np.pad(left_jp, (0, max(0, jp_left_dim - len(left_jp))))[:jp_left_dim],
+                                np.pad(right_jp, (0, max(0, jp_right_dim - len(right_jp))))[:jp_right_dim],
+                            ]).astype(np.float32)
+                        else:
+                            joint_pos = obs_i[jp_start : jp_start + jp_dim]
+                            joint_pos = np.pad(joint_pos, (0, max(0, jp_dim - len(joint_pos))))[:jp_dim]
+                        joint_pos_seq.append(joint_pos.astype(np.float32))
+                    joint_pos_seq = np.stack(joint_pos_seq, axis=0)
+
+                    actions_new = []
+                    for i in range(T):
+                        target_idx = i + 5
+                        if target_idx < T:
+                            actions_new.append(joint_pos_seq[target_idx])
+                        else:
+                            actions_new.append(joint_pos_seq[-1])
+                    actions = np.stack(actions_new, axis=0).astype(np.float32)
+                    if demo_key == demo_keys[0]:
+                        print(f"[HDF5DemoDataset] ✅ Replaced actions with joint_pos[t+5] for smoother actions")
+                else:
+                    # Use original actions from HDF5 (no joint_pos[t+5] replacement)
+                    actions = actions.astype(np.float32)
+                    if demo_key == demo_keys[0]:
+                        print(f"[HDF5DemoDataset] ✅ Using original actions (use_action_target=True)")
 
                 # Build action trajectory for each timestep: [T, pred_horizon, action_dim]
                 # ACTION CHUNKING: Each timestep predicts next pred_horizon actions
@@ -832,6 +833,7 @@ def train_graph_unet_policy(
     num_inference_steps: int = 40,
     policy_type: str = "unet",
     use_joint_film: bool = False,
+    use_action_target: bool = False,
     node_configs: list[dict] | None = None,
     graph_edge_dim: int = 128,
     save_every: int = 200,
@@ -915,6 +917,7 @@ def train_graph_unet_policy(
         single_batch_size=single_batch_size,
         skip_first_steps=skip_first_steps,
         node_configs=node_configs,
+        use_action_target=use_action_target,
     )
 
     # Get normalization stats for saving
@@ -1545,6 +1548,11 @@ def main():
         action="store_true",
         help="Encode joint_states_history and inject into U-Net via FiLM (concat with z).",
     )
+    parser.add_argument(
+        "--use_action_target",
+        action="store_true",
+        help="Use original actions from HDF5; if not set, replace with joint_pos[t+5] for smoother targets.",
+    )
 
     # Dynamic graph: node_configs as JSON string
     parser.add_argument(
@@ -1635,6 +1643,7 @@ def main():
         num_inference_steps=args.num_inference_steps,
         policy_type=args.policy_type,
         use_joint_film=args.use_joint_film,
+        use_action_target=args.use_action_target,
         node_configs=getattr(args, "node_configs", None),
         graph_edge_dim=args.graph_edge_dim,
         save_every=args.save_every,

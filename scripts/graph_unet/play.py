@@ -422,9 +422,28 @@ def play_graph_unet_policy(
         f"[Play] Inference frequency: every {exec_horizon} steps (vs every step without chunking)"
     )
     num_subtasks_cfg = getattr(policy.cfg, "num_subtasks", 0)
+    # Fallback: model has subtask_to_z but cfg.num_subtasks=0 (old checkpoint) → infer from encoder
+    if num_subtasks_cfg == 0 and hasattr(policy, "subtask_encoder"):
+        enc = policy.subtask_encoder
+        first = enc[0] if hasattr(enc, "__getitem__") else getattr(enc, "0", enc)
+        in_feat = getattr(first, "in_features", None)
+        if in_feat is not None and in_feat > 0:
+            num_subtasks_cfg = in_feat
+            policy.cfg.num_subtasks = num_subtasks_cfg  # Patch so loop uses it
+            print(f"[Play] Inferred num_subtasks={num_subtasks_cfg} from model (subtask_encoder)")
     if num_subtasks_cfg > 0:
-        print(f"[Play] Phase condition: {num_subtasks_cfg} subtasks (pick/stack), from env or left gripper")
-    
+        print(f"[Play] Phase condition: {num_subtasks_cfg} subtasks (pick/stack), signal will be injected")
+
+    # Gripper: model 输出 joint，需线性映射成 action (录制时 env 收到的是 action 格式)
+    # 统一映射 action = a*joint + b，左右手相同 (analyze_action_joint_gripper_mapping.py 拟合)
+    use_gripper_joint_to_action = "Stack" in task_name or "Cube-Stack" in task_name
+    gripper_a, gripper_b = (1.7150, 0.8579) if use_gripper_joint_to_action else (None, None)
+    gripper_threshold = -0.2 if not use_gripper_joint_to_action else None
+    if gripper_a is not None:
+        print(f"[Play] Gripper: joint->action mapping action={gripper_a:.4f}*joint+{gripper_b:.4f} (左右手统一)")
+    else:
+        print(f"[Play] Gripper: binary threshold={gripper_threshold}")
+
     obs, info = env.reset()
     episode_count = 0
     episode_rewards = []
@@ -608,14 +627,34 @@ def play_graph_unet_policy(
             if isinstance(obs, dict):
                 # Check if there's a 'policy' key (Isaac Lab wrapper format)
                 if "policy" in obs:
-                    # Direct policy observations (already concatenated)
-                    # But it might still contain target_object_position (39 dims)
-                    # We need to extract only the keys we used during training (32 dims)
+                    # Direct policy observations (concatenated or dict)
+                    # Joint-States-Mimic env has concatenate_terms=False -> obs["policy"] is dict
                     obs_val = obs["policy"]
                     if isinstance(obs_val, torch.Tensor):
                         obs_tensor_raw = obs_val.to(device)
                     elif isinstance(obs_val, np.ndarray):
                         obs_tensor_raw = torch.from_numpy(obs_val).to(device)
+                    elif isinstance(obs_val, dict):
+                        # Joint-States-Mimic: concatenate_terms=False -> policy obs is dict
+                        # Order must match training obs_keys (stack train_graph_unet.sh OBS_KEYS)
+                        _dual_arm_policy_order = [
+                            "left_joint_pos", "left_joint_vel", "right_joint_pos", "right_joint_vel",
+                            "left_ee_position", "left_ee_orientation", "right_ee_position", "right_ee_orientation",
+                            "cube_1_pos", "cube_1_ori", "cube_2_pos", "cube_2_ori", "last_action_all",
+                        ]
+                        keys_order = [k for k in _dual_arm_policy_order if k in obs_val]
+                        parts = []
+                        for key in keys_order:
+                            v = obs_val[key]
+                            if isinstance(v, torch.Tensor):
+                                parts.append(v.flatten(start_dim=1).to(device))
+                            elif isinstance(v, np.ndarray):
+                                parts.append(torch.from_numpy(v).flatten(start_dim=1).to(device))
+                            else:
+                                parts.append(torch.tensor(v).flatten(start_dim=1).to(device))
+                        obs_tensor_raw = torch.cat(parts, dim=1) if parts else None
+                        if obs_tensor_raw is None:
+                            raise RuntimeError("obs['policy'] is dict but no keys matched")
                     else:
                         obs_tensor_raw = torch.tensor(obs_val, device=device)
                     
@@ -837,6 +876,11 @@ def play_graph_unet_policy(
             subtask_condition = None
             phase_source = "none"
             num_subtasks = getattr(policy.cfg, "num_subtasks", 0)
+            # Debug: log obs structure once (step 0) to verify subtask_terms availability
+            if step_count == 0 and isinstance(obs, dict) and num_subtasks > 0:
+                obs_keys_str = ", ".join(str(k) for k in obs.keys())
+                has_st = "subtask_terms" in obs
+                print(f"[Play] obs keys: [{obs_keys_str}] | subtask_terms={'YES' if has_st else 'NO'}")
             if num_subtasks > 0:
                 # 1) 优先从 env 获取 (Mimic env 有 get_subtask_term_signals)
                 try:
@@ -923,6 +967,13 @@ def play_graph_unet_policy(
                     subtask_condition = torch.zeros(num_envs, num_subtasks, device=device)
                     subtask_condition[:, 0] = 1.0
                     phase_source = "default"
+            # Safety: model expects subtask when it has subtask_to_z
+            if num_subtasks > 0 and subtask_condition is None and hasattr(policy, "subtask_to_z"):
+                subtask_condition = torch.zeros(num_envs, num_subtasks, device=device)
+                subtask_condition[:, 0] = 1.0
+                phase_source = "fallback"
+                if step_count < 3:
+                    print(f"[Play] WARNING: subtask_condition was None, using fallback [1,0,...]")
             
             # ==========================================================================
             # RECEDING HORIZON CONTROL: Check if we need to re-plan
@@ -1046,18 +1097,24 @@ def play_graph_unet_policy(
             else:
                 action_for_env = actions.clone()
 
-            # Gripper mapping for Isaac Sim: same logic for both arms: > -0.2 -> 1 (open), else -1 (close)
-            # After reorder, action_for_env = [right_6, left_6], grippers at 5 and 11
-            for g_idx in gripper_indices:
-                action_for_env[:, g_idx] = torch.where(
-                    action_for_env[:, g_idx] > -0.2, 1.0, -1.0
-                )
+            # Gripper: Stack=joint 线性映射成 action; Lift=binary threshold
+            if gripper_a is not None and action_dim == 12:
+                for g_idx in [5, 11]:
+                    joint_val = action_for_env[:, g_idx].float()
+                    action_for_env[:, g_idx] = gripper_a * joint_val + gripper_b
+            elif gripper_threshold is not None:
+                is_stack = "Stack" in task_name or "Cube-Stack" in task_name
+                open_val = float(JAW_OPEN) if is_stack else 1.0
+                close_val = 0.0 if is_stack else -1.0
+                for g_idx in gripper_indices:
+                    action_for_env[:, g_idx] = torch.where(
+                        action_for_env[:, g_idx] > gripper_threshold, open_val, close_val
+                    )
 
             # DEBUG: print gripper + joint info every 50 steps (env 0 only)
             if step_count % 50 == 0 and gripper_indices:
                 g_info = " | ".join(
-                    f"g{i}_raw={actions[0, i].item():+.4f}→{action_for_env[0, i].item():+.1f}"
-                    for i in gripper_indices
+                    f"g{i}={action_for_env[0, i].item():+.4f}" for i in gripper_indices
                 )
                 jp = obs_tensor[0, : min(12, obs_tensor.shape[1])].cpu().numpy()
                 print(f"[DBG step={step_count}] {g_info} | joint_pos={np.array2string(jp, precision=3, separator=',')}")
@@ -1068,7 +1125,7 @@ def play_graph_unet_policy(
                 # Shift action history (use normalized actions, not denormalized!)
                 action_history_buffers[env_id] = torch.cat(
                     [
-                    action_history_buffers[env_id][1:],
+                        action_history_buffers[env_id][1:],
                         actions_normalized[
                             env_id : env_id + 1
                         ],  # [1, action_dim] - Use normalized actions!

@@ -23,7 +23,7 @@ NUM_ENVS="${NUM_ENVS:-50}"
 NUM_EPISODES="${NUM_EPISODES:-1000}"
 
 python scripts/graph_unet/play.py \
-    --task SO-ARM101-Dual-Cube-Stack-Play-v0 \
+    --task SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-v0 \
     --checkpoint "$CHECKPOINT" \
     --num_envs "$NUM_ENVS" \
     --num_episodes "$NUM_EPISODES" \

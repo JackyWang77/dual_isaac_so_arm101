@@ -10,10 +10,11 @@ if [ "$MODE" != "flow_matching" ]; then
     exit 1
 fi
 
-EXTRA_ARGS=""
+# Default: no joint film (causal confusion), use original action (not joint_pos[t+5])
+EXTRA_ARGS="--use_action_target"
 SUFFIX="stack_joint"
 if [ "$JOINT_FILM" = "joint" ]; then
-    EXTRA_ARGS="--use_joint_film"
+    EXTRA_ARGS="--use_joint_film --use_action_target"
     SUFFIX="stack_joint_film"
 fi
 

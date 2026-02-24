@@ -97,8 +97,10 @@ def grasp_intent(
     dist_left = torch.norm(obj_pos - ee_left_pos, dim=1)
     right_is_closer = (dist_right < dist_left).float()
     left_is_closer = (dist_left < dist_right).float()
-    right_gripper_closed = (0.698 - right_arm.data.joint_pos[:, -1]) / 0.698
-    left_gripper_closed = (0.698 - left_arm.data.joint_pos[:, -1]) / 0.698
+    # JAW_OPEN=0.698 (cube_stack_env_cfg); 0 = closed
+    jaw_open = 0.698
+    right_gripper_closed = (jaw_open - right_arm.data.joint_pos[:, -1]) / jaw_open
+    left_gripper_closed = (jaw_open - left_arm.data.joint_pos[:, -1]) / jaw_open
     right_near = (dist_right < proximity_threshold).float()
     left_near = (dist_left < proximity_threshold).float()
     return right_is_closer * right_near * right_gripper_closed + left_is_closer * left_near * left_gripper_closed

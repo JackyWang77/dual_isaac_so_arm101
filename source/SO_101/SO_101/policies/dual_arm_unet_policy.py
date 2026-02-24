@@ -369,7 +369,10 @@ class DualArmUnetPolicy(GraphUnetPolicy):
             subtask_embed = self.subtask_encoder(subtask_condition)
             z = z + self.subtask_to_z(subtask_embed)
 
-        # 2. 各臂 joint encoding
+        # 2. 各臂 joint encoding (Causal confusion: joint_history[t]→action[t+1] 太简单，gripper 学不好)
+        # use_joint_film=False 时 intentionally 不传 joint，只保留 graph z
+        if not getattr(self.cfg, "use_joint_film", False):
+            joint_states_history = None
         left_jh, right_jh = self._split_joint_history(joint_states_history)
         z_dim_half = self.left_joint_encoder[-1].out_features
         left_jenc = self._encode_arm_joint(self.left_joint_encoder, left_jh, B, device, z_dim_half)
@@ -537,7 +540,10 @@ class DualArmUnetPolicyMLP(UnetPolicy):
             subtask_embed = self.subtask_encoder(subtask_condition)
             z = z + self.subtask_to_z(subtask_embed)
 
-        # 2. 各臂 joint encoding
+        # 2. 各臂 joint encoding (Causal confusion: joint_history[t]→action[t+1] 太简单，gripper 学不好)
+        # use_joint_film=False 时 intentionally 不传 joint，只保留 graph/MLP z
+        if not getattr(self.cfg, "use_joint_film", False):
+            joint_states_history = None
         left_jh, right_jh = self._split_joint_history(joint_states_history)
         z_dim_half = self.left_joint_encoder[-1].out_features
         left_jenc = self._encode_arm_joint(self.left_joint_encoder, left_jh, B, device, z_dim_half)

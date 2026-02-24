@@ -163,7 +163,8 @@ class DualSoArm101CubeStackJointPosEnvCfg(CubeStackEnvCfg):
 @configclass
 class DualSoArm101CubeStackJointPosEnvCfg_PLAY(DualSoArm101CubeStackJointPosEnvCfg):
     """Play config for joint position policy: fewer envs, no obs noise, obs=64, action=12.
-    Adds subtask_terms (pick_cube, stack_cube) so play can use same phase signals as Mimic training."""
+    Adds subtask_terms (pick_cube, stack_cube) so play can use same phase signals as Mimic training.
+    Gripper: JointPositionActionCfg (continuous) - accepts raw joint pos from policy, no threshold mapping."""
 
     def __post_init__(self):
         super().__post_init__()
@@ -172,3 +173,16 @@ class DualSoArm101CubeStackJointPosEnvCfg_PLAY(DualSoArm101CubeStackJointPosEnvC
         self.observations.policy.enable_corruption = False
         # 与 Mimic 一致: 添加 subtask_terms，供 get_subtask_term_signals 使用
         self.observations.subtask_terms = CubeStackSubtaskCfg()
+        # Explicit: continuous gripper for Play (parent already has JointPositionActionCfg, ensure no override)
+        self.actions.right_gripper_action = mdp.JointPositionActionCfg(
+            asset_name="right_arm",
+            joint_names=["jaw_joint"],
+            scale=1.0,
+            use_default_offset=False,
+        )
+        self.actions.left_gripper_action = mdp.JointPositionActionCfg(
+            asset_name="left_arm",
+            joint_names=["jaw_joint"],
+            scale=1.0,
+            use_default_offset=False,
+        )
