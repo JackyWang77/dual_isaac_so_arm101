@@ -47,6 +47,12 @@ parser.add_argument(
     choices=["unet", "graph_unet"],
     help="Policy class to use (default: unet)",
 )
+parser.add_argument(
+    "--exec_horizon",
+    type=int,
+    default=None,
+    help="Override exec_horizon: execute N predicted steps before re-planning (default: from checkpoint). Smaller = more frequent re-plan, may be more accurate.",
+)
 
 # Append AppLauncher CLI args (this will add --device automatically)
 AppLauncher.add_app_launcher_args(parser)
@@ -101,6 +107,7 @@ def play_graph_unet_policy(
     num_diffusion_steps: int | None = None,
     episode_length_s: float | None = None,
     policy_type: str = "unet",
+    exec_horizon: int | None = None,
 ):
     """Play trained Graph-Unet policy.
     
@@ -410,8 +417,11 @@ def play_graph_unet_policy(
     pred_horizon = (
         policy.cfg.pred_horizon if hasattr(policy.cfg, "pred_horizon") else 16
     )
-    exec_horizon = policy.cfg.exec_horizon if hasattr(policy.cfg, "exec_horizon") else 8
-    
+    exec_horizon_default = policy.cfg.exec_horizon if hasattr(policy.cfg, "exec_horizon") else 8
+    exec_horizon = exec_horizon if exec_horizon is not None else exec_horizon_default
+    if exec_horizon != exec_horizon_default:
+        print(f"[Play] Override exec_horizon: {exec_horizon_default} -> {exec_horizon}")
+
     # Run episodes
     print(f"\n[Play] Running {num_episodes} episodes...")
     print(f"[Play] Action history length: {action_history_length}")
@@ -1282,6 +1292,7 @@ def main():
         num_diffusion_steps=args_cli.num_diffusion_steps,
         episode_length_s=getattr(args_cli, "episode_length_s", None),
         policy_type=getattr(args_cli, "policy_type", "unet"),
+        exec_horizon=getattr(args_cli, "exec_horizon", None),
     )
 
 

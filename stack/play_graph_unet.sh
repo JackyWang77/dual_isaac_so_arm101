@@ -22,6 +22,7 @@ echo "========================================"
 NUM_ENVS="${NUM_ENVS:-1}"
 NUM_EPISODES="${NUM_EPISODES:-1000}"
 EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-8}"
+EXEC_HORIZON="${EXEC_HORIZON:-5}"  # 每 N 步重新预测，越小越频繁（可测试预测精度）
 
 python scripts/graph_unet/play.py \
     --task SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-Play-v0 \
@@ -31,4 +32,5 @@ python scripts/graph_unet/play.py \
     --num_episodes "$NUM_EPISODES" \
     --episode_length_s "$EPISODE_LENGTH_S" \
     --num_diffusion_steps 10 \
+    --exec_horizon "$EXEC_HORIZON" \
     # --headless true

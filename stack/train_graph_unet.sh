@@ -4,9 +4,14 @@ cd "$(dirname "$0")/.."
 
 MODE="${1:-flow_matching}"
 JOINT_FILM="${2:-}"
+RESUME="${3:-}"  # Optional: path to checkpoint to resume, or use env RESUME_CHECKPOINT
+RESUME_CHECKPOINT="${RESUME:-$RESUME_CHECKPOINT}"
 
 if [ "$MODE" != "flow_matching" ]; then
-    echo "Usage: $0 [flow_matching] [joint]"
+    echo "Usage: $0 [flow_matching] [joint] [resume_checkpoint]"
+    echo "  Example: $0 flow_matching                    # from scratch"
+    echo "  Example: $0 flow_matching '' ./logs/graph_unet_full/stack_joint_t1_gripper/checkpoint_200.pt"
+    echo "  Or:      RESUME_CHECKPOINT=./path/to/ckpt.pt $0 flow_matching"
     exit 1
 fi
 
@@ -26,6 +31,7 @@ echo "========================================"
 echo "Training GraphUnetPolicy - Stack"
 echo "Mode: $MODE | Joint FiLM: ${JOINT_FILM:-off}"
 echo "Save: ./logs/graph_unet_full/$SUFFIX"
+[ -n "$RESUME_CHECKPOINT" ] && echo "Resume: $RESUME_CHECKPOINT"
 echo "========================================"
 
 python scripts/graph_unet/train.py \
@@ -53,4 +59,5 @@ python scripts/graph_unet/train.py \
     --save_dir "./logs/graph_unet_full/$SUFFIX" \
     --log_dir "./logs/graph_unet_full/$SUFFIX" \
     --save_every 200 \
-    $EXTRA_ARGS
+    $EXTRA_ARGS \
+    ${RESUME_CHECKPOINT:+--resume "$RESUME_CHECKPOINT"}
