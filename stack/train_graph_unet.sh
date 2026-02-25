@@ -7,8 +7,7 @@ ARG2="${2:-}"
 ARG3="${3:-}"
 
 # Parse: $0 flow_matching [joint|path] [path]
-# - flow_matching ./path          -> resume from path
-# - flow_matching '' ./path       -> resume from path
+# - flow_matching ./path          -> resume from path (推荐，无需 '')
 # - flow_matching joint ./path    -> joint mode + resume
 if [ "$ARG2" = "joint" ]; then
     JOINT_FILM="joint"
@@ -27,8 +26,8 @@ RESUME_CHECKPOINT="${RESUME:-$RESUME_CHECKPOINT}"
 if [ "$MODE" != "flow_matching" ]; then
     echo "Usage: $0 flow_matching [joint] [resume_checkpoint]"
     echo "  Example: $0 flow_matching                                    # from scratch, 1000 epochs"
-    echo "  Example: $0 flow_matching '' ./logs/.../checkpoint_1000.pt    # resume from 1000"
-    echo "  Example: EPOCHS=2000 $0 flow_matching '' ./logs/.../checkpoint_1000.pt  # 1000->2000"
+    echo "  Example: $0 flow_matching ./logs/.../checkpoint_1000.pt        # resume from 1000"
+    echo "  Example: EPOCHS=2000 $0 flow_matching ./logs/.../checkpoint_1000.pt  # 1000->2000"
     echo "  Env:     EPOCHS=2000 总 epoch 数; RESUME_CHECKPOINT=path 续训路径"
     exit 1
 fi
