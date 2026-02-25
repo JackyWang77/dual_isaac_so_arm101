@@ -463,7 +463,10 @@ def play_graph_unet_policy(
     episode_count = 0
     episode_rewards = []
     episode_success = []
+    episode_pick_success = []  # Stack task: pick success (cube at target)
+    episode_stack_success = []  # Stack task: stack success (two cubes stacked)
     current_episode_rewards = torch.zeros(num_envs, device=device)
+    is_stack_task = "Stack" in task_name or "Cube-Stack" in task_name
     
     # Success rate: 与 train 一致，仅当 Episode_Termination/success 且 非 object_dropping 时计为成功
     def _get_success_flags(info):
@@ -509,6 +512,33 @@ def play_graph_unet_policy(
     OBJ_HEIGHT_IDX = _obs_offsets.get(_obj_pos_key, 12) + 2  # z index
     SUCCESS_HEIGHT = 0.10  # 成功阈值 (m)
     print(f"[Play] Success: timeout=失败, 否则 height>={SUCCESS_HEIGHT}m=成功 (与 play_graph_rl 一致)")
+    if is_stack_task:
+        print(f"[Play] Stack 任务: 将统计 Pick SR (cube 到 target) 和 Stack SR (两 cube 叠放)")
+
+    def _extract_cube_positions_from_obs(obs_data, env_idx: int):
+        """从 obs 提取 env_idx 的 cube_1_pos, cube_2_pos [3]。无则返回 None, None。"""
+        if not isinstance(obs_data, dict):
+            return None, None
+        policy = obs_data.get("policy")
+        if policy is None:
+            return None, None
+        if isinstance(policy, dict):
+            c1 = policy.get("cube_1_pos")
+            c2 = policy.get("cube_2_pos")
+            if c1 is not None and c2 is not None:
+                if isinstance(c1, np.ndarray):
+                    c1 = torch.from_numpy(c1).to(device)
+                    c2 = torch.from_numpy(c2).to(device)
+                if isinstance(c1, torch.Tensor) and c1.dim() == 2 and c1.shape[0] > env_idx:
+                    return c1[env_idx, :3].float(), c2[env_idx, :3].float()
+        # Fallback: policy 为拼接 tensor [num_envs, obs_dim]
+        if isinstance(policy, (torch.Tensor, np.ndarray)):
+            t = torch.from_numpy(policy).to(device) if isinstance(policy, np.ndarray) else policy
+            if t.dim() == 2 and "cube_1_pos" in _obs_offsets and "cube_2_pos" in _obs_offsets:
+                o1 = _obs_offsets["cube_1_pos"]
+                o2 = _obs_offsets["cube_2_pos"]
+                return t[env_idx, o1 : o1 + 3].float(), t[env_idx, o2 : o2 + 3].float()
+        return None, None
 
     # Initialize action, node, and joint history buffers for each environment
     action_history_buffers = [
@@ -551,9 +581,9 @@ def play_graph_unet_policy(
     # ==========================================================================
     # EMA SMOOTHING for action smoothing (joints only, gripper excluded)
     # ==========================================================================
-    ema_alpha = 1.0  # EMA weight: 1=no smoothing (for testing), 0.5=default smoother
+    ema_alpha = 0.5 if ("Stack" in task_name or "Cube-Stack" in task_name) else 1.0
     ema_smoothed_joints = None  # Will be initialized on first action [num_envs, joint_dim]
-    print(f"[Play] EMA smoothing enabled: alpha={ema_alpha} (joints only, gripper excluded)")
+    print(f"[Play] EMA smoothing: alpha={ema_alpha} (joints only, gripper excluded)")
 
     # ==========================================================================
     # RECEDING HORIZON CONTROL (RHC) - Action Buffers
@@ -891,11 +921,6 @@ def play_graph_unet_policy(
             subtask_condition = None
             phase_source = "none"
             num_subtasks = getattr(policy.cfg, "num_subtasks", 0)
-            # Debug: log obs structure once (step 0) to verify subtask_terms availability
-            if step_count == 0 and isinstance(obs, dict) and num_subtasks > 0:
-                obs_keys_str = ", ".join(str(k) for k in obs.keys())
-                has_st = "subtask_terms" in obs
-                print(f"[Play] obs keys: [{obs_keys_str}] | subtask_terms={'YES' if has_st else 'NO'}")
             if num_subtasks > 0:
                 # 1) 优先从 env 获取 (Mimic env 有 get_subtask_term_signals)
                 try:
@@ -1000,21 +1025,6 @@ def play_graph_unet_policy(
             needs_replan = any(
                 len(action_buffers[env_id]) == 0 for env_id in range(num_envs)
             )
-
-            # DEBUG: 打印 phase 触发情况 (每 20 步或首次 re-plan 时)
-            if num_subtasks > 0 and needs_replan and (step_count % 20 == 0 or step_count < 5):
-                n_pick = int((subtask_condition[:, 0] > 0.5).sum().item()) if subtask_condition is not None else 0
-                n_stack = (
-                    int((subtask_condition[:, 1] > 0.5).sum().item())
-                    if subtask_condition is not None and subtask_condition.shape[1] >= 2
-                    else 0
-                )
-                pick_stack_info = ""
-                if phase_source in ("obs_mimic", "obs_subtask_terms") and "cube_1_pos" in _obs_offsets and obs_tensor.shape[0] > 0:
-                    c1 = obs_tensor[0, _obs_offsets["cube_1_pos"] : _obs_offsets["cube_1_pos"] + 3]
-                    c2 = obs_tensor[0, _obs_offsets["cube_2_pos"] : _obs_offsets["cube_2_pos"] + 3]
-                    pick_stack_info = f" | c1_z={c1[2].item():.3f} c2_z={c2[2].item():.3f}"
-                print(f"[Play] step={step_count} phase_src={phase_source} | pick={n_pick}/{num_envs} stack={n_stack}/{num_envs}{pick_stack_info}")
 
             if needs_replan:
                 # Predict action trajectory: Graph-Unet outputs 6-dim (5 arm + 1 gripper); buffer keeps raw (unmapped)
@@ -1126,14 +1136,6 @@ def play_graph_unet_policy(
                         action_for_env[:, g_idx] > gripper_threshold, open_val, close_val
                     )
 
-            # DEBUG: print gripper + joint info every 50 steps (env 0 only)
-            if step_count % 50 == 0 and gripper_indices:
-                g_info = " | ".join(
-                    f"g{i}={action_for_env[0, i].item():+.4f}" for i in gripper_indices
-                )
-                jp = obs_tensor[0, : min(12, obs_tensor.shape[1])].cpu().numpy()
-                print(f"[DBG step={step_count}] {g_info} | joint_pos={np.array2string(jp, precision=3, separator=',')}")
-
             # Update history buffers (shift and add new)
             # IMPORTANT: Store normalized actions in history buffer, as policy expects normalized action_history
             for env_id in range(num_envs):
@@ -1205,7 +1207,8 @@ def play_graph_unet_policy(
                         episode_rewards.append(current_episode_rewards[i].item())
 
                         # 与 play_graph_rl / train 一致：仅用 truncated + 高度（Isaac Lab log 为标量不可用）
-                        obj_h = obs_tensor[i, OBJ_HEIGHT_IDX].item()  # obs_tensor = step 前状态
+                        # obs 为 step 后的新 obs，用 obs 取 cube 位置（step 后终态）
+                        obj_h = obs_tensor[i, OBJ_HEIGHT_IDX].item()  # obs_tensor 为 step 前，高度近似
                         is_truncated = bool(
                             truncated[i].item() if hasattr(truncated[i], "item") else truncated[i]
                         )
@@ -1215,10 +1218,36 @@ def play_graph_unet_policy(
                             is_success = obj_h >= SUCCESS_HEIGHT
 
                         episode_success.append(is_success)
+
+                        # Stack 任务：统计 Pick SR 和 Stack SR（用 step 后的 obs）
+                        pick_ok, stack_ok = None, None
+                        if is_stack_task and "cube_1_pos" in _obs_offsets:
+                            c1, c2 = _extract_cube_positions_from_obs(obs, i)
+                            if c1 is not None and c2 is not None:
+                                target_xy = torch.tensor(
+                                    [PICK_TARGET_XY[0], PICK_TARGET_XY[1]],
+                                    device=device, dtype=c1.dtype
+                                )
+                                at_xy_1 = torch.norm(c1[:2] - target_xy) < PICK_EPS_XY
+                                at_z_1 = torch.abs(c1[2] - PICK_TARGET_Z) < PICK_EPS_Z
+                                at_xy_2 = torch.norm(c2[:2] - target_xy) < PICK_EPS_XY
+                                at_z_2 = torch.abs(c2[2] - PICK_TARGET_Z) < PICK_EPS_Z
+                                pick_ok = (at_xy_1 and at_z_1) or (at_xy_2 and at_z_2)
+                                z_ok_a = torch.abs((c1[2] - c2[2]) - STACK_EXPECTED_HEIGHT) < STACK_EPS_Z
+                                xy_ok_a = torch.norm(c1[:2] - c2[:2]) < STACK_EPS_XY
+                                z_ok_b = torch.abs((c2[2] - c1[2]) - STACK_EXPECTED_HEIGHT) < STACK_EPS_Z
+                                xy_ok_b = torch.norm(c2[:2] - c1[:2]) < STACK_EPS_XY
+                                stack_ok = (z_ok_a and xy_ok_a) or (z_ok_b and xy_ok_b)
+                            episode_pick_success.append(pick_ok if pick_ok is not None else False)
+                            episode_stack_success.append(stack_ok if stack_ok is not None else False)
+
                         episode_count += 1
                         status = "✅" if is_success else "❌"
                         sr = sum(episode_success) / len(episode_success) * 100.0
-                        print(f"[Play] Ep {episode_count:3d} h={obj_h:.3f}m {status} | SR={sr:.1f}%")
+                        extra = ""
+                        if pick_ok is not None and stack_ok is not None:
+                            extra = f" | Pick={'✓' if pick_ok else '✗'} Stack={'✓' if stack_ok else '✗'}"
+                        print(f"[Play] Ep {episode_count:3d} h={obj_h:.3f}m {status} | SR={sr:.1f}%{extra}")
 
                         current_episode_rewards[i] = 0.0
 
@@ -1271,6 +1300,11 @@ def play_graph_unet_policy(
             f"[Play] SR={sr_final:.1f}% (100ep:{sr_100_final:.1f}%) [{n}ep] | "
             f"Rew_mean={mean_reward:.1f} | {sum(episode_success)}/{n} success"
         )
+        if is_stack_task and episode_pick_success and episode_stack_success:
+            pick_sr = sum(episode_pick_success) / len(episode_pick_success) * 100.0
+            stack_sr = sum(episode_stack_success) / len(episode_stack_success) * 100.0
+            print(f"[Play] Pick SR={pick_sr:.1f}% ({sum(episode_pick_success)}/{len(episode_pick_success)})")
+            print(f"[Play] Stack SR={stack_sr:.1f}% ({sum(episode_stack_success)}/{len(episode_stack_success)})")
     
     # Close environment
     env.close()

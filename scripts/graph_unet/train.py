@@ -854,6 +854,7 @@ def train_graph_unet_policy(
     use_action_target: bool = False,
     action_offset: int = 1,
     apply_gripper_mapping: bool = True,
+    use_cross_arm_attn: bool = False,
     node_configs: list[dict] | None = None,
     graph_edge_dim: int = 128,
     save_every: int = 200,
@@ -1084,6 +1085,7 @@ def train_graph_unet_policy(
     if is_dual_arm:
         cfg_kwargs["arm_action_dim"] = action_dim // 2
         cfg_kwargs["cross_arm_heads"] = 4
+        cfg_kwargs["use_cross_arm_attn"] = use_cross_arm_attn
     cfg = GraphDiTPolicyCfg(**cfg_kwargs)
 
     if num_subtasks > 0:
@@ -1586,6 +1588,13 @@ def main():
         action="store_true",
         help="Disable gripper mapping (default: >-0.6→1, <=-0.6→-1 for indices 5,11).",
     )
+    parser.add_argument(
+        "--cross_attention",
+        type=str,
+        default="false",
+        choices=["true", "false"],
+        help="CrossArmAttention at bottleneck: true or false (default: false).",
+    )
 
     # Dynamic graph: node_configs as JSON string
     parser.add_argument(
@@ -1679,6 +1688,7 @@ def main():
         use_action_target=args.use_action_target,
         action_offset=args.action_offset,
         apply_gripper_mapping=not args.no_gripper_mapping,
+        use_cross_arm_attn=(getattr(args, "cross_attention", "false") == "true"),
         node_configs=getattr(args, "node_configs", None),
         graph_edge_dim=args.graph_edge_dim,
         save_every=args.save_every,

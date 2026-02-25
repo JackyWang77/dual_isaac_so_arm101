@@ -25,22 +25,32 @@ RESUME_CHECKPOINT="${RESUME:-$RESUME_CHECKPOINT}"
 
 if [ "$MODE" != "flow_matching" ]; then
     echo "Usage: $0 flow_matching [joint] [resume_checkpoint]"
-    echo "  Example: $0 flow_matching                                    # from scratch, 1000 epochs"
-    echo "  Example: $0 flow_matching ./logs/.../checkpoint_1000.pt        # resume from 1000"
-    echo "  Example: EPOCHS=2000 $0 flow_matching ./logs/.../checkpoint_1000.pt  # 1000->2000"
-    echo "  Env:     EPOCHS=2000 总 epoch 数; RESUME_CHECKPOINT=path 续训路径"
+    echo "  Example: $0 flow_matching                                    # no cross (default)"
+    echo "  Example: CROSS_ATTN=true $0 flow_matching                     # with cross attn"
+    echo "  Example: EPOCHS=2000 $0 flow_matching ./logs/.../checkpoint_1000.pt"
+    echo "  Env:     CROSS_ATTN=true|false  ; EPOCHS=2000 ; RESUME_CHECKPOINT=path"
     exit 1
 fi
 
 # Epochs: 续训时用 EPOCHS=2000 表示训练到 2000 次（从 checkpoint 的 epoch+1 继续）
 EPOCHS="${EPOCHS:-1000}"
 
-# Default: joint_pos[t+1] + gripper映射(>-0.6→1, <=-0.6→-1)
+# CrossArmAttention: --cross_attention true|false（stack 推荐 false，左右臂从 graph EE 独立推断）
+CROSS_ATTN="${CROSS_ATTN:-true}"
+if [ "$CROSS_ATTN" = "true" ] || [ "$CROSS_ATTN" = "1" ]; then
+    CROSS_ATTN_VAL="true"
+    CROSS_SUFFIX="_cross"
+else
+    CROSS_ATTN_VAL="false"
+    CROSS_SUFFIX="_nocross"
+fi
+
+# Default: joint_pos[t+1] + gripper映射
 EXTRA_ARGS="--action_offset 1"
-SUFFIX="stack_joint_t1_gripper"
+SUFFIX="stack_joint_t1_gripper${CROSS_SUFFIX}"
 if [ "$JOINT_FILM" = "joint" ]; then
     EXTRA_ARGS="--use_joint_film --action_offset 1"
-    SUFFIX="stack_joint_film_t1_gripper"
+    SUFFIX="stack_joint_film_t1_gripper${CROSS_SUFFIX}"
 fi
 
 # Stack task: 4 nodes (2 EE + 2 objects)
@@ -49,7 +59,7 @@ OBS_KEYS='["left_joint_pos","left_joint_vel","right_joint_pos","right_joint_vel"
 
 echo "========================================"
 echo "Training GraphUnetPolicy - Stack"
-echo "Mode: $MODE | Joint FiLM: ${JOINT_FILM:-off}"
+echo "Mode: $MODE | Joint FiLM: ${JOINT_FILM:-off} | CrossArmAttn: $CROSS_ATTN"
 echo "Save: ./logs/graph_unet_full/$SUFFIX"
 if [ -n "$RESUME_CHECKPOINT" ]; then
     echo "Resume: $RESUME_CHECKPOINT"
@@ -86,5 +96,6 @@ python scripts/graph_unet/train.py \
     --save_dir "./logs/graph_unet_full/$SUFFIX" \
     --log_dir "./logs/graph_unet_full/$SUFFIX" \
     --save_every 200 \
+    --cross_attention "$CROSS_ATTN_VAL" \
     $EXTRA_ARGS \
     ${RESUME_CHECKPOINT:+--resume "$RESUME_CHECKPOINT"}

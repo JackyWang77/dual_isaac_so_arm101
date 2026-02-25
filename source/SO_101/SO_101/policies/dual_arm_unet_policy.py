@@ -289,8 +289,9 @@ class DualArmUnetPolicy(GraphUnetPolicy):
             n_groups=8,
         )
 
-        # Bottleneck cross-arm attention
-        self.cross_arm_attn = CrossArmAttention(dim=mid_dim, num_heads=cross_heads)
+        # Bottleneck cross-arm attention (可选：stack 任务 pick/stack 顺序，无协同，可关闭)
+        use_cross = getattr(cfg, "use_cross_arm_attn", True)
+        self.cross_arm_attn = CrossArmAttention(dim=mid_dim, num_heads=cross_heads) if use_cross else None
 
         # 删掉父类的单 U-Net（不再使用）
         del self.unet
@@ -392,8 +393,9 @@ class DualArmUnetPolicy(GraphUnetPolicy):
         skips_l, bottleneck_l = self.unet_left.encode(na_left, ts_embed, z_left)
         skips_r, bottleneck_r = self.unet_right.encode(na_right, ts_embed, z_right)
 
-        # 5. CrossArmAttention at bottleneck ← 关键
-        bottleneck_l, bottleneck_r = self.cross_arm_attn(bottleneck_l, bottleneck_r)
+        # 5. CrossArmAttention at bottleneck (可选，use_cross_arm_attn=False 时跳过)
+        if self.cross_arm_attn is not None:
+            bottleneck_l, bottleneck_r = self.cross_arm_attn(bottleneck_l, bottleneck_r)
 
         # 6. Up path
         out_l = self.unet_left.decode(bottleneck_l, skips_l, ts_embed, z_left)   # [B, 6, T]
@@ -480,7 +482,8 @@ class DualArmUnetPolicyMLP(UnetPolicy):
             n_groups=8,
         )
 
-        self.cross_arm_attn = CrossArmAttention(dim=mid_dim, num_heads=cross_heads)
+        use_cross = getattr(cfg, "use_cross_arm_attn", True)
+        self.cross_arm_attn = CrossArmAttention(dim=mid_dim, num_heads=cross_heads) if use_cross else None
 
         del self.unet
         if hasattr(self, "joint_encoder"):
@@ -565,8 +568,9 @@ class DualArmUnetPolicyMLP(UnetPolicy):
         skips_l, bottleneck_l = self.unet_left.encode(na_left, ts_embed, z_left)
         skips_r, bottleneck_r = self.unet_right.encode(na_right, ts_embed, z_right)
 
-        # 6. CrossArmAttention at bottleneck
-        bottleneck_l, bottleneck_r = self.cross_arm_attn(bottleneck_l, bottleneck_r)
+        # 6. CrossArmAttention at bottleneck (可选)
+        if self.cross_arm_attn is not None:
+            bottleneck_l, bottleneck_r = self.cross_arm_attn(bottleneck_l, bottleneck_r)
 
         # 7. Up path
         out_l = self.unet_left.decode(bottleneck_l, skips_l, ts_embed, z_left)   # [B, 6, T]

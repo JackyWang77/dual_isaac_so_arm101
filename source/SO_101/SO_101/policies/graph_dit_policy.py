@@ -674,6 +674,8 @@ class GraphDiTPolicyCfg:
     """Per-arm action dimension (e.g. 6 for left/right). Set when action_dim=12 and using DualArmUnetPolicy."""
     cross_arm_heads: int = 4
     """Number of attention heads for CrossArmAttention at bottleneck."""
+    use_cross_arm_attn: bool = True
+    """Whether to use CrossArmAttention at bottleneck. False: 左右臂独立，仅从 graph EE 推断（stack 任务 pick/stack 顺序执行，无协同）。"""
     
     # Edge-Conditioned Modulation (ECC-style)
     use_edge_modulation: bool = True
