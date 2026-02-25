@@ -3,17 +3,38 @@
 cd "$(dirname "$0")/.."
 
 MODE="${1:-flow_matching}"
-JOINT_FILM="${2:-}"
-RESUME="${3:-}"  # Optional: path to checkpoint to resume, or use env RESUME_CHECKPOINT
+ARG2="${2:-}"
+ARG3="${3:-}"
+
+# Parse: $0 flow_matching [joint|path] [path]
+# - flow_matching ./path          -> resume from path
+# - flow_matching '' ./path       -> resume from path
+# - flow_matching joint ./path    -> joint mode + resume
+if [ "$ARG2" = "joint" ]; then
+    JOINT_FILM="joint"
+    RESUME="$ARG3"
+else
+    JOINT_FILM=""
+    # $2 is path (contains .pt or /) -> use as resume; else use $3
+    if [[ "$ARG2" == *".pt"* ]] || [[ "$ARG2" == *"/"* ]]; then
+        RESUME="$ARG2"
+    else
+        RESUME="$ARG3"
+    fi
+fi
 RESUME_CHECKPOINT="${RESUME:-$RESUME_CHECKPOINT}"
 
 if [ "$MODE" != "flow_matching" ]; then
-    echo "Usage: $0 [flow_matching] [joint] [resume_checkpoint]"
-    echo "  Example: $0 flow_matching                    # from scratch"
-    echo "  Example: $0 flow_matching '' ./logs/graph_unet_full/stack_joint_t1_gripper/checkpoint_200.pt"
-    echo "  Or:      RESUME_CHECKPOINT=./path/to/ckpt.pt $0 flow_matching"
+    echo "Usage: $0 flow_matching [joint] [resume_checkpoint]"
+    echo "  Example: $0 flow_matching                                    # from scratch, 1000 epochs"
+    echo "  Example: $0 flow_matching '' ./logs/.../checkpoint_1000.pt    # resume from 1000"
+    echo "  Example: EPOCHS=2000 $0 flow_matching '' ./logs/.../checkpoint_1000.pt  # 1000->2000"
+    echo "  Env:     EPOCHS=2000 总 epoch 数; RESUME_CHECKPOINT=path 续训路径"
     exit 1
 fi
+
+# Epochs: 续训时用 EPOCHS=2000 表示训练到 2000 次（从 checkpoint 的 epoch+1 继续）
+EPOCHS="${EPOCHS:-1000}"
 
 # Default: joint_pos[t+1] + gripper映射(>-0.6→1, <=-0.6→-1)
 EXTRA_ARGS="--action_offset 1"
@@ -31,7 +52,14 @@ echo "========================================"
 echo "Training GraphUnetPolicy - Stack"
 echo "Mode: $MODE | Joint FiLM: ${JOINT_FILM:-off}"
 echo "Save: ./logs/graph_unet_full/$SUFFIX"
-[ -n "$RESUME_CHECKPOINT" ] && echo "Resume: $RESUME_CHECKPOINT"
+if [ -n "$RESUME_CHECKPOINT" ]; then
+    echo "Resume: $RESUME_CHECKPOINT"
+    if [ ! -f "$RESUME_CHECKPOINT" ]; then
+        echo "ERROR: Checkpoint file not found! Cannot resume."
+        exit 1
+    fi
+fi
+echo "Epochs: $EPOCHS (续训时从 checkpoint 的 epoch+1 继续到 $EPOCHS)"
 echo "========================================"
 
 python scripts/graph_unet/train.py \
@@ -44,7 +72,7 @@ python scripts/graph_unet/train.py \
     --skip_first_steps 0 \
     --mode "$MODE" \
     --lr_schedule constant \
-    --epochs 1000 \
+    --epochs "$EPOCHS" \
     --batch_size 16 \
     --lr 3e-4 \
     --hidden_dim 64 \
