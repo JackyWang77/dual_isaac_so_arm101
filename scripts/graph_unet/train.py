@@ -1088,17 +1088,6 @@ def train_graph_unet_policy(
         cfg_kwargs["arm_action_dim"] = action_dim // 2
         cfg_kwargs["cross_arm_heads"] = 4
         cfg_kwargs["use_cross_arm_attn"] = use_cross_arm_attn
-    cfg = GraphDiTPolicyCfg(**cfg_kwargs)
-
-    if num_subtasks > 0:
-        print(
-            f"[Train] Policy configured with {num_subtasks} subtasks: {dataset.subtask_order}"
-        )
-        print(f"[Train] Subtask conditioning will be used during training.")
-    else:
-        print(
-            f"[Train] No subtask info found, subtask conditioning disabled (num_subtasks=0)"
-        )
 
     # Create policy network (policy_type 优先: unet→MLP, graph_unet→graph, use_raw_only→RawOnly)
     if is_dual_arm and use_raw_only:
@@ -1112,6 +1101,22 @@ def train_graph_unet_policy(
         PolicyClass = GraphUnetPolicy
     else:
         PolicyClass = UnetPolicy
+
+    # use_graph_encoder 供 play 正确区分 MLP vs Graph 加载
+    if is_dual_arm and not use_raw_only:
+        cfg_kwargs["use_graph_encoder"] = PolicyClass is DualArmUnetPolicy
+    cfg = GraphDiTPolicyCfg(**cfg_kwargs)
+
+    if num_subtasks > 0:
+        print(
+            f"[Train] Policy configured with {num_subtasks} subtasks: {dataset.subtask_order}"
+        )
+        print(f"[Train] Subtask conditioning will be used during training.")
+    else:
+        print(
+            f"[Train] No subtask info found, subtask conditioning disabled (num_subtasks=0)"
+        )
+
     print(f"\n[Train] Creating {PolicyClass.__name__} Policy...")
     policy = PolicyClass(cfg).to(device)
 

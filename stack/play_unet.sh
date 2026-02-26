@@ -1,5 +1,5 @@
 #!/bin/bash
-# Play/Test UnetPolicy - Dual Cube Stack task
+# Play/Test UnetPolicy (MLP encoder) - Dual Cube Stack task
 cd "$(dirname "$0")/.."
 
 CHECKPOINT="${1:-}"
@@ -15,16 +15,25 @@ if [ -z "$CHECKPOINT" ] || [ ! -f "$CHECKPOINT" ]; then
 fi
 
 echo "========================================"
-echo "Playing UnetPolicy - Stack"
+echo "Playing UnetPolicy (MLP) - Stack"
 echo "Checkpoint: $CHECKPOINT"
 echo "========================================"
 
-NUM_ENVS="${NUM_ENVS:-50}"
+# 与 play_graph_unet.sh 对齐
+NUM_ENVS="${NUM_ENVS:-1}"
 NUM_EPISODES="${NUM_EPISODES:-1000}"
+EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-15}"
+EXEC_HORIZON="${EXEC_HORIZON:-10}"
+EMA="${EMA:-0.5}"
 
 python scripts/graph_unet/play.py \
-    --task SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-v0 \
+    --task SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-Play-v0 \
     --checkpoint "$CHECKPOINT" \
+    --policy_type unet \
     --num_envs "$NUM_ENVS" \
     --num_episodes "$NUM_EPISODES" \
-    --headless true
+    --episode_length_s "$EPISODE_LENGTH_S" \
+    --num_diffusion_steps 15 \
+    --exec_horizon "$EXEC_HORIZON" \
+    --ema "$EMA" \
+    # --headless true

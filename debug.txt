@@ -1,48 +1,28 @@
-|   8   | action_rate             | -0.0001 |
-|   9   | joint_vel_right         | -0.0001 |
-|   10  | joint_vel_left          | -0.0001 |
-+-------+-------------------------+---------+
+43s] [ext: isaacsim.asset.browser-1.3.23] startup
+[5.479s] [ext: isaacsim.core.throttling-2.2.2] startup
+[5.482s] [ext: omni.kit.ui.actions-1.0.5] startup
+[5.484s] [ext: omni.physx.bundle-107.3.26] startup
+[5.484s] [ext: isaacsim.sensors.camera-1.3.6] startup
+[5.488s] [ext: isaaclab-0.48.4] startup
+[5.620s] [ext: isaaclab_assets-0.2.3] startup
+[5.802s] [ext: isaaclab_tasks-0.11.8] startup
+[6.091s] [ext: omni.kit.menu.common-2.0.1] startup
+[6.092s] [ext: isaaclab_rl-0.4.4] startup
+[6.093s] [ext: isaaclab_mimic-1.0.15] startup
+[6.094s] [ext: isaaclab.python-2.3.0] startup
+[6.095s] Simulation App Starting
+2026-02-26T13:40:13Z [6,316ms] [Warning] [omni.fabric.plugin] Warning: attribute viewportHandle not found for bucket id 9
 
-[INFO] Curriculum Manager:  <CurriculumManager> contains 0 active terms.
-+----------------------+
-| Active Curriculum Terms |
-+-----------+----------+
-|   Index   | Name     |
-+-----------+----------+
-+-----------+----------+
-
-Creating window for environment.
-[INFO]: Completed setting up the environment...
-[Play] Observation space: Dict('policy': Dict('cube_1_ori': Box(-inf, inf, (1, 4), float32), 'cube_1_pos': Box(-inf, inf, (1, 3), float32), 'cube_2_ori': Box(-inf, inf, (1, 4), float32), 'cube_2_pos': Box(-inf, inf, (1, 3), float32), 'last_action_all': Box(-inf, inf, (1, 12), float32), 'left_ee_orientation': Box(-inf, inf, (1, 4), float32), 'left_ee_position': Box(-inf, inf, (1, 3), float32), 'left_joint_pos': Box(-inf, inf, (1, 6), float32), 'left_joint_vel': Box(-inf, inf, (1, 6), float32), 'right_ee_orientation': Box(-inf, inf, (1, 4), float32), 'right_ee_position': Box(-inf, inf, (1, 3), float32), 'right_joint_pos': Box(-inf, inf, (1, 6), float32), 'right_joint_vel': Box(-inf, inf, (1, 6), float32)), 'subtask_terms': Dict('pick_cube': Box(-inf, inf, (1,), float32), 'stack_cube': Box(-inf, inf, (1,), float32)))
-[Play] Action space: Box(-inf, inf, (1, 12), float32)
-[Play] Obs dim: 64, Action dim: 12
-
-[Play] Loading policy from: ./logs/graph_unet_full/stack_joint_flow_matching/1000inject/checkpoint_600.pt
-[Play] Policy type: DualArmUnetPolicy
-[GraphDiTPolicy] Loaded model from: ./logs/graph_unet_full/stack_joint_flow_matching/1000inject/checkpoint_600.pt
-[Play] Using Graph-Unet for all action dimensions (including gripper)
-[Play] Policy mode: FLOW_MATCHING
-[Play] Loaded observation normalization stats
-[Play] Loaded action normalization stats
-[Play] Loaded node feature normalization stats
-[Play] Loaded joint state normalization stats
-[Play] Loaded obs_key_offsets for dynamic extraction
-[Play] Using 4-node graph (node_histories)
-
-[Play] Running 1000 episodes...
-[Play] Action history length: 10
-[Play] ACTION CHUNKING: pred_horizon=20, exec_horizon=10
-[Play] Inference frequency: every 10 steps (vs every step without chunking)
-[Play] Phase condition: 2 subtasks (pick/stack), signal will be injected
-[Play] Gripper: continuous (raw)
-[Play] Success: timeout=失败, 否则 height>=0.1m=成功 (与 play_graph_rl 一致)
-[Play] EMA smoothing enabled: alpha=1.0 (joints only, gripper excluded)
+[6.582s] app ready
+[8.726s] Simulation App Startup Complete
+/home/jacky_wang/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/gymnasium/envs/registration.py:636: UserWarning: WARN: Overriding environment Isaac-Stack-Cube-Franka-IK-Rel-Skillgen-v0 already in registry.
+  logger.warn(f"Overriding environment {new_spec.id} already in registry.")
+/home/jacky_wang/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/gymnasium/envs/registration.py:636: UserWarning: WARN: Overriding environment Isaac-Stack-Cube-Bin-Franka-IK-Rel-Mimic-v0 already in registry.
+  logger.warn(f"Overriding environment {new_spec.id} already in registry.")
 Traceback (most recent call last):
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_unet/play.py", line 1253, in <module>
-    main()
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_unet/play.py", line 1239, in main
-    play_graph_unet_policy(
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_unet/play.py", line 635, in play_graph_unet_policy
-    obs_tensor_raw = torch.tensor(obs_val, device=device)
-                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-RuntimeError: Could not infer dtype of dict
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/isaaclab_mimic/annotate_demos.py", line 665, in <module>
+    successful_task_count = main()
+                            ^^^^^^
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/isaaclab_mimic/annotate_demos.py", line 236, in main
+    raise FileNotFoundError(
+FileNotFoundError: The input dataset file ./datasets/dataset.hdf5 does not exist.

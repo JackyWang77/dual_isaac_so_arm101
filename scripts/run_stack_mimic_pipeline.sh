@@ -44,7 +44,6 @@ python scripts/isaaclab_mimic/annotate_demos.py \
     --device "$DEVICE" \
     --task "$TASK_ANNOTATE" \
     --auto \
-    --headless \
     --input_file "$INPUT_FILE" \
     --output_file "$ANNOTATED_FILE"
 

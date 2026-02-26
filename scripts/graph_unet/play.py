@@ -269,12 +269,13 @@ def play_graph_unet_policy(
         if getattr(cfg, "use_raw_only", False):
             PolicyClass = DualArmUnetPolicyRawOnly  # raw node only, no graph
             print(f"[Play] *** RAW ONLY MODE *** No graph encoder, raw node projection only")
+        elif getattr(cfg, "use_graph_encoder", False) is True:
+            PolicyClass = DualArmUnetPolicy  # graph encoder
         else:
-            node_configs = getattr(cfg, "node_configs", None)
-            if node_configs is not None and len(node_configs) > 2:
-                PolicyClass = DualArmUnetPolicy  # graph encoder
-            else:
-                PolicyClass = DualArmUnetPolicyMLP  # MLP encoder
+            # use_graph_encoder=False 或旧 checkpoint：按 state_dict 推断（graph 含 graph_attention_layers）
+            state_keys = checkpoint.get("policy_state_dict", {}).keys()
+            has_graph = any("graph_attention_layers" in k for k in state_keys)
+            PolicyClass = DualArmUnetPolicy if has_graph else DualArmUnetPolicyMLP
     elif policy_type == "graph_unet":
         PolicyClass = GraphUnetPolicy
     else:
@@ -454,6 +455,7 @@ def play_graph_unet_policy(
             print(f"[Play] Inferred num_subtasks={num_subtasks_cfg} from model (subtask_encoder)")
     if num_subtasks_cfg > 0:
         print(f"[Play] Phase condition: {num_subtasks_cfg} subtasks (pick/stack), signal will be injected")
+        print(f"[Play] Subtask signal 格式: one-hot [pick, stack], [1,0]=pick 阶段 [0,1]=stack 阶段")
 
     # Gripper: joint_pos[t+5] 训练 → 需线性映射; use_action_target 训练 → 直接用 action
     # Joint-States-Mimic-Play: BinaryJoint env，model 输出 1/-1 直接喂给 env，无需映射
@@ -504,7 +506,13 @@ def play_graph_unet_policy(
         if not isinstance(log, dict):
             return None
         success_mask = None
-        for key in ("Episode_Termination/success", "success", "episode_success", "termination_success"):
+        for key in (
+            "Episode_Termination/success",
+            "Episode_Termination/stack_success",
+            "success",
+            "episode_success",
+            "termination_success",
+        ):
             if key in log:
                 success_mask = _to_mask(log[key])
                 if success_mask is not None:
@@ -516,6 +524,12 @@ def play_graph_unet_policy(
             drop_mask = _to_mask(log[drop_key])
             if drop_mask is not None:
                 success_mask = success_mask & (~drop_mask)
+        # Stack: 排除 cube 掉落
+        for dk in ("Episode_Termination/cube_1_dropping", "Episode_Termination/cube_2_dropping"):
+            if dk in log:
+                drop_mask = _to_mask(log[dk])
+                if drop_mask is not None:
+                    success_mask = success_mask & (~drop_mask)
         return success_mask
 
     # 成功率：Stack 用信号（pick_cube/stack_cube），非 Stack 用 info 或 height 回退
@@ -524,8 +538,17 @@ def play_graph_unet_policy(
     SUCCESS_HEIGHT = 0.10  # 非 Stack 任务回退阈值 (m)
     if is_stack_task:
         print(f"[Play] Stack 任务: 按信号统计 Pick SR (cube 到 target) 和 Stack SR (两 cube 叠放)")
+        print(
+            f"[Play] Signal 参数: PICK_TARGET_XY={PICK_TARGET_XY} PICK_TARGET_Z={PICK_TARGET_Z} "
+            f"PICK_EPS_XY={PICK_EPS_XY} PICK_EPS_Z={PICK_EPS_Z}"
+        )
+        print(
+            f"[Play] Signal 参数: STACK_EXPECTED_HEIGHT={STACK_EXPECTED_HEIGHT} "
+            f"STACK_EPS_Z={STACK_EPS_Z} STACK_EPS_XY={STACK_EPS_XY} OBJ_HEIGHT_IDX={OBJ_HEIGHT_IDX}"
+        )
     else:
         print(f"[Play] Success: 优先 info 信号，否则 height>={SUCCESS_HEIGHT}m=成功")
+        print(f"[Play] Signal 参数: OBJ_HEIGHT_IDX={OBJ_HEIGHT_IDX} SUCCESS_HEIGHT={SUCCESS_HEIGHT}m")
 
     def _extract_cube_positions_from_obs(obs_data, env_idx: int):
         """从 obs 提取 env_idx 的 cube_1_pos, cube_2_pos [3]。无则返回 None, None。"""
@@ -1026,6 +1049,11 @@ def play_graph_unet_policy(
                 phase_source = "fallback"
                 if step_count < 3:
                     print(f"[Play] WARNING: subtask_condition was None, using fallback [1,0,...]")
+
+            # 打印 subtask 输入来源和首帧值（便于调试）
+            if num_subtasks > 0 and subtask_condition is not None and step_count < 100 and step_count % 50 == 0:
+                env0 = subtask_condition[0].cpu().tolist()
+                print(f"[Play] Subtask signal step={step_count} source={phase_source} env0={env0}")
             
             # ==========================================================================
             # RECEDING HORIZON CONTROL: Check if we need to re-plan
@@ -1225,6 +1253,7 @@ def play_graph_unet_policy(
                         )
                         pick_ok, stack_ok = None, None
                         if is_stack_task and "cube_1_pos" in _obs_offsets:
+                            # 与 lift 一致：obs_tensor = step 前最后一帧（Isaac Lab done 后 obs 为 reset 态）
                             c1 = obs_tensor[i, _obs_offsets["cube_1_pos"] : _obs_offsets["cube_1_pos"] + 3]
                             c2 = obs_tensor[i, _obs_offsets["cube_2_pos"] : _obs_offsets["cube_2_pos"] + 3]
                             target_xy = torch.tensor(
@@ -1243,16 +1272,27 @@ def play_graph_unet_policy(
                             stack_ok = (z_ok_a and xy_ok_a) or (z_ok_b and xy_ok_b)
                             episode_pick_success.append(pick_ok)
                             episode_stack_success.append(stack_ok)
-                            # Stack 任务：按信号，stack_ok=成功；超时=失败
-                            is_success = False if is_truncated else stack_ok
+                            # 与 lift 一致：成功会立刻结束 → terminated=True, truncated=False
+                            # 超时必失败；非超时：优先 info，否则 terminated=成功（obs 慢一帧时 stack_ok 可能漏判）
+                            if is_truncated:
+                                is_success = False
+                            else:
+                                success_flags = _get_success_flags(info)
+                                if success_flags is not None:
+                                    is_success = bool(success_flags[i].item() if hasattr(success_flags[i], "item") else success_flags[i])
+                                else:
+                                    # info 无 success 键时：terminated=成功结束（信 env，不依赖 obs 慢一帧）
+                                    is_success = stack_ok if stack_ok else True
                         else:
-                            # 非 Stack：优先 info 信号，否则 height 回退
+                            # 非 Stack (Lift)：与 Stack 一致，超时必失败，否则优先 info 再 height
                             success_flags = _get_success_flags(info)
-                            if success_flags is not None:
+                            if is_truncated:
+                                is_success = False
+                            elif success_flags is not None:
                                 is_success = bool(success_flags[i].item() if hasattr(success_flags[i], "item") else success_flags[i])
                             else:
                                 obj_h = obs_tensor[i, OBJ_HEIGHT_IDX].item()
-                                is_success = False if is_truncated else (obj_h >= SUCCESS_HEIGHT)
+                                is_success = obj_h >= SUCCESS_HEIGHT
 
                         episode_success.append(is_success)
                         episode_count += 1
@@ -1287,10 +1327,10 @@ def play_graph_unet_policy(
                         # Reset EMA state for this environment
                         if ema_smoothed_joints is not None:
                             ema_smoothed_joints[i] = 0.0
-                        
-                        if episode_count >= num_episodes:
-                            break
-            
+
+            # 多 env 同时 done 时必须全部处理完再退出，否则未处理的 env 会留下脏 buffer
+            if done.any() and episode_count >= num_episodes:
+                break
             step_count += 1
             
             # Print progress: 与 train 一致，SR + SR(100ep) + 已完成的 episode 数
