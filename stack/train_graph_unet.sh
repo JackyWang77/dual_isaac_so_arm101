@@ -36,7 +36,7 @@ fi
 EPOCHS="${EPOCHS:-1000}"
 
 # CrossArmAttention: --cross_attention true|false（stack 推荐 false，左右臂从 graph EE 独立推断）
-CROSS_ATTN="${CROSS_ATTN:-true}"
+CROSS_ATTN="${CROSS_ATTN:-false}"
 if [ "$CROSS_ATTN" = "true" ] || [ "$CROSS_ATTN" = "1" ]; then
     CROSS_ATTN_VAL="true"
     CROSS_SUFFIX="_cross"

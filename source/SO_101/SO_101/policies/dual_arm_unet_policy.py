@@ -251,10 +251,15 @@ class DualArmUnetPolicy(GraphUnetPolicy):
         z_dim = getattr(cfg, "z_dim", 64)
         cross_heads = getattr(cfg, "cross_arm_heads", 4)
 
-        # 每臂单独的 joint encoder（只编码自己那侧的 joint history）
+        # 每臂单独的 joint encoder（use_joint_film=True 时用）
         jd_per_arm = arm_dim  # 每臂 joint_dim = arm_action_dim (6: 5 arm + 1 gripper)
         hist_len = cfg.action_history_length
         arm_joint_z_dim = z_dim // 2  # 给每臂留一半 z 空间
+
+        # raw_node: 最后一帧 node 信息投影到 arm_joint_z_dim（use_joint_film=False 时用）
+        num_nodes = len(cfg.node_configs) if getattr(cfg, "node_configs", None) else getattr(cfg, "num_nodes", 2)
+        raw_node_dim = num_nodes * getattr(cfg, "node_dim", 7)  # N * 7
+        self.raw_node_proj = nn.Linear(raw_node_dim, arm_joint_z_dim)
 
         self.left_joint_encoder = nn.Sequential(
             nn.Linear(jd_per_arm * hist_len, cfg.hidden_dim),
@@ -267,7 +272,7 @@ class DualArmUnetPolicy(GraphUnetPolicy):
             nn.Linear(cfg.hidden_dim, arm_joint_z_dim),
         )
 
-        # 每臂的 UNet（输入 dim = arm_dim，条件 dim = z_dim + arm_joint_z_dim）
+        # 每臂的 UNet：cond_dim = z + arm_joint_z_dim（两分支统一，投影后语义对齐）
         arm_cond_dim = z_dim + arm_joint_z_dim
         down_dims = (128, 256, 512)
         mid_dim = down_dims[-1]
@@ -370,17 +375,20 @@ class DualArmUnetPolicy(GraphUnetPolicy):
             subtask_embed = self.subtask_encoder(subtask_condition)
             z = z + self.subtask_to_z(subtask_embed)
 
-        # 2. 各臂 joint encoding (Causal confusion: joint_history[t]→action[t+1] 太简单，gripper 学不好)
-        # use_joint_film=False 时 intentionally 不传 joint，只保留 graph z
-        if not getattr(self.cfg, "use_joint_film", False):
-            joint_states_history = None
-        left_jh, right_jh = self._split_joint_history(joint_states_history)
-        z_dim_half = self.left_joint_encoder[-1].out_features
-        left_jenc = self._encode_arm_joint(self.left_joint_encoder, left_jh, B, device, z_dim_half)
-        right_jenc = self._encode_arm_joint(self.right_joint_encoder, right_jh, B, device, z_dim_half)
+        # 2. 各臂 FiLM 条件：use_joint_film=True 用 joint_enc，False 用 raw_node 投影
+        use_joint_film = getattr(self.cfg, "use_joint_film", False)
+        arm_joint_z_dim = self.left_joint_encoder[-1].out_features
 
-        z_left = torch.cat([z, left_jenc], dim=-1)   # [B, z_dim + z_dim_half]
-        z_right = torch.cat([z, right_jenc], dim=-1)  # [B, z_dim + z_dim_half]
+        if use_joint_film:
+            left_jh, right_jh = self._split_joint_history(joint_states_history)
+            left_jenc = self._encode_arm_joint(self.left_joint_encoder, left_jh, B, device, arm_joint_z_dim)
+            right_jenc = self._encode_arm_joint(self.right_joint_encoder, right_jh, B, device, arm_joint_z_dim)
+            z_left = torch.cat([z, left_jenc], dim=-1)
+            z_right = torch.cat([z, right_jenc], dim=-1)
+        else:
+            raw_latest = nh[:, :, -1, :].reshape(B, -1)  # [B, N*7]
+            raw_proj = self.raw_node_proj(raw_latest)    # [B, arm_joint_z_dim]
+            z_left = z_right = torch.cat([z, raw_proj], dim=-1)
 
         # 3. 拆分 noisy_action
         if noisy_action.dim() == 2:
@@ -449,6 +457,11 @@ class DualArmUnetPolicyMLP(UnetPolicy):
         jd_per_arm = arm_dim
         hist_len = cfg.action_history_length
         arm_joint_z_dim = z_dim // 2
+
+        # raw_node: 最后一帧 node 信息投影到 arm_joint_z_dim（use_joint_film=False 时用）
+        num_nodes = len(cfg.node_configs) if getattr(cfg, "node_configs", None) else getattr(cfg, "num_nodes", 2)
+        raw_node_dim = num_nodes * getattr(cfg, "node_dim", 7)
+        self.raw_node_proj = nn.Linear(raw_node_dim, arm_joint_z_dim)
 
         self.left_joint_encoder = nn.Sequential(
             nn.Linear(jd_per_arm * hist_len, cfg.hidden_dim),
@@ -543,17 +556,20 @@ class DualArmUnetPolicyMLP(UnetPolicy):
             subtask_embed = self.subtask_encoder(subtask_condition)
             z = z + self.subtask_to_z(subtask_embed)
 
-        # 2. 各臂 joint encoding (Causal confusion: joint_history[t]→action[t+1] 太简单，gripper 学不好)
-        # use_joint_film=False 时 intentionally 不传 joint，只保留 graph/MLP z
-        if not getattr(self.cfg, "use_joint_film", False):
-            joint_states_history = None
-        left_jh, right_jh = self._split_joint_history(joint_states_history)
-        z_dim_half = self.left_joint_encoder[-1].out_features
-        left_jenc = self._encode_arm_joint(self.left_joint_encoder, left_jh, B, device, z_dim_half)
-        right_jenc = self._encode_arm_joint(self.right_joint_encoder, right_jh, B, device, z_dim_half)
+        # 2. 各臂 FiLM 条件：use_joint_film=True 用 joint_enc，False 用 raw_node 投影
+        use_joint_film = getattr(self.cfg, "use_joint_film", False)
+        arm_joint_z_dim = self.left_joint_encoder[-1].out_features
 
-        z_left = torch.cat([z, left_jenc], dim=-1)
-        z_right = torch.cat([z, right_jenc], dim=-1)
+        if use_joint_film:
+            left_jh, right_jh = self._split_joint_history(joint_states_history)
+            left_jenc = self._encode_arm_joint(self.left_joint_encoder, left_jh, B, device, arm_joint_z_dim)
+            right_jenc = self._encode_arm_joint(self.right_joint_encoder, right_jh, B, device, arm_joint_z_dim)
+            z_left = torch.cat([z, left_jenc], dim=-1)
+            z_right = torch.cat([z, right_jenc], dim=-1)
+        else:
+            raw_latest = nh[:, :, -1, :].reshape(B, -1)
+            raw_proj = self.raw_node_proj(raw_latest)
+            z_left = z_right = torch.cat([z, raw_proj], dim=-1)
 
         # 3. 拆分 noisy_action
         if noisy_action.dim() == 2:

@@ -53,6 +53,12 @@ parser.add_argument(
     default=None,
     help="Override exec_horizon: execute N predicted steps before re-planning (default: from checkpoint). Smaller = more frequent re-plan, may be more accurate.",
 )
+parser.add_argument(
+    "--ema",
+    type=float,
+    default=1.0,
+    help="EMA alpha for joint smoothing (1.0=no smoothing, 0.5=smoothing). Default 1.0.",
+)
 
 # Append AppLauncher CLI args (this will add --device automatically)
 AppLauncher.add_app_launcher_args(parser)
@@ -108,6 +114,7 @@ def play_graph_unet_policy(
     episode_length_s: float | None = None,
     policy_type: str = "unet",
     exec_horizon: int | None = None,
+    ema_alpha: float = 1.0,
 ):
     """Play trained Graph-Unet policy.
     
@@ -581,7 +588,7 @@ def play_graph_unet_policy(
     # ==========================================================================
     # EMA SMOOTHING for action smoothing (joints only, gripper excluded)
     # ==========================================================================
-    ema_alpha = 0.5 if ("Stack" in task_name or "Cube-Stack" in task_name) else 1.0
+    # ema_alpha: 1.0=无平滑，直接用 model 输出；0.5=有平滑
     ema_smoothed_joints = None  # Will be initialized on first action [num_envs, joint_dim]
     print(f"[Play] EMA smoothing: alpha={ema_alpha} (joints only, gripper excluded)")
 
@@ -1327,6 +1334,7 @@ def main():
         episode_length_s=getattr(args_cli, "episode_length_s", None),
         policy_type=getattr(args_cli, "policy_type", "unet"),
         exec_horizon=getattr(args_cli, "exec_horizon", None),
+        ema_alpha=getattr(args_cli, "ema", 1.0),
     )
 
 
