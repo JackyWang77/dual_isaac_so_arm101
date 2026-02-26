@@ -676,6 +676,8 @@ class GraphDiTPolicyCfg:
     """Number of attention heads for CrossArmAttention at bottleneck."""
     use_cross_arm_attn: bool = True
     """Whether to use CrossArmAttention at bottleneck. False: 左右臂独立，仅从 graph EE 推断（stack 任务 pick/stack 顺序执行，无协同）。"""
+    use_raw_only: bool = False
+    """When True, use DualArmUnetPolicyRawOnly: no graph encoder, only raw node projection into UNet."""
     
     # Edge-Conditioned Modulation (ECC-style)
     use_edge_modulation: bool = True

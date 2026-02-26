@@ -92,7 +92,7 @@ from SO_101.tasks.cube_stack.cube_stack_env_cfg import (
     STACK_EPS_XY,
 )
 from SO_101.policies.graph_unet_policy import UnetPolicy, GraphUnetPolicy
-from SO_101.policies.dual_arm_unet_policy import DualArmUnetPolicy, DualArmUnetPolicyMLP
+from SO_101.policies.dual_arm_unet_policy import DualArmUnetPolicy, DualArmUnetPolicyMLP, DualArmUnetPolicyRawOnly
 
 # Try to import visualization utilities (if available)
 try:
@@ -264,13 +264,17 @@ def play_graph_unet_policy(
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     cfg = checkpoint.get("cfg", None)
 
-    # Policy class from checkpoint cfg: arm_action_dim set → dual-arm (graph or MLP)
+    # Policy class from checkpoint cfg: arm_action_dim set → dual-arm (graph, MLP, or RawOnly)
     if cfg is not None and getattr(cfg, "arm_action_dim", None) is not None:
-        node_configs = getattr(cfg, "node_configs", None)
-        if node_configs is not None and len(node_configs) > 2:
-            PolicyClass = DualArmUnetPolicy  # graph encoder
+        if getattr(cfg, "use_raw_only", False):
+            PolicyClass = DualArmUnetPolicyRawOnly  # raw node only, no graph
+            print(f"[Play] *** RAW ONLY MODE *** No graph encoder, raw node projection only")
         else:
-            PolicyClass = DualArmUnetPolicyMLP  # MLP encoder
+            node_configs = getattr(cfg, "node_configs", None)
+            if node_configs is not None and len(node_configs) > 2:
+                PolicyClass = DualArmUnetPolicy  # graph encoder
+            else:
+                PolicyClass = DualArmUnetPolicyMLP  # MLP encoder
     elif policy_type == "graph_unet":
         PolicyClass = GraphUnetPolicy
     else:
@@ -514,13 +518,14 @@ def play_graph_unet_policy(
                 success_mask = success_mask & (~drop_mask)
         return success_mask
 
-    # 成功率：与 play_graph_rl / train 一致，仅用 truncated + 高度
+    # 成功率：Stack 用信号（pick_cube/stack_cube），非 Stack 用 info 或 height 回退
     _obj_pos_key = "cube_1_pos" if "cube_1_pos" in _obs_offsets else "object_position"
     OBJ_HEIGHT_IDX = _obs_offsets.get(_obj_pos_key, 12) + 2  # z index
-    SUCCESS_HEIGHT = 0.10  # 成功阈值 (m)
-    print(f"[Play] Success: timeout=失败, 否则 height>={SUCCESS_HEIGHT}m=成功 (与 play_graph_rl 一致)")
+    SUCCESS_HEIGHT = 0.10  # 非 Stack 任务回退阈值 (m)
     if is_stack_task:
-        print(f"[Play] Stack 任务: 将统计 Pick SR (cube 到 target) 和 Stack SR (两 cube 叠放)")
+        print(f"[Play] Stack 任务: 按信号统计 Pick SR (cube 到 target) 和 Stack SR (两 cube 叠放)")
+    else:
+        print(f"[Play] Success: 优先 info 信号，否则 height>={SUCCESS_HEIGHT}m=成功")
 
     def _extract_cube_positions_from_obs(obs_data, env_idx: int):
         """从 obs 提取 env_idx 的 cube_1_pos, cube_2_pos [3]。无则返回 None, None。"""
@@ -1213,48 +1218,51 @@ def play_graph_unet_policy(
                     if done[i]:
                         episode_rewards.append(current_episode_rewards[i].item())
 
-                        # 与 play_graph_rl / train 一致：仅用 truncated + 高度（Isaac Lab log 为标量不可用）
-                        # obs 为 step 后的新 obs，用 obs 取 cube 位置（step 后终态）
-                        obj_h = obs_tensor[i, OBJ_HEIGHT_IDX].item()  # obs_tensor 为 step 前，高度近似
+                        # 成功率：优先用 env 信号，Stack 用 step 前 obs_tensor（终端态）计算 pick/stack
+                        # obs_tensor 为 step 前，即终止前最后一帧；step 后 obs 可能是 reset 后的
                         is_truncated = bool(
                             truncated[i].item() if hasattr(truncated[i], "item") else truncated[i]
                         )
-                        if is_truncated:
-                            is_success = False
-                        else:
-                            is_success = obj_h >= SUCCESS_HEIGHT
-
-                        episode_success.append(is_success)
-
-                        # Stack 任务：统计 Pick SR 和 Stack SR（用 step 后的 obs）
                         pick_ok, stack_ok = None, None
                         if is_stack_task and "cube_1_pos" in _obs_offsets:
-                            c1, c2 = _extract_cube_positions_from_obs(obs, i)
-                            if c1 is not None and c2 is not None:
-                                target_xy = torch.tensor(
-                                    [PICK_TARGET_XY[0], PICK_TARGET_XY[1]],
-                                    device=device, dtype=c1.dtype
-                                )
-                                at_xy_1 = torch.norm(c1[:2] - target_xy) < PICK_EPS_XY
-                                at_z_1 = torch.abs(c1[2] - PICK_TARGET_Z) < PICK_EPS_Z
-                                at_xy_2 = torch.norm(c2[:2] - target_xy) < PICK_EPS_XY
-                                at_z_2 = torch.abs(c2[2] - PICK_TARGET_Z) < PICK_EPS_Z
-                                pick_ok = (at_xy_1 and at_z_1) or (at_xy_2 and at_z_2)
-                                z_ok_a = torch.abs((c1[2] - c2[2]) - STACK_EXPECTED_HEIGHT) < STACK_EPS_Z
-                                xy_ok_a = torch.norm(c1[:2] - c2[:2]) < STACK_EPS_XY
-                                z_ok_b = torch.abs((c2[2] - c1[2]) - STACK_EXPECTED_HEIGHT) < STACK_EPS_Z
-                                xy_ok_b = torch.norm(c2[:2] - c1[:2]) < STACK_EPS_XY
-                                stack_ok = (z_ok_a and xy_ok_a) or (z_ok_b and xy_ok_b)
-                            episode_pick_success.append(pick_ok if pick_ok is not None else False)
-                            episode_stack_success.append(stack_ok if stack_ok is not None else False)
+                            c1 = obs_tensor[i, _obs_offsets["cube_1_pos"] : _obs_offsets["cube_1_pos"] + 3]
+                            c2 = obs_tensor[i, _obs_offsets["cube_2_pos"] : _obs_offsets["cube_2_pos"] + 3]
+                            target_xy = torch.tensor(
+                                [PICK_TARGET_XY[0], PICK_TARGET_XY[1]],
+                                device=device, dtype=c1.dtype
+                            )
+                            at_xy_1 = torch.norm(c1[:2] - target_xy) < PICK_EPS_XY
+                            at_z_1 = torch.abs(c1[2] - PICK_TARGET_Z) < PICK_EPS_Z
+                            at_xy_2 = torch.norm(c2[:2] - target_xy) < PICK_EPS_XY
+                            at_z_2 = torch.abs(c2[2] - PICK_TARGET_Z) < PICK_EPS_Z
+                            pick_ok = (at_xy_1 and at_z_1) or (at_xy_2 and at_z_2)
+                            z_ok_a = torch.abs((c1[2] - c2[2]) - STACK_EXPECTED_HEIGHT) < STACK_EPS_Z
+                            xy_ok_a = torch.norm(c1[:2] - c2[:2]) < STACK_EPS_XY
+                            z_ok_b = torch.abs((c2[2] - c1[2]) - STACK_EXPECTED_HEIGHT) < STACK_EPS_Z
+                            xy_ok_b = torch.norm(c2[:2] - c1[:2]) < STACK_EPS_XY
+                            stack_ok = (z_ok_a and xy_ok_a) or (z_ok_b and xy_ok_b)
+                            episode_pick_success.append(pick_ok)
+                            episode_stack_success.append(stack_ok)
+                            # Stack 任务：按信号，stack_ok=成功；超时=失败
+                            is_success = False if is_truncated else stack_ok
+                        else:
+                            # 非 Stack：优先 info 信号，否则 height 回退
+                            success_flags = _get_success_flags(info)
+                            if success_flags is not None:
+                                is_success = bool(success_flags[i].item() if hasattr(success_flags[i], "item") else success_flags[i])
+                            else:
+                                obj_h = obs_tensor[i, OBJ_HEIGHT_IDX].item()
+                                is_success = False if is_truncated else (obj_h >= SUCCESS_HEIGHT)
 
+                        episode_success.append(is_success)
                         episode_count += 1
                         status = "✅" if is_success else "❌"
                         sr = sum(episode_success) / len(episode_success) * 100.0
                         extra = ""
                         if pick_ok is not None and stack_ok is not None:
                             extra = f" | Pick={'✓' if pick_ok else '✗'} Stack={'✓' if stack_ok else '✗'}"
-                        print(f"[Play] Ep {episode_count:3d} h={obj_h:.3f}m {status} | SR={sr:.1f}%{extra}")
+                        obj_h_str = f"h={obs_tensor[i, OBJ_HEIGHT_IDX].item():.3f}m " if is_stack_task else ""
+                        print(f"[Play] Ep {episode_count:3d} {obj_h_str}{status} | SR={sr:.1f}%{extra}")
 
                         current_episode_rewards[i] = 0.0
 

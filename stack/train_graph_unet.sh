@@ -95,7 +95,8 @@ python scripts/graph_unet/train.py \
     --node_configs "$NODE_CONFIGS" \
     --save_dir "./logs/graph_unet_full/$SUFFIX" \
     --log_dir "./logs/graph_unet_full/$SUFFIX" \
+    --use_raw_only \
     --save_every 200 \
     --cross_attention "$CROSS_ATTN_VAL" \
     $EXTRA_ARGS \
-    ${RESUME_CHECKPOINT:+--resume "$RESUME_CHECKPOINT"}
+    ${RESUME_CHECKPOINT:+--resume "$RESUME_CHECKPOINT"} 

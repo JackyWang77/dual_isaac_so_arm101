@@ -600,3 +600,342 @@ class DualArmUnetPolicyMLP(UnetPolicy):
         if return_dict:
             return {"noise_pred": noise_pred}
         return noise_pred
+
+
+# ==============================================================================
+# 5. DualArmUnetPolicyRawOnly — 无 graph，仅 raw node 投影注入 UNet
+# ==============================================================================
+
+class DualArmUnetPolicyRawOnly(nn.Module):
+    """
+    双臂 Flow Matching，无 graph encoder，仅 raw node（最后一帧）投影注入 UNet。
+
+        Raw Node [B, N*7] → Linear → cond [B, cond_dim]
+                ↓
+        ┌────────────────────────┐
+        │  UNet_left  (6-dim)     │ ←── cond
+        │  UNet_right (6-dim)     │ ←── cond
+        │       ↕ CrossArmAttn   │  ← 可选
+        └────────────────────────┘
+                ↓
+        concat [left, right] → [B, pred_horizon, 12]
+
+    与 DualArmUnetPolicy 区别：无 graph attention，无 z，cond 仅来自 raw node 投影。
+    """
+
+    def __init__(self, cfg: GraphDiTPolicyCfg):
+        super().__init__()
+        self.cfg = cfg
+
+        arm_dim = getattr(cfg, "arm_action_dim", cfg.action_dim // 2)
+        assert cfg.action_dim == arm_dim * 2
+        self.arm_dim = arm_dim
+
+        cond_dim = getattr(cfg, "z_dim", 64)
+        cross_heads = getattr(cfg, "cross_arm_heads", 4)
+
+        num_nodes = len(cfg.node_configs) if getattr(cfg, "node_configs", None) else getattr(cfg, "num_nodes", 2)
+        raw_node_dim = num_nodes * getattr(cfg, "node_dim", 7)
+        self.raw_node_proj = nn.Linear(raw_node_dim, cond_dim)
+
+        down_dims = (128, 256, 512)
+        mid_dim = down_dims[-1]
+
+        self.unet_left = SplitConditionalUnet1D(
+            input_dim=arm_dim,
+            global_cond_dim=cond_dim,
+            diffusion_step_embed_dim=cfg.hidden_dim,
+            down_dims=down_dims,
+            kernel_size=5,
+            n_groups=8,
+        )
+        self.unet_right = SplitConditionalUnet1D(
+            input_dim=arm_dim,
+            global_cond_dim=cond_dim,
+            diffusion_step_embed_dim=cfg.hidden_dim,
+            down_dims=down_dims,
+            kernel_size=5,
+            n_groups=8,
+        )
+
+        use_cross = getattr(cfg, "use_cross_arm_attn", True)
+        self.cross_arm_attn = CrossArmAttention(dim=mid_dim, num_heads=cross_heads) if use_cross else None
+
+        self.pred_horizon = cfg.pred_horizon
+        self.action_history_length = cfg.action_history_length
+        self.exec_horizon = getattr(cfg, "exec_horizon", 8)
+
+        # Timestep embedding
+        self.timestep_embedding = nn.Sequential(
+            nn.Linear(cfg.hidden_dim, cfg.hidden_dim * 4),
+            nn.SiLU(),
+            nn.Linear(cfg.hidden_dim * 4, cfg.hidden_dim),
+        )
+        import math
+        num_steps = getattr(cfg, "diffusion_steps", 100)
+        half_dim = cfg.hidden_dim // 2
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, dtype=torch.float32) * -emb)
+        emb = torch.arange(num_steps, dtype=torch.float32).unsqueeze(1) * emb.unsqueeze(0)
+        emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
+        if cfg.hidden_dim % 2 == 1:
+            emb = torch.cat([emb, torch.zeros(num_steps, 1)], dim=1)
+        self.register_buffer("timestep_pos_embed", emb)
+
+        # Subtask
+        num_subtasks = getattr(cfg, "num_subtasks", 0)
+        if num_subtasks > 0:
+            self.subtask_encoder = nn.Sequential(
+                nn.Linear(num_subtasks, cfg.hidden_dim // 4),
+                nn.LayerNorm(cfg.hidden_dim // 4),
+                nn.GELU(),
+            )
+            self.subtask_to_cond = nn.Linear(cfg.hidden_dim // 4, cond_dim)
+        else:
+            self.subtask_encoder = None
+            self.subtask_to_cond = None
+
+    def _build_node_histories(
+        self,
+        obs: torch.Tensor,
+        ee_node_history: torch.Tensor | None = None,
+        object_node_history: torch.Tensor | None = None,
+        node_histories: torch.Tensor | None = None,
+        node_types: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return (node_histories [B, N, H, 7], node_types [N])."""
+        if node_histories is not None:
+            N = node_histories.shape[1]
+            if node_types is None:
+                node_types = torch.zeros(N, dtype=torch.long, device=node_histories.device)
+            return node_histories, node_types
+
+        if ee_node_history is not None and object_node_history is not None:
+            nh = torch.stack([ee_node_history, object_node_history], dim=1)
+            nt = torch.tensor([0, 1], dtype=torch.long, device=nh.device)
+            return nh, nt
+
+        nh = self._extract_node_histories_from_obs(obs)
+        N = nh.shape[1]
+        nt = torch.zeros(N, dtype=torch.long, device=nh.device)
+        return nh, nt
+
+    def _extract_node_histories_from_obs(self, obs: torch.Tensor) -> torch.Tensor:
+        """Extract [B, N, 1, 7] from obs using node_configs + obs_structure."""
+        node_configs = getattr(self.cfg, "node_configs", None)
+        obs_struct = getattr(self.cfg, "obs_structure", None)
+        if node_configs is None or obs_struct is None:
+            if obs_struct:
+                ee_pos = obs[:, obs_struct["ee_position"][0] : obs_struct["ee_position"][1]]
+                ee_ori = obs[:, obs_struct["ee_orientation"][0] : obs_struct["ee_orientation"][1]]
+                obj_pos = obs[:, obs_struct["object_position"][0] : obs_struct["object_position"][1]]
+                obj_ori = obs[:, obs_struct["object_orientation"][0] : obs_struct["object_orientation"][1]]
+            else:
+                ee_pos, ee_ori = obs[:, 19:22], obs[:, 22:26]
+                obj_pos, obj_ori = obs[:, 12:15], obs[:, 15:19]
+            ee_node = torch.cat([ee_pos, ee_ori], dim=-1).unsqueeze(1).unsqueeze(2)
+            obj_node = torch.cat([obj_pos, obj_ori], dim=-1).unsqueeze(1).unsqueeze(2)
+            return torch.cat([ee_node, obj_node], dim=1)
+
+        nodes = []
+        for nc in node_configs:
+            pos_key, ori_key = nc["pos_key"], nc["ori_key"]
+            if pos_key in obs_struct and ori_key in obs_struct:
+                pos = obs[:, obs_struct[pos_key][0] : obs_struct[pos_key][1]]
+                ori = obs[:, obs_struct[ori_key][0] : obs_struct[ori_key][1]]
+            else:
+                pos = torch.zeros(obs.shape[0], 3, device=obs.device)
+                ori = torch.zeros(obs.shape[0], 4, device=obs.device)
+                ori[:, 0] = 1.0
+            nodes.append(torch.cat([pos, ori], dim=-1))
+        return torch.stack(nodes, dim=1).unsqueeze(2)
+
+    def _get_timestep_embed(self, timesteps: torch.Tensor) -> torch.Tensor:
+        max_t = self.timestep_pos_embed.shape[0] - 1
+        timesteps = timesteps.clamp(0, max_t)
+        pos_embed = self.timestep_pos_embed[timesteps]
+        return self.timestep_embedding(pos_embed)
+
+    def forward(
+        self,
+        obs: torch.Tensor,
+        noisy_action: torch.Tensor | None = None,
+        action_history: torch.Tensor | None = None,
+        ee_node_history: torch.Tensor | None = None,
+        object_node_history: torch.Tensor | None = None,
+        node_histories: torch.Tensor | None = None,
+        node_types: torch.Tensor | None = None,
+        joint_states_history: torch.Tensor | None = None,
+        subtask_condition: torch.Tensor | None = None,
+        timesteps: torch.Tensor | None = None,
+        return_dict: bool = False,
+    ) -> torch.Tensor | dict:
+        if noisy_action is None or timesteps is None:
+            raise ValueError("DualArmUnetPolicyRawOnly.forward requires noisy_action and timesteps")
+
+        B = obs.shape[0]
+        nh, _ = self._build_node_histories(
+            obs, ee_node_history, object_node_history, node_histories, node_types,
+        )
+        raw_latest = nh[:, :, -1, :].reshape(B, -1)
+        cond = self.raw_node_proj(raw_latest)
+
+        if subtask_condition is not None and self.subtask_encoder is not None:
+            st_embed = self.subtask_encoder(subtask_condition)
+            cond = cond + self.subtask_to_cond(st_embed)
+
+        ts_embed = self._get_timestep_embed(timesteps)
+
+        if noisy_action.dim() == 2:
+            noisy_action = noisy_action.unsqueeze(1)
+        na_left = noisy_action[..., : self.arm_dim].transpose(1, 2)
+        na_right = noisy_action[..., self.arm_dim :].transpose(1, 2)
+
+        skips_l, bottleneck_l = self.unet_left.encode(na_left, ts_embed, cond)
+        skips_r, bottleneck_r = self.unet_right.encode(na_right, ts_embed, cond)
+
+        if self.cross_arm_attn is not None:
+            bottleneck_l, bottleneck_r = self.cross_arm_attn(bottleneck_l, bottleneck_r)
+
+        out_l = self.unet_left.decode(bottleneck_l, skips_l, ts_embed, cond)
+        out_r = self.unet_right.decode(bottleneck_r, skips_r, ts_embed, cond)
+
+        out_l = out_l.transpose(1, 2)
+        out_r = out_r.transpose(1, 2)
+        noise_pred = torch.cat([out_l, out_r], dim=-1)
+
+        if return_dict:
+            return {"noise_pred": noise_pred}
+        return noise_pred
+
+    def predict(
+        self,
+        obs: torch.Tensor,
+        action_history: torch.Tensor | None = None,
+        ee_node_history: torch.Tensor | None = None,
+        object_node_history: torch.Tensor | None = None,
+        joint_states_history: torch.Tensor | None = None,
+        subtask_condition: torch.Tensor | None = None,
+        num_diffusion_steps: int | None = None,
+        deterministic: bool = True,
+        *,
+        node_histories: torch.Tensor | None = None,
+        node_types: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Flow Matching prediction."""
+        num_steps = num_diffusion_steps or getattr(self.cfg, "num_inference_steps", 10)
+        with torch.no_grad():
+            batch_size = obs.shape[0]
+            device = obs.device
+            pred_horizon = self.pred_horizon
+            action_t = torch.randn(batch_size, pred_horizon, self.cfg.action_dim, device=device)
+            t = torch.zeros(batch_size, device=device)
+            dt = 1.0 / num_steps
+            diffusion_steps = getattr(self.cfg, "diffusion_steps", 100)
+
+            for step in range(num_steps):
+                timesteps = (t * (diffusion_steps - 1)).long().clamp(0, diffusion_steps - 1)
+                velocity = self.forward(
+                    obs,
+                    noisy_action=action_t,
+                    action_history=action_history,
+                    ee_node_history=ee_node_history,
+                    object_node_history=object_node_history,
+                    node_histories=node_histories,
+                    node_types=node_types,
+                    joint_states_history=joint_states_history,
+                    subtask_condition=subtask_condition,
+                    timesteps=timesteps,
+                )
+                action_t = action_t + dt * velocity
+                t = t + dt
+
+            if not deterministic:
+                action_t = action_t + 0.05 * torch.randn_like(action_t)
+
+            return action_t
+
+    def loss(
+        self,
+        obs: torch.Tensor,
+        actions: torch.Tensor,
+        action_history: torch.Tensor | None = None,
+        ee_node_history: torch.Tensor | None = None,
+        object_node_history: torch.Tensor | None = None,
+        joint_states_history: torch.Tensor | None = None,
+        subtask_condition: torch.Tensor | None = None,
+        timesteps: torch.Tensor | None = None,
+        mask: torch.Tensor | None = None,
+        node_histories: torch.Tensor | None = None,
+        node_types: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        """Flow Matching loss: predict velocity field for action trajectory."""
+        batch_size = obs.shape[0]
+        device = obs.device
+        pred_horizon = self.pred_horizon
+        diffusion_steps = getattr(self.cfg, "diffusion_steps", 100)
+
+        if len(actions.shape) == 2:
+            actions = actions.unsqueeze(1).expand(-1, pred_horizon, -1)
+
+        t = torch.rand(batch_size, device=device)
+        noise = torch.randn_like(actions)
+        t_broadcast = t.view(-1, 1, 1)
+        x_t = (1 - t_broadcast) * noise + t_broadcast * actions
+        v_t = actions - noise
+        timesteps_t = (t * (diffusion_steps - 1)).long().clamp(0, diffusion_steps - 1)
+
+        v_pred = self.forward(
+            obs,
+            noisy_action=x_t,
+            action_history=action_history,
+            ee_node_history=ee_node_history,
+            object_node_history=object_node_history,
+            node_histories=node_histories,
+            node_types=node_types,
+            joint_states_history=joint_states_history,
+            subtask_condition=subtask_condition,
+            timesteps=timesteps_t,
+        )
+
+        if mask is not None:
+            if len(mask.shape) == 1:
+                mask_expanded = mask.float().view(-1, 1, 1)
+                total_valid_elements = (
+                    (mask.float() * pred_horizon * actions.shape[-1]).sum().clamp(min=1)
+                )
+            else:
+                mask_expanded = mask.float().unsqueeze(-1)
+                total_valid_elements = (mask.float().sum() * actions.shape[-1]).clamp(min=1)
+            per_element_loss = F.mse_loss(v_pred, v_t, reduction="none")
+            masked_loss = per_element_loss * mask_expanded
+            per_sample_sum = masked_loss.sum(dim=(1, 2))
+            mse_loss = per_sample_sum.sum() / total_valid_elements
+        else:
+            mse_loss = F.mse_loss(v_pred, v_t)
+
+        result = {"total_loss": mse_loss, "mse_loss": mse_loss}
+        import os
+        if os.getenv("DEBUG_LOSS", "False").lower() == "true":
+            result["debug"] = {
+                "v_pred": v_pred.detach(),
+                "v_t": v_t.detach(),
+                "actions": actions.detach(),
+                "noise": noise.detach(),
+                "x_t": x_t.detach(),
+                "t": t.detach(),
+            }
+        return result
+
+    @classmethod
+    def load(cls, path: str, device: str = "cuda"):
+        checkpoint = torch.load(path, map_location=device, weights_only=False)
+        cfg = checkpoint.get("cfg")
+        if cfg is None:
+            raise ValueError(f"No config in checkpoint: {path}")
+        policy = cls(cfg)
+        policy.load_state_dict(checkpoint["policy_state_dict"], strict=False)
+        policy.to(device)
+        policy.eval()
+        print(f"[DualArmUnetPolicyRawOnly] Loaded from {path}")
+        return policy

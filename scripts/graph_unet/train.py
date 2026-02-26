@@ -39,7 +39,7 @@ import torch
 import torch.optim as optim
 from SO_101.policies.graph_dit_policy import GraphDiTPolicyCfg
 from SO_101.policies.graph_unet_policy import GraphUnetPolicy, UnetPolicy
-from SO_101.policies.dual_arm_unet_policy import DualArmUnetPolicy, DualArmUnetPolicyMLP
+from SO_101.policies.dual_arm_unet_policy import DualArmUnetPolicy, DualArmUnetPolicyMLP, DualArmUnetPolicyRawOnly
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.tensorboard import SummaryWriter
@@ -858,6 +858,7 @@ def train_graph_unet_policy(
     node_configs: list[dict] | None = None,
     graph_edge_dim: int = 128,
     save_every: int = 200,
+    use_raw_only: bool = False,
 ):
     """Train Graph-Unet Policy with Action Chunking."""
 
@@ -1081,6 +1082,7 @@ def train_graph_unet_policy(
         graph_pool_mode="mean" if node_configs and len(node_configs) > 2 else "concat",
         node_configs=node_configs,
         graph_edge_dim=graph_edge_dim,
+        use_raw_only=use_raw_only,
     )
     if is_dual_arm:
         cfg_kwargs["arm_action_dim"] = action_dim // 2
@@ -1098,8 +1100,11 @@ def train_graph_unet_policy(
             f"[Train] No subtask info found, subtask conditioning disabled (num_subtasks=0)"
         )
 
-    # Create policy network (policy_type 优先: unet→MLP, graph_unet→graph)
-    if is_dual_arm and policy_type == "unet":
+    # Create policy network (policy_type 优先: unet→MLP, graph_unet→graph, use_raw_only→RawOnly)
+    if is_dual_arm and use_raw_only:
+        PolicyClass = DualArmUnetPolicyRawOnly  # no graph, raw node only (train_graph_unet.sh --use_raw_only)
+        print(f"\n[Train] *** RAW ONLY MODE *** No graph encoder, conditioning = raw node projection only")
+    elif is_dual_arm and policy_type == "unet":
         PolicyClass = DualArmUnetPolicyMLP  # MLP encoder + dual UNets (train_unet.sh)
     elif is_dual_arm_graph:
         PolicyClass = DualArmUnetPolicy  # graph encoder + dual UNets (train_graph_unet.sh)
@@ -1595,6 +1600,11 @@ def main():
         choices=["true", "false"],
         help="CrossArmAttention at bottleneck: true or false (default: false).",
     )
+    parser.add_argument(
+        "--use_raw_only",
+        action="store_true",
+        help="Use DualArmUnetPolicyRawOnly: no graph encoder, only raw node projection into UNet.",
+    )
 
     # Dynamic graph: node_configs as JSON string
     parser.add_argument(
@@ -1692,6 +1702,7 @@ def main():
         node_configs=getattr(args, "node_configs", None),
         graph_edge_dim=args.graph_edge_dim,
         save_every=args.save_every,
+        use_raw_only=getattr(args, "use_raw_only", False),
     )
 
 
