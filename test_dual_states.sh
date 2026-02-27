@@ -14,7 +14,7 @@ source /mnt/ssd/IsaacSim-ros_workspaces/build_ws/humble/isaac_sim_ros_ws/install
 export ROS_DOMAIN_ID=0
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 
-NUM_DEMOS="${1:-80}"
+NUM_DEMOS="${1:-20}"
 DATASET_FILE="${2:-}"
 
 cd /mnt/ssd/dual_isaac_so_arm101
