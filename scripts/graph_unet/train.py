@@ -90,7 +90,7 @@ class HDF5DemoDataset(Dataset):
                              Human-collected demos often have noisy initial actions.
             use_action_target: If True, use original actions; if False, replace with joint_pos[t+offset].
             action_offset: When not use_action_target, use joint_pos[t+offset] (default 1).
-            apply_gripper_mapping: If True, map gripper (indices 5,11) >-0.6→1, <=-0.6→-1.
+            apply_gripper_mapping: If True, map gripper (indices 5,11) >-0.2→1, <=-0.2→-1.
         """
         self.hdf5_path = hdf5_path
         self.obs_keys = obs_keys
@@ -260,17 +260,18 @@ class HDF5DemoDataset(Dataset):
                     if demo_key == demo_keys[0]:
                         print(f"[HDF5DemoDataset] ✅ Using original actions (use_action_target=True)")
 
-                # Gripper mapping: indices 5,11 (dual arm) or 5 (single) -> >-0.6→1, <=-0.6→-1
+                # Gripper mapping: joint_pos gripper ~[-0.37, 0.34] (closed neg, open pos)
+                # Threshold -0.2: >-0.2→1 (open), <=-0.2→-1 (closed). Must match play.py.
                 if self.apply_gripper_mapping and actions.shape[1] >= 6:
                     gripper_indices = [5]
                     if actions.shape[1] >= 12:
                         gripper_indices = [5, 11]
                     for gidx in gripper_indices:
                         actions[:, gidx] = np.where(
-                            actions[:, gidx] > -0.6, 1.0, -1.0
+                            actions[:, gidx] > -0.2, 1.0, -1.0
                         ).astype(np.float32)
                     if demo_key == demo_keys[0]:
-                        print(f"[HDF5DemoDataset] ✅ Gripper mapping: joint >-0.6→1, <=-0.6→-1 (indices {gripper_indices})")
+                        print(f"[HDF5DemoDataset] ✅ Gripper mapping: joint >-0.2→1, <=-0.2→-1 (indices {gripper_indices})")
 
                 # Build action trajectory for each timestep: [T, pred_horizon, action_dim]
                 # ACTION CHUNKING: Each timestep predicts next pred_horizon actions
@@ -1596,7 +1597,7 @@ def main():
     parser.add_argument(
         "--no_gripper_mapping",
         action="store_true",
-        help="Disable gripper mapping (default: >-0.6→1, <=-0.6→-1 for indices 5,11).",
+        help="Disable gripper mapping (default: >-0.2→1, <=-0.2→-1 for indices 5,11).",
     )
     parser.add_argument(
         "--cross_attention",

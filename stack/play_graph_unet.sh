@@ -20,7 +20,7 @@ echo "Checkpoint: $CHECKPOINT"
 echo "========================================"
 
 # 与 play_unet.sh 对齐；大批量: NUM_ENVS=64 NUM_EPISODES=1000
-NUM_ENVS="${NUM_ENVS:-64}"
+NUM_ENVS="${NUM_ENVS:-1}"
 NUM_EPISODES="${NUM_EPISODES:-1000}"
 EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-15}"
 EXEC_HORIZON="${EXEC_HORIZON:-6}"
@@ -35,5 +35,4 @@ python scripts/graph_unet/play.py \
     --episode_length_s "$EPISODE_LENGTH_S" \
     --num_diffusion_steps 10 \
     --exec_horizon "$EXEC_HORIZON" \
-    --ema "$EMA" \
-    --headless true
+    --ema "$EMA" 
