@@ -47,9 +47,9 @@ class GripperDataset(Dataset):
         trigger_close_count = 0
         trigger_open_count = 0
         
-        # 从图看，阈值：
-        OPEN_THRESHOLD = -0.2  # > -0.2 认为是OPEN
-        CLOSE_THRESHOLD = -0.2  # < -0.2 认为是CLOSED
+        # 只有明显闭合才算 closed，其余都是 open（与 graph_unet 一致）
+        OPEN_THRESHOLD = -0.3  # > -0.3 认为是OPEN
+        CLOSE_THRESHOLD = -0.3  # <= -0.3 认为是CLOSED
         
         with h5py.File(hdf5_path, 'r') as f:
             demo_keys = sorted([k for k in f['data'].keys() if k.startswith('demo_')])

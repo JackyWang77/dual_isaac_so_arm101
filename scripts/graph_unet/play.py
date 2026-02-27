@@ -464,7 +464,7 @@ def play_graph_unet_policy(
         ("Stack" in task_name or "Cube-Stack" in task_name) and not use_action_direct
     )
     gripper_a, gripper_b = (1.7150, 0.8579) if use_gripper_joint_to_action else (None, None)
-    gripper_threshold = -0.2 if not use_gripper_joint_to_action and not use_action_direct else None
+    gripper_threshold = -0.3 if not use_gripper_joint_to_action and not use_action_direct else None
     if use_action_direct:
         print(f"[Play] Action: 直接用 model 输出 (与数据收集 env 一致)")
     elif gripper_a is not None:

@@ -808,11 +808,11 @@ def play_graph_dit_policy(
                 # Always update actions with smoothed joints (even if alpha=1.0, this is just joints)
                 actions = torch.cat([ema_smoothed_joints, gripper], dim=-1)  # [num_envs, 6] raw
 
-            # Gripper mapping for Isaac Sim only: <= -0.2 -> -1, > -0.2 -> 1; buffer keeps raw (actions_normalized)
+            # Gripper mapping for Isaac Sim only: <= -0.3 -> -1, > -0.3 -> 1; buffer keeps raw (actions_normalized)
             action_for_env = actions.clone()
             if action_dim >= 6:
                 action_for_env[:, 5] = torch.where(
-                    actions[:, 5] > -0.2, 1.0, -1.0
+                    actions[:, 5] > -0.3, 1.0, -1.0
                 )  # Isaac reads -1/1; model sees raw in history
             
             # Update history buffers (shift and add new)
