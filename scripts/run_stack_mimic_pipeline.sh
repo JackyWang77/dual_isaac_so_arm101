@@ -1,6 +1,6 @@
 #!/bin/bash
 # IsaacLab Mimic Pipeline Script for Dual-Arm Cube Stack Task
-# Merge datasets 1-14 -> annotate with subtask signals (pick_cube, stack_cube)
+# Merge datasets 1-20 -> annotate with subtask signals (pick_cube, stack_cube)
 
 TASK_ANNOTATE="SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-v0"
 
@@ -8,7 +8,7 @@ INPUT_FILE="./datasets/dual_cube_stack_joint_states_mimic_dataset.hdf5"
 ANNOTATED_FILE="./datasets/dual_cube_stack_annotated_dataset.hdf5"
 DEVICE="cpu"
 
-# Component datasets to merge (1-14)
+# Component datasets to merge (1-20)
 DATASETS=(
     "./datasets/dual_cube_stack_joint_states_mimic_dataset_1.hdf5"
     "./datasets/dual_cube_stack_joint_states_mimic_dataset_2.hdf5"
@@ -24,18 +24,24 @@ DATASETS=(
     "./datasets/dual_cube_stack_joint_states_mimic_dataset_12.hdf5"
     "./datasets/dual_cube_stack_joint_states_mimic_dataset_13.hdf5"
     "./datasets/dual_cube_stack_joint_states_mimic_dataset_14.hdf5"
+    "./datasets/dual_cube_stack_joint_states_mimic_dataset_15.hdf5"
+    "./datasets/dual_cube_stack_joint_states_mimic_dataset_16.hdf5"
+    "./datasets/dual_cube_stack_joint_states_mimic_dataset_17.hdf5"
+    "./datasets/dual_cube_stack_joint_states_mimic_dataset_18.hdf5"
+    "./datasets/dual_cube_stack_joint_states_mimic_dataset_19.hdf5"
+    "./datasets/dual_cube_stack_joint_states_mimic_dataset_20.hdf5"
 )
 
 echo "========================================"
 echo "IsaacLab Mimic Pipeline - Dual Cube Stack"
 echo "========================================"
 echo "Annotation Task: $TASK_ANNOTATE"
-echo "Input: $INPUT_FILE (merge of datasets 1-14)"
+echo "Input: $INPUT_FILE (merge of datasets 1-20)"
 echo "Output: $ANNOTATED_FILE"
 echo "========================================"
 
 echo ""
-echo "Merging datasets 1-14..."
+echo "Merging datasets 1-20..."
 echo "========================================"
 python scripts/merge_hdf5_datasets.py \
     "${DATASETS[@]}" \

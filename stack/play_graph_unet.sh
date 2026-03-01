@@ -20,11 +20,11 @@ echo "Checkpoint: $CHECKPOINT"
 echo "========================================"
 
 # 与 play_unet.sh 对齐；大批量: NUM_ENVS=64 NUM_EPISODES=1000
-NUM_ENVS="${NUM_ENVS:-1}"
+NUM_ENVS="${NUM_ENVS:-64}"
 NUM_EPISODES="${NUM_EPISODES:-1000}"
-EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-15}"
-EXEC_HORIZON="${EXEC_HORIZON:-6}"
-EMA="${EMA:-0.5}"
+EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-10}"
+EXEC_HORIZON="${EXEC_HORIZON:-10}"
+EMA="${EMA:-0.9}"
 
 python scripts/graph_unet/play.py \
     --task SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-Play-v0 \
@@ -33,6 +33,7 @@ python scripts/graph_unet/play.py \
     --num_envs "$NUM_ENVS" \
     --num_episodes "$NUM_EPISODES" \
     --episode_length_s "$EPISODE_LENGTH_S" \
-    --num_diffusion_steps 10 \
+    --num_diffusion_steps 15 \
     --exec_horizon "$EXEC_HORIZON" \
-    --ema "$EMA" 
+    --ema "$EMA" \
+    --headless true
