@@ -15,7 +15,7 @@ DATASETS=(
     "./datasets/dual_cube_stack_joint_states_mimic_dataset_3.hdf5"
     "./datasets/dual_cube_stack_joint_states_mimic_dataset_4.hdf5"
     "./datasets/dual_cube_stack_joint_states_mimic_dataset_5.hdf5"
-    "./datasets/dual_cube_stack_joint_states_mimic_dataset_6.hdf5"
+    # "./datasets/dual_cube_stack_joint_states_mimic_dataset_6.hdf5"
     "./datasets/dual_cube_stack_joint_states_mimic_dataset_7.hdf5"
     "./datasets/dual_cube_stack_joint_states_mimic_dataset_8.hdf5"
     "./datasets/dual_cube_stack_joint_states_mimic_dataset_9.hdf5"
@@ -28,8 +28,8 @@ DATASETS=(
     "./datasets/dual_cube_stack_joint_states_mimic_dataset_16.hdf5"
     "./datasets/dual_cube_stack_joint_states_mimic_dataset_17.hdf5"
     "./datasets/dual_cube_stack_joint_states_mimic_dataset_18.hdf5"
-    "./datasets/dual_cube_stack_joint_states_mimic_dataset_19.hdf5"
-    "./datasets/dual_cube_stack_joint_states_mimic_dataset_20.hdf5"
+    # "./datasets/dual_cube_stack_joint_states_mimic_dataset_19.hdf5"
+    # "./datasets/dual_cube_stack_joint_states_mimic_dataset_20.hdf5"
 )
 
 echo "========================================"
