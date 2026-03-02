@@ -585,20 +585,30 @@ class GraphUnetPolicy(GraphDiTPolicy):
         node_features: torch.Tensor,
         edge_embed: torch.Tensor,
         condition: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        return_attention: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor] | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Run L layers of graph attention, then pool to z.
 
         Args:
             node_features: [B, N, H, D]
             edge_embed:    [B, H, edge_dim] (N==2) or [B, N, N, H, edge_dim] (N>2)
             condition:     unused, kept for API compatibility
+            return_attention: If True, return attn_weights from last layer
         Returns:
-            (enriched node_features, z)
+            (enriched node_features, z) or (node_features, z, attn_weights) when return_attention
         """
+        attn_weights = None
         for i in range(len(self.graph_attention_layers)):
             residual = node_features
             node_normed = self.graph_pre_norms[i](node_features)
-            node_features = self.graph_attention_layers[i](node_normed, edge_embed)
+            out = self.graph_attention_layers[i](
+                node_normed, edge_embed,
+                return_attention=(return_attention and i == len(self.graph_attention_layers) - 1),
+            )
+            if isinstance(out, tuple):
+                node_features, attn_weights = out
+            else:
+                node_features = out
             node_features = node_features + residual
 
             B_n, N, H_n, D = node_features.shape
@@ -609,6 +619,8 @@ class GraphUnetPolicy(GraphDiTPolicy):
             node_features = node_flat.view(B_n, N, H_n, D) + residual
 
         z = self._pool_node_latent(node_features)
+        if return_attention and attn_weights is not None:
+            return node_features, z, attn_weights
         return node_features, z
 
     # ------------------------------------------------------------------
@@ -628,6 +640,7 @@ class GraphUnetPolicy(GraphDiTPolicy):
         subtask_condition: torch.Tensor | None = None,
         timesteps: torch.Tensor | None = None,
         return_dict: bool = False,
+        return_attention: bool = False,
     ) -> torch.Tensor | dict:
         if noisy_action is None or timesteps is None:
             raise ValueError("GraphUnetPolicy.forward requires noisy_action and timesteps")
@@ -639,7 +652,15 @@ class GraphUnetPolicy(GraphDiTPolicy):
         edge_embed = self._compute_and_embed_edges(nh)
 
         ts_embed = self._get_timestep_embed(timesteps)
-        _, z = self._encode_graph(node_features, edge_embed, condition=None)
+        encode_out = self._encode_graph(
+            node_features, edge_embed, condition=None,
+            return_attention=return_attention,
+        )
+        if isinstance(encode_out, tuple) and len(encode_out) == 3:
+            _, z, attn_weights = encode_out
+        else:
+            _, z = encode_out
+            attn_weights = None
 
         # Option 1: inject subtask into z before U-Net (subtask 直接影响 action 生成)
         if subtask_condition is not None and hasattr(self, "subtask_to_z"):
@@ -660,7 +681,10 @@ class GraphUnetPolicy(GraphDiTPolicy):
         noise_pred = noise_pred.transpose(1, 2)
 
         if return_dict:
-            return {"noise_pred": noise_pred}
+            out = {"noise_pred": noise_pred}
+            if return_attention and attn_weights is not None:
+                out["attention"] = attn_weights
+            return out
         return noise_pred
 
     # ------------------------------------------------------------------

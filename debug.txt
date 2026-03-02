@@ -1,28 +1,7 @@
-43s] [ext: isaacsim.asset.browser-1.3.23] startup
-[5.479s] [ext: isaacsim.core.throttling-2.2.2] startup
-[5.482s] [ext: omni.kit.ui.actions-1.0.5] startup
-[5.484s] [ext: omni.physx.bundle-107.3.26] startup
-[5.484s] [ext: isaacsim.sensors.camera-1.3.6] startup
-[5.488s] [ext: isaaclab-0.48.4] startup
-[5.620s] [ext: isaaclab_assets-0.2.3] startup
-[5.802s] [ext: isaaclab_tasks-0.11.8] startup
-[6.091s] [ext: omni.kit.menu.common-2.0.1] startup
-[6.092s] [ext: isaaclab_rl-0.4.4] startup
-[6.093s] [ext: isaaclab_mimic-1.0.15] startup
-[6.094s] [ext: isaaclab.python-2.3.0] startup
-[6.095s] Simulation App Starting
-2026-02-26T13:40:13Z [6,316ms] [Warning] [omni.fabric.plugin] Warning: attribute viewportHandle not found for bucket id 9
+[Play] ===== Final Statistics =====
+[Play] SR=30.0% (100ep:30.0%) [10ep] | Rew_mean=123.9 | 3/10 success
+[Play] Pick SR=80.0% (8/10)
+[Play] Stack SR=20.0% (2/10)
 
-[6.582s] app ready
-[8.726s] Simulation App Startup Complete
-/home/jacky_wang/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/gymnasium/envs/registration.py:636: UserWarning: WARN: Overriding environment Isaac-Stack-Cube-Franka-IK-Rel-Skillgen-v0 already in registry.
-  logger.warn(f"Overriding environment {new_spec.id} already in registry.")
-/home/jacky_wang/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/gymnasium/envs/registration.py:636: UserWarning: WARN: Overriding environment Isaac-Stack-Cube-Bin-Franka-IK-Rel-Mimic-v0 already in registry.
-  logger.warn(f"Overriding environment {new_spec.id} already in registry.")
-Traceback (most recent call last):
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/isaaclab_mimic/annotate_demos.py", line 665, in <module>
-    successful_task_count = main()
-                            ^^^^^^
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/isaaclab_mimic/annotate_demos.py", line 236, in main
-    raise FileNotFoundError(
-FileNotFoundError: The input dataset file ./datasets/dataset.hdf5 does not exist.
+[Play] Playback completed!
+[294.750s] Simulation App Shutting Down

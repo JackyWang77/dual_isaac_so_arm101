@@ -133,6 +133,35 @@ def main():
             print(f"  p{p:2d}: {v:.4f}")
         print()
 
+        # Histogram: joint_pos[5] 分布
+        print("--- joint_pos[5] 直方图分布 (Right gripper, train target) ---")
+        bins = np.linspace(-0.6, 0.4, 21)  # 20 bins from -0.6 to 0.4
+        hist, bin_edges = np.histogram(all_joint_r5_t5, bins=bins)
+        max_count = hist.max()
+        bar_width = 40
+        for i in range(len(hist)):
+            lo, hi = bin_edges[i], bin_edges[i + 1]
+            mid = (lo + hi) / 2
+            pct = 100 * hist[i] / len(all_joint_r5_t5)
+            bar_len = int(bar_width * hist[i] / max_count) if max_count > 0 else 0
+            bar = "█" * bar_len
+            thr_mark = "  <- -0.3" if lo <= -0.3 < hi else ""
+            print(f"  [{lo:6.3f}, {hi:6.3f}): {hist[i]:5d} ({pct:5.2f}%) {bar}{thr_mark}")
+        print()
+
+        # Left gripper histogram
+        print("--- joint_pos[5] 直方图分布 (Left gripper, train target) ---")
+        hist_l, _ = np.histogram(all_joint_l5_t5, bins=bins)
+        max_count_l = hist_l.max()
+        for i in range(len(hist_l)):
+            lo, hi = bin_edges[i], bin_edges[i + 1]
+            pct = 100 * hist_l[i] / len(all_joint_l5_t5)
+            bar_len = int(bar_width * hist_l[i] / max_count_l) if max_count_l > 0 else 0
+            bar = "█" * bar_len
+            thr_mark = "  <- -0.3" if lo <= -0.3 < hi else ""
+            print(f"  [{lo:6.3f}, {hi:6.3f}): {hist_l[i]:5d} ({pct:5.2f}%) {bar}{thr_mark}")
+        print()
+
         # Linear fit: joint[5] -> action[5] (用 joint 预测 action，供 play 时 model 输出 joint 后映射)
         from numpy.linalg import lstsq
         # 分别拟合

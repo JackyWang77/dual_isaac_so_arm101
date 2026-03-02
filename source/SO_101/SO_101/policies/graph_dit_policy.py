@@ -892,15 +892,17 @@ class GraphAttentionWithEdgeBias(nn.Module):
         node_features: torch.Tensor,   # [B, N, H, D]
         edge_features: torch.Tensor,    # [B, H, edge_dim] (legacy 2-node)
                                         # OR [B, N, N, H, edge_dim] (dynamic N-node)
-    ) -> torch.Tensor:
+        return_attention: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         Graph attention with temporal edge modulation.
 
         Args:
             node_features: [B, N, H, D]
             edge_features: [B, H, edge_dim] (legacy) or [B, N, N, H, edge_dim] (dynamic)
+            return_attention: If True, also return attn_weights [B, num_heads, seq_len, seq_len]
         Returns:
-            [B, N, H, D]
+            [B, N, H, D] or (out, attn_weights) when return_attention
         """
         assert node_features.dim() == 4, f"node_features must be [B,N,H,D], got {node_features.shape}"
         batch_size, num_nodes, history_length, hidden_dim = node_features.shape
@@ -991,6 +993,8 @@ class GraphAttentionWithEdgeBias(nn.Module):
             out_temporal.view(batch_size * num_nodes * history_length, self.hidden_dim)
         ).view(batch_size, num_nodes, history_length, self.hidden_dim)
 
+        if return_attention:
+            return out_temporal, attn_weights
         return out_temporal
 
     def _build_attention_bias(
@@ -2291,10 +2295,11 @@ class GraphDiTPolicy(nn.Module):
         subtask_condition: torch.Tensor | None = None,
         num_diffusion_steps: int | None = None,
         deterministic: bool = True,
+        return_attention: bool = False,
         *,
         node_histories: torch.Tensor | None = None,
         node_types: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | tuple[torch.Tensor, dict]:
         """
         Predict action TRAJECTORY from observations (inference mode).
         
@@ -2328,6 +2333,7 @@ class GraphDiTPolicy(nn.Module):
             subtask_condition,
             num_diffusion_steps,
             deterministic,
+            return_attention,
             node_histories=node_histories,
             node_types=node_types,
         )
@@ -2342,9 +2348,10 @@ class GraphDiTPolicy(nn.Module):
         subtask_condition: torch.Tensor | None,
         num_diffusion_steps: int | None,
         deterministic: bool,
+        return_attention: bool = False,
         node_histories: torch.Tensor | None = None,
         node_types: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+    ) -> torch.Tensor | tuple[torch.Tensor, dict]:
         """Flow Matching prediction: ODE solving for action trajectory (Euler, 1 NFE per step).
 
         With Action Chunking, returns [batch, pred_horizon, action_dim].
@@ -2367,14 +2374,15 @@ class GraphDiTPolicy(nn.Module):
             t = torch.zeros(batch_size, device=device)
             dt = 1.0 / num_steps
 
+            captured_attention = None
             for step in range(num_steps):
                 timesteps = (
                     (t * (self.cfg.diffusion_steps - 1))
                     .long()
                     .clamp(0, self.cfg.diffusion_steps - 1)
                 )
-                velocity = self.forward(
-                    obs,
+                fw_kw = dict(
+                    obs=obs,
                     noisy_action=action_t,
                     action_history=action_history,
                     ee_node_history=ee_node_history,
@@ -2385,12 +2393,24 @@ class GraphDiTPolicy(nn.Module):
                     subtask_condition=subtask_condition,
                     timesteps=timesteps,
                 )
+                if return_attention and step == 0:
+                    fw_kw["return_dict"] = True
+                    fw_kw["return_attention"] = True
+                out = self.forward(**fw_kw)
+                if isinstance(out, dict):
+                    velocity = out["noise_pred"]
+                    if return_attention and "attention" in out:
+                        captured_attention = {"attention": out["attention"]}
+                else:
+                    velocity = out
                 action_t = action_t + dt * velocity
                 t = t + dt
 
             if not deterministic:
                 action_t = action_t + 0.05 * torch.randn_like(action_t)
 
+            if return_attention and captured_attention is not None:
+                return action_t, captured_attention
             return action_t  # [batch, pred_horizon, action_dim]
     
     def loss(

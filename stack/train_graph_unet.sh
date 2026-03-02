@@ -77,7 +77,7 @@ python scripts/graph_unet/train.py \
     --policy_type graph_unet \
     --obs_dim 64 \
     --action_dim 12 \
-    --action_history_length 10 \
+    --action_history_length 4 \
     --skip_first_steps 0 \
     --mode "$MODE" \
     --lr_schedule constant \
@@ -95,7 +95,7 @@ python scripts/graph_unet/train.py \
     --node_configs "$NODE_CONFIGS" \
     --save_dir "./logs/graph_unet_full/$SUFFIX" \
     --log_dir "./logs/graph_unet_full/$SUFFIX" \
-    --use_raw_only \
+    # --use_raw_only \
     --save_every 200 \
     --cross_attention "$CROSS_ATTN_VAL" \
     $EXTRA_ARGS \

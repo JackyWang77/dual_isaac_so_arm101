@@ -59,6 +59,17 @@ parser.add_argument(
     default=1.0,
     help="EMA alpha for joint smoothing (1.0=no smoothing, 0.5=smoothing). Default 1.0.",
 )
+parser.add_argument(
+    "--record_attention",
+    action="store_true",
+    help="Record graph attention at 4 phases (left_pick, release, right_pick, right_stack) for successful episodes.",
+)
+parser.add_argument(
+    "--attention_output",
+    type=str,
+    default=None,
+    help="Output path for attention records (JSON). Used with --record_attention. Append mode when file exists.",
+)
 
 # Append AppLauncher CLI args (this will add --device automatically)
 AppLauncher.add_app_launcher_args(parser)
@@ -103,6 +114,22 @@ except ImportError:
     print("[Play] DebugDraw not available, visualization will be disabled")
 
 
+def _aggregate_attn_to_node_matrix(attn_weights: torch.Tensor, num_nodes: int, history_length: int) -> np.ndarray:
+    """Aggregate [B, num_heads, seq_len, seq_len] to [B, N, N] node-to-node attention.
+    seq_len = num_nodes * history_length. Node i rows: i*H:(i+1)*H, cols: j*H:(j+1)*H.
+    """
+    B, num_heads, seq_len, _ = attn_weights.shape
+    device = attn_weights.device
+    out = torch.zeros(B, num_nodes, num_nodes, device=device)
+    for i in range(num_nodes):
+        for j in range(num_nodes):
+            qi = slice(i * history_length, (i + 1) * history_length)
+            kj = slice(j * history_length, (j + 1) * history_length)
+            block = attn_weights[:, :, qi, kj]  # [B, heads, H, H]
+            out[:, i, j] = block.mean(dim=(1, 2, 3))
+    return out.cpu().numpy()
+
+
 def play_graph_unet_policy(
     task_name: str,
     checkpoint_path: str,
@@ -115,6 +142,8 @@ def play_graph_unet_policy(
     policy_type: str = "unet",
     exec_horizon: int | None = None,
     ema_alpha: float = 1.0,
+    record_attention: bool = False,
+    attention_output: str | None = None,
 ):
     """Play trained Graph-Unet policy.
     
@@ -134,6 +163,8 @@ def play_graph_unet_policy(
     print(f"[Play] Task: {task_name}")
     print(f"[Play] Checkpoint: {checkpoint_path}")
     print(f"[Play] Num envs: {num_envs}")
+    if record_attention:
+        print(f"[Play] record_attention=ON, output={attention_output or '(not set)'}")
     
     # Create environment
     print(f"\n[Play] Creating environment...")
@@ -640,7 +671,27 @@ def play_graph_unet_policy(
     ]
     
     step_count = 0
-    
+
+    # Record obs only (attention extracted offline)
+    record_obs = record_attention and attention_output is not None
+    if record_obs:
+        print(f"[Play] Recording obs at every replan -> {attention_output} (attention extracted offline)")
+    episode_id_per_env = [0] * num_envs
+    all_replan_records = []
+    completed_episodes = []
+
+    def _flush_records(records, completed, out_path_str, current_ep_id):
+        """Incremental save: write all records so far with success labels."""
+        import json as _json
+        success_dict = {(eid, epid): ok for eid, epid, ok in completed}
+        for r in records:
+            r["success"] = success_dict.get((r["env_id"], r["episode_id"]), False)
+        _out = os.path.abspath(out_path_str)
+        with open(_out, "w") as _f:
+            _json.dump(records, _f)
+        n_ok = sum(1 for r in records if r.get("success"))
+        print(f"[Play] Flushed {len(records)} records ({n_ok} success) -> {_out}")
+
     def _extract_node_features_from_obs(obs_tensor):
         """Extract EE and Object node features using obs_key_offsets from checkpoint."""
         def _slice(key, size):
@@ -703,6 +754,20 @@ def play_graph_unet_policy(
     
     with torch.inference_mode():
         while simulation_app.is_running() and episode_count < num_episodes:
+            # ── DEBUG: first 3 steps, print obs structure and action stats ──
+            if step_count < 3:
+                if isinstance(obs, dict) and "policy" in obs:
+                    obs_val_dbg = obs["policy"]
+                    if isinstance(obs_val_dbg, dict):
+                        print(f"[DEBUG step={step_count}] obs['policy'] is dict, keys={list(obs_val_dbg.keys())}")
+                        for k, v in obs_val_dbg.items():
+                            sh = v.shape if hasattr(v, 'shape') else '?'
+                            print(f"  {k}: shape={sh}  val[0]={v[0].tolist() if hasattr(v, 'tolist') and v.dim() >= 1 else v}")
+                    elif hasattr(obs_val_dbg, 'shape'):
+                        print(f"[DEBUG step={step_count}] obs['policy'] is Tensor shape={obs_val_dbg.shape}")
+                    else:
+                        print(f"[DEBUG step={step_count}] obs['policy'] type={type(obs_val_dbg)}")
+
             # Process observations
             if isinstance(obs, dict):
                 # Check if there's a 'policy' key (Isaac Lab wrapper format)
@@ -831,6 +896,14 @@ def play_graph_unet_policy(
                 elif len(obs_tensor.shape) > 2:
                     obs_tensor = obs_tensor.view(obs_tensor.shape[0], -1)
             
+            # ── DEBUG: print obs_tensor stats for first 3 steps ──
+            if step_count < 3:
+                print(f"[DEBUG step={step_count}] obs_tensor shape={obs_tensor.shape} "
+                      f"env0_mean={obs_tensor[0].mean().item():.4f} env0_std={obs_tensor[0].std().item():.4f}")
+                if num_envs > 1:
+                    print(f"[DEBUG step={step_count}] env0 cube_1_pos={obs_tensor[0, _obs_offsets.get('cube_1_pos', 0):_obs_offsets.get('cube_1_pos', 0)+3].tolist()}")
+                    print(f"[DEBUG step={step_count}] env1 cube_1_pos={obs_tensor[1, _obs_offsets.get('cube_1_pos', 0):_obs_offsets.get('cube_1_pos', 0)+3].tolist()}")
+
             # Normalize observations (if stats available)
             # Ensure dimensions match (obs_tensor should be 32 dims after removing target_object_position)
             if obs_mean is not None and obs_std is not None:
@@ -1054,7 +1127,7 @@ def play_graph_unet_policy(
             if num_subtasks > 0 and subtask_condition is not None and step_count < 100 and step_count % 50 == 0:
                 env0 = subtask_condition[0].cpu().tolist()
                 print(f"[Play] Subtask signal step={step_count} source={phase_source} env0={env0}")
-            
+
             # ==========================================================================
             # RECEDING HORIZON CONTROL: Check if we need to re-plan
             # ==========================================================================
@@ -1067,8 +1140,24 @@ def play_graph_unet_policy(
             )
 
             if needs_replan:
-                # Predict action trajectory: Graph-Unet outputs 6-dim (5 arm + 1 gripper); buffer keeps raw (unmapped)
-                # Output: [num_envs, pred_horizon, 6] (normalized)
+                # Record obs snapshot (attention extracted offline)
+                if record_obs:
+                    obs_keys = ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos"]
+                    for env_id in range(num_envs):
+                        obs_snap = {}
+                        for k in obs_keys:
+                            if k in _obs_offsets:
+                                obs_snap[k] = obs_tensor[env_id, _obs_offsets[k] : _obs_offsets[k] + 3].cpu().tolist()
+                        obs_snap["obs_full"] = obs_tensor[env_id].cpu().tolist()
+                        if use_node_histories:
+                            obs_snap["node_features"] = node_history_buffers[env_id].cpu().tolist()
+                        all_replan_records.append({
+                            "env_id": env_id,
+                            "episode_id": episode_id_per_env[env_id],
+                            "step": step_count,
+                            "obs": obs_snap,
+                        })
+
                 predict_kw = dict(
                     obs=obs_tensor_normalized,
                     action_history=action_history_tensor,
@@ -1162,6 +1251,17 @@ def play_graph_unet_policy(
             else:
                 action_for_env = actions.clone()
 
+            # ── DEBUG: print action stats for first 3 steps ──
+            if step_count < 3:
+                print(f"[DEBUG step={step_count}] action_for_env shape={action_for_env.shape} "
+                      f"env0={action_for_env[0].tolist()}")
+                if num_envs > 1:
+                    print(f"[DEBUG step={step_count}] env1={action_for_env[1].tolist()}")
+                has_nan = torch.isnan(action_for_env).any().item()
+                has_inf = torch.isinf(action_for_env).any().item()
+                if has_nan or has_inf:
+                    print(f"[DEBUG] ⚠️ NaN={has_nan} Inf={has_inf} in action_for_env!")
+
             # Gripper: Stack=joint 线性映射成 action; Lift=binary threshold
             if gripper_a is not None and action_dim == 12:
                 for g_idx in [5, 11]:
@@ -1242,6 +1342,13 @@ def play_graph_unet_policy(
             
             # Check for episode completion and reset history buffers + action buffers
             if done.any():
+                done_indices = [i for i in range(num_envs) if done[i]]
+                if episode_count < 5:
+                    sf = _get_success_flags(info)
+                    print(f"[DEBUG done] step={step_count} done_envs={done_indices} "
+                          f"terminated={[bool(terminated[i]) for i in done_indices]} "
+                          f"truncated={[bool(truncated[i]) for i in done_indices]} "
+                          f"success_flags={'None' if sf is None else [bool(sf[i]) for i in done_indices]}")
                 for i in range(num_envs):
                     if done[i]:
                         episode_rewards.append(current_episode_rewards[i].item())
@@ -1304,6 +1411,15 @@ def play_graph_unet_policy(
                         obj_h_str = f"h={obs_tensor[i, OBJ_HEIGHT_IDX].item():.3f}m " if is_stack_task else ""
                         print(f"[Play] Ep {episode_count:3d} {obj_h_str}{status} | SR={sr:.1f}%{extra}")
 
+                        if record_obs:
+                            completed_episodes.append((i, episode_id_per_env[i], is_success))
+                            # Incremental save: flush after each episode so data survives crashes
+                            _flush_records(
+                                all_replan_records, completed_episodes,
+                                attention_output, episode_id_per_env[i],
+                            )
+                            episode_id_per_env[i] += 1
+
                         current_episode_rewards[i] = 0.0
 
                         # Reset history buffers for this environment
@@ -1363,6 +1479,12 @@ def play_graph_unet_policy(
     
     # Close environment
     env.close()
+
+    if record_obs and attention_output:
+        _flush_records(all_replan_records, completed_episodes, attention_output, -1)
+        n_success = sum(1 for r in all_replan_records if r.get("success"))
+        print(f"[Play] Final save: {len(all_replan_records)} records ({n_success} success)")
+
     print(f"\n[Play] Playback completed!")
 
 
@@ -1382,6 +1504,8 @@ def main():
         episode_length_s=getattr(args_cli, "episode_length_s", None),
         policy_type=getattr(args_cli, "policy_type", "unet"),
         exec_horizon=getattr(args_cli, "exec_horizon", None),
+        record_attention=getattr(args_cli, "record_attention", False),
+        attention_output=getattr(args_cli, "attention_output", None),
         ema_alpha=getattr(args_cli, "ema", 1.0),
     )
 
