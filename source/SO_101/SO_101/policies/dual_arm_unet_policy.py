@@ -840,17 +840,13 @@ class DualArmDisentangledPolicy(DisentangledGraphUnetPolicy):
         self.arm_dim = arm_dim
 
         z_dim = getattr(cfg, "z_dim", 64)
+        raw_proj_dim = z_dim // 2  # matches parent's raw_proj output
         cross_heads = getattr(cfg, "cross_arm_heads", 4)
 
         # Per-arm joint encoders
         jd_per_arm = arm_dim
         hist_len = cfg.action_history_length
         arm_joint_z_dim = z_dim // 2
-
-        # Raw node projection for non-joint-film mode
-        num_nodes = len(cfg.node_configs) if getattr(cfg, "node_configs", None) else getattr(cfg, "num_nodes", 2)
-        raw_node_dim = num_nodes * getattr(cfg, "node_dim", 7)
-        self.arm_raw_node_proj = nn.Linear(raw_node_dim, arm_joint_z_dim)
 
         self.left_joint_encoder = nn.Sequential(
             nn.Linear(jd_per_arm * hist_len, cfg.hidden_dim),
@@ -863,8 +859,9 @@ class DualArmDisentangledPolicy(DisentangledGraphUnetPolicy):
             nn.Linear(cfg.hidden_dim, arm_joint_z_dim),
         )
 
-        # Dual U-Nets
-        arm_cond_dim = z_dim + arm_joint_z_dim
+        # Dual U-Nets: cond = cat([graph_z, raw_proj]) + arm_joint_enc
+        # Parent provides graph_z(z_dim) + raw_proj(raw_proj_dim), then we add arm_joint
+        arm_cond_dim = z_dim + raw_proj_dim + arm_joint_z_dim
         down_dims = (128, 256, 512)
         mid_dim = down_dims[-1]
 
@@ -936,22 +933,23 @@ class DualArmDisentangledPolicy(DisentangledGraphUnetPolicy):
             obs, ee_node_history, object_node_history, node_histories, node_types,
         )
 
-        # 2. Disentangled graph encode → graph_z
+        # 2. Disentangled graph encode → graph_z [B, z_dim]
         dist_embed, sim_embed = self._compute_disentangled_edges(nh)
         _, graph_z = self._encode_disentangled_graph(nh, dist_embed, sim_embed)
 
-        # 3. Raw residual blend
+        # 3. Raw projection: latest frame → current state [B, raw_proj_dim]
         raw_latest = nh[:, :, -1, :].reshape(B, -1)
-        raw_z = self.raw_residual_proj(raw_latest)
-        alpha = torch.sigmoid(self.raw_blend)
-        z = alpha * graph_z + (1 - alpha) * raw_z
+        raw_feat = self.raw_proj(raw_latest)
 
-        # 4. Subtask
+        # 4. Base conditioning: cat([graph_z, raw_feat])
+        z_base = torch.cat([graph_z, raw_feat], dim=-1)
+
+        # 5. Subtask
         if subtask_condition is not None and hasattr(self, "subtask_to_z"):
             subtask_embed = self.subtask_encoder(subtask_condition)
-            z = z + self.subtask_to_z(subtask_embed)
+            z_base = z_base + F.pad(self.subtask_to_z(subtask_embed), (0, raw_feat.shape[-1]))
 
-        # 5. Per-arm conditioning
+        # 6. Per-arm conditioning
         use_joint_film = getattr(self.cfg, "use_joint_film", False)
         arm_joint_z_dim = self.left_joint_encoder[-1].out_features
 
@@ -959,20 +957,20 @@ class DualArmDisentangledPolicy(DisentangledGraphUnetPolicy):
             left_jh, right_jh = self._split_joint_history(joint_states_history)
             left_jenc = self._encode_arm_joint(self.left_joint_encoder, left_jh, B, device, arm_joint_z_dim)
             right_jenc = self._encode_arm_joint(self.right_joint_encoder, right_jh, B, device, arm_joint_z_dim)
-            z_left = torch.cat([z, left_jenc], dim=-1)
-            z_right = torch.cat([z, right_jenc], dim=-1)
         else:
-            raw_proj = self.arm_raw_node_proj(raw_latest)
-            z_left = z_right = torch.cat([z, raw_proj], dim=-1)
+            left_jenc = right_jenc = torch.zeros(B, arm_joint_z_dim, device=device)
 
-        # 6. Split noisy action
+        z_left = torch.cat([z_base, left_jenc], dim=-1)
+        z_right = torch.cat([z_base, right_jenc], dim=-1)
+
+        # 7. Split noisy action
         ts_embed = self._get_timestep_embed(timesteps)
         if noisy_action.dim() == 2:
             noisy_action = noisy_action.unsqueeze(1)
         na_left = noisy_action[..., :self.arm_dim].transpose(1, 2)
         na_right = noisy_action[..., self.arm_dim:].transpose(1, 2)
 
-        # 7. Encode → CrossArm → Decode
+        # 8. Encode → CrossArm → Decode
         skips_l, bottleneck_l = self.unet_left.encode(na_left, ts_embed, z_left)
         skips_r, bottleneck_r = self.unet_right.encode(na_right, ts_embed, z_right)
 
@@ -987,7 +985,7 @@ class DualArmDisentangledPolicy(DisentangledGraphUnetPolicy):
         noise_pred = torch.cat([out_l, out_r], dim=-1)
 
         if return_dict:
-            return {"noise_pred": noise_pred, "raw_blend_alpha": alpha.item()}
+            return {"noise_pred": noise_pred}
         return noise_pred
 
     def predict(
