@@ -1490,8 +1490,8 @@ def main():
         "--policy_type",
         type=str,
         default="unet",
-        choices=["unet", "graph_unet"],
-        help="Policy class: 'unet' (MLP encoder + U-Net) or 'graph_unet' (full Graph Attention + U-Net)",
+        choices=["unet", "graph_unet", "disentangled_graph_unet"],
+        help="Policy class: 'unet' (MLP) / 'graph_unet' (full Graph Attn) / 'disentangled_graph_unet' (pos/rot separate)",
     )
 
     # Dataset arguments
