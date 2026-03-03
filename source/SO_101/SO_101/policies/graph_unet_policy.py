@@ -852,11 +852,13 @@ class DisentangledGraphUnetPolicy(GraphDiTPolicy):
             nn.GELU(),
         )
 
-        # Raw projection: latest frame → compact state snapshot
+        # Match raw-only cond_dim: graph_z(half) + raw_proj(half) = z_dim total
         num_nodes = len(cfg.node_configs) if getattr(cfg, "node_configs", None) else getattr(cfg, "num_nodes", 2)
         raw_node_dim = num_nodes * cfg.node_dim  # N * 7
-        raw_proj_dim = z_dim // 2  # half of z_dim for raw, keeps total compact
+        raw_proj_dim = z_dim // 2
+        graph_z_dim = z_dim - raw_proj_dim  # ensure exact match
         self.raw_proj = nn.Linear(raw_node_dim, raw_proj_dim)
+        self.graph_z_proj = nn.Linear(z_dim, graph_z_dim)  # compress graph_z to half
 
         # Joint FiLM (optional)
         self._use_joint_film = getattr(cfg, "use_joint_film", False)
@@ -871,10 +873,10 @@ class DisentangledGraphUnetPolicy(GraphDiTPolicy):
             )
             joint_z_dim = z_dim
 
-        # U-Net backbone: cond = cat([graph_z, raw_proj]) + optional joint
+        # U-Net backbone: cond = cat([graph_z_compressed, raw_proj]) = z_dim (same as raw-only)
         self.unet = ConditionalUnet1D(
             input_dim=cfg.action_dim,
-            global_cond_dim=z_dim + raw_proj_dim + joint_z_dim,
+            global_cond_dim=z_dim + joint_z_dim,
             diffusion_step_embed_dim=cfg.hidden_dim,
             down_dims=[128, 256, 512],
             kernel_size=5,
@@ -1099,16 +1101,17 @@ class DisentangledGraphUnetPolicy(GraphDiTPolicy):
             attn_weights = None
 
         # Raw projection: latest frame → current state snapshot
-        raw_latest = nh[:, :, -1, :].reshape(B, -1)  # [B, N*7]
-        raw_feat = self.raw_proj(raw_latest)           # [B, raw_proj_dim]
+        raw_latest = nh[:, :, -1, :].reshape(B, -1)    # [B, N*7]
+        raw_feat = self.raw_proj(raw_latest)             # [B, raw_proj_dim=32]
+        graph_z_comp = self.graph_z_proj(graph_z)        # [B, graph_z_dim=32]
 
-        # Concat: graph_z (trend) + raw_feat (current state)
-        z = torch.cat([graph_z, raw_feat], dim=-1)     # [B, z_dim + raw_proj_dim]
+        # Concat: compressed graph_z + raw_feat = z_dim (same as raw-only cond_dim)
+        z = torch.cat([graph_z_comp, raw_feat], dim=-1)  # [B, z_dim=64]
 
         # Subtask conditioning
         if subtask_condition is not None and hasattr(self, "subtask_to_z"):
             subtask_embed = self.subtask_encoder(subtask_condition)
-            z = z + F.pad(self.subtask_to_z(subtask_embed), (0, raw_feat.shape[-1]))
+            z = z + self.subtask_to_z(subtask_embed)
 
         # Joint FiLM (optional)
         if self._use_joint_film and joint_states_history is not None:

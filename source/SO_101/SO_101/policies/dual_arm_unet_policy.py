@@ -840,7 +840,6 @@ class DualArmDisentangledPolicy(DisentangledGraphUnetPolicy):
         self.arm_dim = arm_dim
 
         z_dim = getattr(cfg, "z_dim", 64)
-        raw_proj_dim = z_dim // 2  # matches parent's raw_proj output
         cross_heads = getattr(cfg, "cross_arm_heads", 4)
 
         # Per-arm joint encoders
@@ -859,9 +858,9 @@ class DualArmDisentangledPolicy(DisentangledGraphUnetPolicy):
             nn.Linear(cfg.hidden_dim, arm_joint_z_dim),
         )
 
-        # Dual U-Nets: cond = cat([graph_z, raw_proj]) + arm_joint_enc
-        # Parent provides graph_z(z_dim) + raw_proj(raw_proj_dim), then we add arm_joint
-        arm_cond_dim = z_dim + raw_proj_dim + arm_joint_z_dim
+        # Dual U-Nets: cond = cat([graph_z_comp, raw_proj]) + arm_joint_enc
+        # Parent compresses graph_z + raw_proj to z_dim total, then we add arm_joint
+        arm_cond_dim = z_dim + arm_joint_z_dim
         down_dims = (128, 256, 512)
         mid_dim = down_dims[-1]
 
@@ -937,17 +936,16 @@ class DualArmDisentangledPolicy(DisentangledGraphUnetPolicy):
         dist_embed, sim_embed = self._compute_disentangled_edges(nh)
         _, graph_z = self._encode_disentangled_graph(nh, dist_embed, sim_embed)
 
-        # 3. Raw projection: latest frame → current state [B, raw_proj_dim]
+        # 3. Compress graph_z + raw projection → z_dim total (same as raw-only)
         raw_latest = nh[:, :, -1, :].reshape(B, -1)
-        raw_feat = self.raw_proj(raw_latest)
+        raw_feat = self.raw_proj(raw_latest)              # [B, z_dim//2]
+        graph_z_comp = self.graph_z_proj(graph_z)          # [B, z_dim//2]
+        z_base = torch.cat([graph_z_comp, raw_feat], dim=-1)  # [B, z_dim]
 
-        # 4. Base conditioning: cat([graph_z, raw_feat])
-        z_base = torch.cat([graph_z, raw_feat], dim=-1)
-
-        # 5. Subtask
+        # 4. Subtask
         if subtask_condition is not None and hasattr(self, "subtask_to_z"):
             subtask_embed = self.subtask_encoder(subtask_condition)
-            z_base = z_base + F.pad(self.subtask_to_z(subtask_embed), (0, raw_feat.shape[-1]))
+            z_base = z_base + self.subtask_to_z(subtask_embed)
 
         # 6. Per-arm conditioning
         use_joint_film = getattr(self.cfg, "use_joint_film", False)

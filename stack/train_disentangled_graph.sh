@@ -74,7 +74,7 @@ python scripts/graph_unet/train.py \
     --policy_type disentangled_graph_unet \
     --obs_dim 64 \
     --action_dim 12 \
-    --action_history_length 4 \
+    --action_history_length 10 \
     --skip_first_steps 0 \
     --mode "$MODE" \
     --lr_schedule constant \
