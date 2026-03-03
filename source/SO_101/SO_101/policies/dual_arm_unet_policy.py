@@ -841,26 +841,29 @@ class DualArmDisentangledPolicy(DisentangledGraphUnetPolicy):
 
         z_dim = getattr(cfg, "z_dim", 64)
         cross_heads = getattr(cfg, "cross_arm_heads", 4)
+        self._use_joint_film = getattr(cfg, "use_joint_film", False)
 
-        # Per-arm joint encoders
+        # Per-arm joint encoders (only used when use_joint_film=True)
         jd_per_arm = arm_dim
         hist_len = cfg.action_history_length
         arm_joint_z_dim = z_dim // 2
 
-        self.left_joint_encoder = nn.Sequential(
-            nn.Linear(jd_per_arm * hist_len, cfg.hidden_dim),
-            nn.GELU(),
-            nn.Linear(cfg.hidden_dim, arm_joint_z_dim),
-        )
-        self.right_joint_encoder = nn.Sequential(
-            nn.Linear(jd_per_arm * hist_len, cfg.hidden_dim),
-            nn.GELU(),
-            nn.Linear(cfg.hidden_dim, arm_joint_z_dim),
-        )
+        if self._use_joint_film:
+            self.left_joint_encoder = nn.Sequential(
+                nn.Linear(jd_per_arm * hist_len, cfg.hidden_dim),
+                nn.GELU(),
+                nn.Linear(cfg.hidden_dim, arm_joint_z_dim),
+            )
+            self.right_joint_encoder = nn.Sequential(
+                nn.Linear(jd_per_arm * hist_len, cfg.hidden_dim),
+                nn.GELU(),
+                nn.Linear(cfg.hidden_dim, arm_joint_z_dim),
+            )
 
-        # Dual U-Nets: cond = cat([graph_z_comp, raw_proj]) + arm_joint_enc
-        # Parent compresses graph_z + raw_proj to z_dim total, then we add arm_joint
-        arm_cond_dim = z_dim + arm_joint_z_dim
+        # Dual U-Nets: cond = z_base (=z_dim) + optional arm_joint
+        # No joint film → cond = z_dim = 64 (same as raw-only)
+        # With joint film → cond = z_dim + arm_joint_z_dim = 96
+        arm_cond_dim = z_dim + (arm_joint_z_dim if self._use_joint_film else 0)
         down_dims = (128, 256, 512)
         mid_dim = down_dims[-1]
 
@@ -947,19 +950,16 @@ class DualArmDisentangledPolicy(DisentangledGraphUnetPolicy):
             subtask_embed = self.subtask_encoder(subtask_condition)
             z_base = z_base + self.subtask_to_z(subtask_embed)
 
-        # 6. Per-arm conditioning
-        use_joint_film = getattr(self.cfg, "use_joint_film", False)
-        arm_joint_z_dim = self.left_joint_encoder[-1].out_features
-
-        if use_joint_film:
+        # 5. Per-arm conditioning
+        if self._use_joint_film:
+            arm_joint_z_dim = self.left_joint_encoder[-1].out_features
             left_jh, right_jh = self._split_joint_history(joint_states_history)
             left_jenc = self._encode_arm_joint(self.left_joint_encoder, left_jh, B, device, arm_joint_z_dim)
             right_jenc = self._encode_arm_joint(self.right_joint_encoder, right_jh, B, device, arm_joint_z_dim)
+            z_left = torch.cat([z_base, left_jenc], dim=-1)   # [B, z_dim + arm_joint_z_dim]
+            z_right = torch.cat([z_base, right_jenc], dim=-1)
         else:
-            left_jenc = right_jenc = torch.zeros(B, arm_joint_z_dim, device=device)
-
-        z_left = torch.cat([z_base, left_jenc], dim=-1)
-        z_right = torch.cat([z_base, right_jenc], dim=-1)
+            z_left = z_right = z_base  # [B, z_dim=64], same as raw-only
 
         # 7. Split noisy action
         ts_embed = self._get_timestep_embed(timesteps)
