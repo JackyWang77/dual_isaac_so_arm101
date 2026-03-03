@@ -38,8 +38,8 @@ import SO_101.tasks  # noqa: F401  # Register environments
 import torch
 import torch.optim as optim
 from SO_101.policies.graph_dit_policy import GraphDiTPolicyCfg
-from SO_101.policies.graph_unet_policy import GraphUnetPolicy, UnetPolicy
-from SO_101.policies.dual_arm_unet_policy import DualArmUnetPolicy, DualArmUnetPolicyMLP, DualArmUnetPolicyRawOnly
+from SO_101.policies.graph_unet_policy import DisentangledGraphUnetPolicy, GraphUnetPolicy, UnetPolicy
+from SO_101.policies.dual_arm_unet_policy import DualArmDisentangledPolicy, DualArmUnetPolicy, DualArmUnetPolicyMLP, DualArmUnetPolicyRawOnly
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.tensorboard import SummaryWriter
@@ -1090,14 +1090,20 @@ def train_graph_unet_policy(
         cfg_kwargs["cross_arm_heads"] = 4
         cfg_kwargs["use_cross_arm_attn"] = use_cross_arm_attn
 
-    # Create policy network (policy_type 优先: unet→MLP, graph_unet→graph, use_raw_only→RawOnly)
+    # Create policy network (policy_type 优先: unet→MLP, graph_unet→graph, disentangled→disentangled, use_raw_only→RawOnly)
     if is_dual_arm and use_raw_only:
         PolicyClass = DualArmUnetPolicyRawOnly  # no graph, raw node only (train_graph_unet.sh --use_raw_only)
         print(f"\n[Train] *** RAW ONLY MODE *** No graph encoder, conditioning = raw node projection only")
+    elif is_dual_arm and policy_type == "disentangled_graph_unet":
+        PolicyClass = DualArmDisentangledPolicy  # disentangled pos/rot graph + dual UNets
+        print(f"\n[Train] *** DISENTANGLED GRAPH *** pos/rot separate attention + raw residual")
     elif is_dual_arm and policy_type == "unet":
         PolicyClass = DualArmUnetPolicyMLP  # MLP encoder + dual UNets (train_unet.sh)
     elif is_dual_arm_graph:
         PolicyClass = DualArmUnetPolicy  # graph encoder + dual UNets (train_graph_unet.sh)
+    elif policy_type == "disentangled_graph_unet":
+        PolicyClass = DisentangledGraphUnetPolicy  # single-arm disentangled
+        print(f"\n[Train] *** DISENTANGLED GRAPH *** pos/rot separate attention + raw residual")
     elif policy_type == "graph_unet":
         PolicyClass = GraphUnetPolicy
     else:
@@ -1105,7 +1111,7 @@ def train_graph_unet_policy(
 
     # use_graph_encoder 供 play 正确区分 MLP vs Graph 加载
     if is_dual_arm and not use_raw_only:
-        cfg_kwargs["use_graph_encoder"] = PolicyClass is DualArmUnetPolicy
+        cfg_kwargs["use_graph_encoder"] = PolicyClass in (DualArmUnetPolicy, DualArmDisentangledPolicy)
     cfg = GraphDiTPolicyCfg(**cfg_kwargs)
 
     if num_subtasks > 0:

@@ -1052,9 +1052,218 @@ class GraphAttentionWithEdgeBias(nn.Module):
         return attention_bias
 
 
+class DisentangledGraphAttention(nn.Module):
+    """Disentangled Graph Attention: position and rotation use separate heads.
+
+    Key design choices vs GraphAttentionWithEdgeBias:
+    1. Separate pos(3) / rot(4) embedding → separate Q/K heads
+       - pos-heads attend using distance bias only
+       - rot-heads attend using quaternion similarity bias only
+       - No cross-type attention (pos never attends to rot)
+    2. Edge features: distance(1) + v1 quat similarity(1), no complex axis alignment
+    3. Edge only enters as attention bias — NO gate/scale/shift on V
+    4. No GRU temporal edge encoding — MLP embed only
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        num_heads: int,
+        edge_dim: int = 32,
+        max_history: int = 20,
+    ):
+        super().__init__()
+        assert num_heads >= 2, "Need at least 2 heads (1 pos + 1 rot)"
+        assert num_heads % 2 == 0, "num_heads must be even for pos/rot split"
+        self.hidden_dim = hidden_dim
+        self.num_heads = num_heads
+        self.head_dim = hidden_dim // num_heads
+        self.max_history = max_history
+
+        # Half heads for pos, half for rot
+        self.pos_heads = num_heads // 2
+        self.rot_heads = num_heads // 2
+        pos_dim = self.pos_heads * self.head_dim  # hidden_dim // 2
+        rot_dim = self.rot_heads * self.head_dim
+
+        # Separate pos/rot embeddings: raw → hidden
+        self.pos_embed = nn.Sequential(
+            nn.Linear(3, pos_dim),
+            nn.LayerNorm(pos_dim),
+            nn.GELU(),
+        )
+        self.rot_embed = nn.Sequential(
+            nn.Linear(4, rot_dim),
+            nn.LayerNorm(rot_dim),
+            nn.GELU(),
+        )
+
+        # Q, K, V for pos stream
+        self.pos_q = nn.Linear(pos_dim, pos_dim)
+        self.pos_k = nn.Linear(pos_dim, pos_dim)
+        self.pos_v = nn.Linear(pos_dim, pos_dim)
+
+        # Q, K, V for rot stream
+        self.rot_q = nn.Linear(rot_dim, rot_dim)
+        self.rot_k = nn.Linear(rot_dim, rot_dim)
+        self.rot_v = nn.Linear(rot_dim, rot_dim)
+
+        # Output projection: merge pos + rot back to hidden_dim
+        self.out_proj = nn.Linear(hidden_dim, hidden_dim)
+
+        # Edge bias: distance → pos heads, similarity → rot heads
+        # (no GRU, simple MLP per feature)
+        self.dist_to_bias = nn.Linear(edge_dim, self.pos_heads)
+        self.sim_to_bias = nn.Linear(edge_dim, self.rot_heads)
+
+        # Temporal position encoding (shared for both streams)
+        self.temporal_pos_embed_pos = nn.Embedding(max_history, pos_dim)
+        self.temporal_pos_embed_rot = nn.Embedding(max_history, rot_dim)
+
+        # Temporal relative bias
+        self.temporal_bias_embedding = nn.Embedding(2 * max_history - 1, num_heads)
+
+        self.dropout = nn.Dropout(0.1)
+        self.scale_pos = 1.0 / math.sqrt(self.head_dim)
+        self.scale_rot = 1.0 / math.sqrt(self.head_dim)
+
+    def forward(
+        self,
+        node_histories: torch.Tensor,  # [B, N, H, 7] raw pos+quat
+        dist_edge_embed: torch.Tensor,  # [B, N, N, H, edge_dim] or [B, H, edge_dim]
+        sim_edge_embed: torch.Tensor,   # same shape
+        return_attention: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        B, N, H, _ = node_histories.shape
+        device = node_histories.device
+
+        # Split raw features
+        pos_raw = node_histories[..., :3]  # [B, N, H, 3]
+        rot_raw = node_histories[..., 3:7]  # [B, N, H, 4]
+
+        # Embed separately
+        pos_feat = self.pos_embed(pos_raw.reshape(-1, 3)).view(B, N, H, -1)
+        rot_feat = self.rot_embed(rot_raw.reshape(-1, 4)).view(B, N, H, -1)
+
+        # Add temporal position
+        t_idx = torch.arange(H, device=device)
+        pos_feat = pos_feat + self.temporal_pos_embed_pos(t_idx).view(1, 1, H, -1)
+        rot_feat = rot_feat + self.temporal_pos_embed_rot(t_idx).view(1, 1, H, -1)
+
+        # Flatten to sequence: [B, N*H, dim]
+        seq_len = N * H
+        pos_flat = pos_feat.view(B, seq_len, -1)
+        rot_flat = rot_feat.view(B, seq_len, -1)
+
+        pos_dim = pos_flat.shape[-1]
+        rot_dim = rot_flat.shape[-1]
+
+        # --- Pos stream ---
+        Qp = self.pos_q(pos_flat).view(B, seq_len, self.pos_heads, self.head_dim).transpose(1, 2)
+        Kp = self.pos_k(pos_flat).view(B, seq_len, self.pos_heads, self.head_dim).transpose(1, 2)
+        Vp = self.pos_v(pos_flat).view(B, seq_len, self.pos_heads, self.head_dim).transpose(1, 2)
+
+        scores_pos = torch.matmul(Qp, Kp.transpose(-2, -1)) * self.scale_pos
+
+        # --- Rot stream ---
+        Qr = self.rot_q(rot_flat).view(B, seq_len, self.rot_heads, self.head_dim).transpose(1, 2)
+        Kr = self.rot_k(rot_flat).view(B, seq_len, self.rot_heads, self.head_dim).transpose(1, 2)
+        Vr = self.rot_v(rot_flat).view(B, seq_len, self.rot_heads, self.head_dim).transpose(1, 2)
+
+        scores_rot = torch.matmul(Qr, Kr.transpose(-2, -1)) * self.scale_rot
+
+        # --- Edge bias (attention bias only, no V modulation) ---
+        pos_bias, rot_bias = self._build_disentangled_bias(
+            B, N, H, dist_edge_embed, sim_edge_embed, device,
+        )
+        scores_pos = scores_pos + pos_bias
+        scores_rot = scores_rot + rot_bias
+
+        # Attend
+        attn_pos = self.dropout(F.softmax(scores_pos, dim=-1))
+        attn_rot = self.dropout(F.softmax(scores_rot, dim=-1))
+
+        out_pos = torch.matmul(attn_pos, Vp)  # [B, pos_heads, seq, head_dim]
+        out_rot = torch.matmul(attn_rot, Vr)
+
+        # Merge heads: interleave pos and rot heads → [B, seq, hidden_dim]
+        out_pos = out_pos.transpose(1, 2).contiguous().view(B, seq_len, pos_dim)
+        out_rot = out_rot.transpose(1, 2).contiguous().view(B, seq_len, rot_dim)
+        out = torch.cat([out_pos, out_rot], dim=-1)  # [B, seq, hidden_dim]
+
+        out = self.out_proj(out).view(B, N, H, self.hidden_dim)
+
+        if return_attention:
+            # Combine attention maps for visualization
+            attn_all = torch.cat([attn_pos, attn_rot], dim=1)  # [B, num_heads, seq, seq]
+            return out, attn_all
+        return out
+
+    def _build_disentangled_bias(
+        self, B, N, H,
+        dist_edge_embed: torch.Tensor,
+        sim_edge_embed: torch.Tensor,
+        device: torch.device,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Build separate spatial bias for pos-heads and rot-heads.
+
+        Returns:
+            pos_bias: [B, pos_heads, seq, seq]
+            rot_bias: [B, rot_heads, seq, seq]
+        """
+        seq_len = N * H
+        pos_bias = torch.zeros(B, self.pos_heads, seq_len, seq_len, device=device)
+        rot_bias = torch.zeros(B, self.rot_heads, seq_len, seq_len, device=device)
+        t_idx = torch.arange(H, device=device)
+
+        if dist_edge_embed.dim() == 5:
+            # Dynamic N-node: [B, N, N, H, edge_dim]
+            for i in range(N):
+                for j in range(i + 1, N):
+                    # Distance → pos heads
+                    d_ij = dist_edge_embed[:, i, j]  # [B, H, edge_dim]
+                    pb = self.dist_to_bias(d_ij.reshape(-1, d_ij.shape[-1]))
+                    pb = pb.view(B, H, self.pos_heads).permute(0, 2, 1)  # [B, pos_heads, H]
+                    ni = i * H + t_idx
+                    nj = j * H + t_idx
+                    pos_bias[:, :, ni, nj] = pb
+                    pos_bias[:, :, nj, ni] = pb
+
+                    # Similarity → rot heads
+                    s_ij = sim_edge_embed[:, i, j]
+                    rb = self.sim_to_bias(s_ij.reshape(-1, s_ij.shape[-1]))
+                    rb = rb.view(B, H, self.rot_heads).permute(0, 2, 1)
+                    rot_bias[:, :, ni, nj] = rb
+                    rot_bias[:, :, nj, ni] = rb
+        else:
+            # Legacy 2-node: [B, H, edge_dim]
+            pb = self.dist_to_bias(dist_edge_embed.reshape(-1, dist_edge_embed.shape[-1]))
+            pb = pb.view(B, H, self.pos_heads).permute(0, 2, 1)
+            n0 = t_idx
+            n1 = H + t_idx
+            pos_bias[:, :, n0, n1] = pb
+            pos_bias[:, :, n1, n0] = pb
+
+            rb = self.sim_to_bias(sim_edge_embed.reshape(-1, sim_edge_embed.shape[-1]))
+            rb = rb.view(B, H, self.rot_heads).permute(0, 2, 1)
+            rot_bias[:, :, n0, n1] = rb
+            rot_bias[:, :, n1, n0] = rb
+
+        # Temporal relative bias: split across pos/rot heads
+        t_all = torch.arange(H, device=device).repeat(N)
+        t_diff = t_all.unsqueeze(0) - t_all.unsqueeze(1)
+        t_diff_shifted = (t_diff + self.max_history - 1).clamp(0, 2 * self.max_history - 2)
+        t_bias = self.temporal_bias_embedding(t_diff_shifted)  # [seq, seq, num_heads]
+        t_bias = t_bias.permute(2, 0, 1).unsqueeze(0)  # [1, num_heads, seq, seq]
+
+        pos_bias = pos_bias + t_bias[:, :self.pos_heads]
+        rot_bias = rot_bias + t_bias[:, self.pos_heads:]
+        return pos_bias, rot_bias
+
+
 class GraphDiTUnit(nn.Module):
     """Single Graph DiT unit following the architecture.
-    
+
     Steps:
     1. Last action self-attention → a_new
     2. Node attention with edge features → node_features_new
