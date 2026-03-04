@@ -87,7 +87,7 @@ python scripts/graph_unet/train.py \
     --graph_edge_dim 8 \
     --pred_horizon 20 \
     --exec_horizon 10 \
-    --device cuda \ 
+    --device cuda \
     --obs_keys "$OBS_KEYS" \
     --node_configs "$NODE_CONFIGS" \
     --save_dir "./logs/disentangled_graph/$SUFFIX" \
