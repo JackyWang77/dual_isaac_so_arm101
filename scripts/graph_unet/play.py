@@ -867,20 +867,6 @@ def play_graph_unet_policy(
 
     with torch.inference_mode():
         while simulation_app.is_running() and episode_count < num_episodes:
-            # ── DEBUG: first 3 steps, print obs structure and action stats ──
-            if step_count < 3:
-                if isinstance(obs, dict) and "policy" in obs:
-                    obs_val_dbg = obs["policy"]
-                    if isinstance(obs_val_dbg, dict):
-                        print(f"[DEBUG step={step_count}] obs['policy'] is dict, keys={list(obs_val_dbg.keys())}")
-                        for k, v in obs_val_dbg.items():
-                            sh = v.shape if hasattr(v, 'shape') else '?'
-                            print(f"  {k}: shape={sh}  val[0]={v[0].tolist() if hasattr(v, 'tolist') and v.dim() >= 1 else v}")
-                    elif hasattr(obs_val_dbg, 'shape'):
-                        print(f"[DEBUG step={step_count}] obs['policy'] is Tensor shape={obs_val_dbg.shape}")
-                    else:
-                        print(f"[DEBUG step={step_count}] obs['policy'] type={type(obs_val_dbg)}")
-
             # Process observations
             if isinstance(obs, dict):
                 # Check if there's a 'policy' key (Isaac Lab wrapper format)
@@ -1021,14 +1007,6 @@ def play_graph_unet_policy(
                 elif len(obs_tensor.shape) > 2:
                     obs_tensor = obs_tensor.view(obs_tensor.shape[0], -1)
             
-            # ── DEBUG: print obs_tensor stats for first 3 steps ──
-            if step_count < 3:
-                print(f"[DEBUG step={step_count}] obs_tensor shape={obs_tensor.shape} "
-                      f"env0_mean={obs_tensor[0].mean().item():.4f} env0_std={obs_tensor[0].std().item():.4f}")
-                if num_envs > 1:
-                    print(f"[DEBUG step={step_count}] env0 cube_1_pos={obs_tensor[0, _obs_offsets.get('cube_1_pos', 0):_obs_offsets.get('cube_1_pos', 0)+3].tolist()}")
-                    print(f"[DEBUG step={step_count}] env1 cube_1_pos={obs_tensor[1, _obs_offsets.get('cube_1_pos', 0):_obs_offsets.get('cube_1_pos', 0)+3].tolist()}")
-
             # Zero out last_action_all for envs that just reset to prevent
             # stale extreme actions from previous episode corrupting the policy
             la_key = "last_action_all"
@@ -1298,11 +1276,6 @@ def play_graph_unet_policy(
                 if step_count < 3:
                     print(f"[Play] WARNING: subtask_condition was None, using fallback [1,0,...]")
 
-            # 打印 subtask 输入来源和首帧值（便于调试）
-            if num_subtasks > 0 and subtask_condition is not None and step_count < 100 and step_count % 50 == 0:
-                env0 = subtask_condition[0].cpu().tolist()
-                print(f"[Play] Subtask signal step={step_count} source={phase_source} env0={env0}")
-
             # ==========================================================================
             # RECEDING HORIZON CONTROL: Check if we need to re-plan
             # ==========================================================================
@@ -1315,11 +1288,6 @@ def play_graph_unet_policy(
             )
 
             if needs_replan:
-                if episode_count < 10:
-                    empty_envs = [eid for eid in range(num_envs) if len(action_buffers[eid]) == 0]
-                    sc_str = subtask_condition[0].cpu().tolist() if subtask_condition is not None else "None"
-                    print(f"[REPLAN DEBUG] step={step_count} ep={episode_count} empty_envs={empty_envs} "
-                          f"subtask={sc_str}")
                 # Record obs snapshot (attention extracted offline)
                 if record_obs:
                     obs_keys = ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos"]
@@ -1375,12 +1343,6 @@ def play_graph_unet_policy(
                             action_buffers_normalized[env_id].append(
                                 action_trajectory_normalized[env_id, t, :].clone()
                             )
-
-            if needs_replan and episode_count < 10:
-                for env_id in range(num_envs):
-                    if len(action_buffers[env_id]) > 0:
-                        print(f"[REPLAN DEBUG] env={env_id} new_buf_len={len(action_buffers[env_id])} "
-                              f"first_action={action_buffers[env_id][0][:4].tolist()}")
 
             # Pop the first action from each buffer
             actions_list = []
@@ -1442,17 +1404,6 @@ def play_graph_unet_policy(
                 action_for_env = torch.cat([actions[:, 6:12], actions[:, 0:6]], dim=1)
             else:
                 action_for_env = actions.clone()
-
-            # ── DEBUG: print action stats for first 3 steps ──
-            if step_count < 3:
-                print(f"[DEBUG step={step_count}] action_for_env shape={action_for_env.shape} "
-                      f"env0={action_for_env[0].tolist()}")
-                if num_envs > 1:
-                    print(f"[DEBUG step={step_count}] env1={action_for_env[1].tolist()}")
-                has_nan = torch.isnan(action_for_env).any().item()
-                has_inf = torch.isinf(action_for_env).any().item()
-                if has_nan or has_inf:
-                    print(f"[DEBUG] ⚠️ NaN={has_nan} Inf={has_inf} in action_for_env!")
 
             # Gripper: Stack=joint 线性映射成 action; Lift=binary threshold
             if gripper_a is not None and action_dim == 12:
@@ -1517,12 +1468,6 @@ def play_graph_unet_policy(
                     print(f"[Play] WARNING: FK flush after reset failed: {_e}")
 
                 done_indices = [i for i in range(num_envs) if done[i]]
-                if episode_count < 5:
-                    sf = _get_success_flags(info)
-                    print(f"[DEBUG done] step={step_count} done_envs={done_indices} "
-                          f"terminated={[bool(terminated[i]) for i in done_indices]} "
-                          f"truncated={[bool(truncated[i]) for i in done_indices]} "
-                          f"success_flags={'None' if sf is None else [bool(sf[i]) for i in done_indices]}")
                 for i in range(num_envs):
                     if done[i]:
                         episode_rewards.append(current_episode_rewards[i].item())
@@ -1628,47 +1573,6 @@ def play_graph_unet_policy(
                         # CRITICAL: Clear action buffer on episode reset!
                         action_buffers[i].clear()
                         action_buffers_normalized[i].clear()
-                        if episode_count < 15:
-                            # Verify env actually reset: check cube + joint positions from NEW obs
-                            try:
-                                reset_ot = _obs_to_tensor(obs)
-                                c1_reset = reset_ot[i, _obs_offsets.get("cube_1_pos", 0):_obs_offsets.get("cube_1_pos", 0)+3].tolist()
-                                c2_reset = reset_ot[i, _obs_offsets.get("cube_2_pos", 0):_obs_offsets.get("cube_2_pos", 0)+3].tolist()
-                                # Joint pos: expect ~(0,0,0,0,0,0.4) per arm if truly post-reset
-                                if "left_joint_pos" in _obs_offsets and "right_joint_pos" in _obs_offsets:
-                                    left_dim = _obs_dims.get("left_joint_pos", 6)
-                                    right_dim = _obs_dims.get("right_joint_pos", 6)
-                                    lo = _obs_offsets["left_joint_pos"]
-                                    ro = _obs_offsets["right_joint_pos"]
-                                    left_jp = reset_ot[i, lo : lo + left_dim].tolist()
-                                    right_jp = reset_ot[i, ro : ro + right_dim].tolist()
-                                    joint_str = f" left_jp={[round(x, 3) for x in left_jp]} right_jp={[round(x, 3) for x in right_jp]}"
-                                else:
-                                    off = _obs_offsets.get("joint_pos", 0)
-                                    dim = _obs_dims.get("joint_pos", 6)
-                                    jp = reset_ot[i, off : off + dim].tolist()
-                                    joint_str = f" joint_pos={[round(x, 3) for x in jp]}"
-                                # Also print EE positions to verify they are HOME (not stale from stuck pos)
-                                ee_str = ""
-                                if "left_ee_position" in _obs_offsets:
-                                    lee_off = _obs_offsets["left_ee_position"]
-                                    lee = reset_ot[i, lee_off : lee_off + 3].tolist()
-                                    ee_str += f" left_ee={[round(x, 3) for x in lee]}"
-                                if "right_ee_position" in _obs_offsets:
-                                    ree_off = _obs_offsets["right_ee_position"]
-                                    ree = reset_ot[i, ree_off : ree_off + 3].tolist()
-                                    ee_str += f" right_ee={[round(x, 3) for x in ree]}"
-                            except Exception as e:
-                                c1_reset, c2_reset = "err", "err"
-                                joint_str = f" joint_err={e!r}"
-                                ee_str = ""
-                            nh_mean = node_history_buffers[i].mean().item() if use_node_histories else 0.0
-                            print(f"[RESET DEBUG] env={i} ep={episode_count} success={is_success} "
-                                  f"terminated={bool(terminated[i])} truncated={is_truncated} "
-                                  f"buf_cleared={len(action_buffers[i])==0} "
-                                  f"node_hist_mean={nh_mean:.4f} "
-                                  f"reset_cube1={c1_reset} reset_cube2={c2_reset}{joint_str}{ee_str}")
-
                         # Reset EMA state: flag for re-init on next step (same as episode 1)
                         ema_needs_init[i] = True
                         # Flag to zero out last_action_all on next obs processing
