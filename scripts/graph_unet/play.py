@@ -44,8 +44,8 @@ parser.add_argument(
     "--policy_type",
     type=str,
     default="unet",
-    choices=["unet", "graph_unet", "disentangled_graph_unet"],
-    help="Policy class to use (default: unet)",
+    choices=["unet", "graph_unet", "disentangled_graph_unet", "disentangled_graph_unet_gated"],
+    help="Policy class: unet / graph_unet / disentangled_graph_unet / disentangled_graph_unet_gated",
 )
 parser.add_argument(
     "--exec_horizon",
@@ -104,6 +104,7 @@ from SO_101.tasks.cube_stack.cube_stack_env_cfg import (
 )
 from SO_101.policies.graph_unet_policy import UnetPolicy, GraphUnetPolicy, DisentangledGraphUnetPolicy
 from SO_101.policies.dual_arm_unet_policy import DualArmUnetPolicy, DualArmUnetPolicyMLP, DualArmUnetPolicyRawOnly, DualArmDisentangledPolicy
+from SO_101.policies.dual_arm_unet_policy_gated import DualArmDisentangledPolicyGated
 
 # Try to import visualization utilities (if available)
 try:
@@ -301,12 +302,17 @@ def play_graph_unet_policy(
         if getattr(cfg, "use_raw_only", False):
             PolicyClass = DualArmUnetPolicyRawOnly
             print(f"[Play] *** RAW ONLY MODE *** No graph encoder, raw node projection only")
+        elif any("graph_gate_logit" in k for k in state_keys):
+            PolicyClass = DualArmDisentangledPolicyGated
+            print(f"[Play] *** DISENTANGLED GRAPH GATED *** gated fusion (metrics/graph_gate_weight)")
         elif any("disentangled_attn_layers" in k for k in state_keys):
             PolicyClass = DualArmDisentangledPolicy
         elif any("graph_attention_layers" in k for k in state_keys):
             PolicyClass = DualArmUnetPolicy
         else:
             PolicyClass = DualArmUnetPolicyMLP
+    elif policy_type == "disentangled_graph_unet_gated":
+        PolicyClass = DualArmDisentangledPolicyGated
     elif policy_type == "disentangled_graph_unet":
         PolicyClass = DisentangledGraphUnetPolicy
     elif policy_type == "graph_unet":

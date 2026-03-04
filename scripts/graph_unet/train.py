@@ -40,6 +40,7 @@ import torch.optim as optim
 from SO_101.policies.graph_dit_policy import GraphDiTPolicyCfg
 from SO_101.policies.graph_unet_policy import DisentangledGraphUnetPolicy, GraphUnetPolicy, UnetPolicy
 from SO_101.policies.dual_arm_unet_policy import DualArmDisentangledPolicy, DualArmUnetPolicy, DualArmUnetPolicyMLP, DualArmUnetPolicyRawOnly
+from SO_101.policies.dual_arm_unet_policy_gated import DualArmDisentangledPolicyGated
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.tensorboard import SummaryWriter
@@ -1093,6 +1094,9 @@ def train_graph_unet_policy(
     if is_dual_arm and use_raw_only:
         PolicyClass = DualArmUnetPolicyRawOnly  # no graph, raw node only (train_graph_unet.sh --use_raw_only)
         print(f"\n[Train] *** RAW ONLY MODE *** No graph encoder, conditioning = raw node projection only")
+    elif is_dual_arm and policy_type == "disentangled_graph_unet_gated":
+        PolicyClass = DualArmDisentangledPolicyGated  # gated fusion: raw + gate*graph, no concat
+        print(f"\n[Train] *** DISENTANGLED GRAPH GATED *** pos/rot attention + gated fusion (metrics/graph_gate_weight)")
     elif is_dual_arm and policy_type == "disentangled_graph_unet":
         PolicyClass = DualArmDisentangledPolicy  # disentangled pos/rot graph + dual UNets
         print(f"\n[Train] *** DISENTANGLED GRAPH *** pos/rot separate attention + raw residual")
@@ -1110,7 +1114,9 @@ def train_graph_unet_policy(
 
     # use_graph_encoder 供 play 正确区分 MLP vs Graph 加载
     if is_dual_arm and not use_raw_only:
-        cfg_kwargs["use_graph_encoder"] = PolicyClass in (DualArmUnetPolicy, DualArmDisentangledPolicy)
+        cfg_kwargs["use_graph_encoder"] = PolicyClass in (
+            DualArmUnetPolicy, DualArmDisentangledPolicy, DualArmDisentangledPolicyGated,
+        )
     cfg = GraphDiTPolicyCfg(**cfg_kwargs)
 
     if num_subtasks > 0:
@@ -1378,6 +1384,9 @@ def train_graph_unet_policy(
             writer.add_scalar(
                 "Train/LearningRate", optimizer.param_groups[0]["lr"], global_step
             )
+            for k, v in loss_dict.items():
+                if k.startswith("metrics/") and isinstance(v, torch.Tensor) and v.numel() == 1:
+                    writer.add_scalar(k, v.item(), global_step)
 
         # Update learning rate (if scheduler is enabled)
         if scheduler is not None:
@@ -1489,8 +1498,8 @@ def main():
         "--policy_type",
         type=str,
         default="unet",
-        choices=["unet", "graph_unet", "disentangled_graph_unet"],
-        help="Policy class: 'unet' (MLP) / 'graph_unet' (full Graph Attn) / 'disentangled_graph_unet' (pos/rot separate)",
+        choices=["unet", "graph_unet", "disentangled_graph_unet", "disentangled_graph_unet_gated"],
+        help="Policy: unet / graph_unet / disentangled_graph_unet / disentangled_graph_unet_gated (gated fusion)",
     )
 
     # Dataset arguments
