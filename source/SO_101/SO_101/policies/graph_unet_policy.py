@@ -194,29 +194,17 @@ class UnetPolicy(GraphDiTPolicy):
         del self.noise_head
         del self.pred_horizon_pos_embed
 
-        self._use_joint_film = getattr(cfg, "use_joint_film", False)
         z_dim = getattr(cfg, "z_dim", 64)
-        joint_z_dim = 0
-        if self._use_joint_film:
-            jd = getattr(cfg, "joint_dim", None) or 6
-            hist_len = cfg.action_history_length
-            self.joint_encoder = nn.Sequential(
-                nn.Linear(jd * hist_len, cfg.hidden_dim),
-                nn.GELU(),
-                nn.Linear(cfg.hidden_dim, z_dim),
-            )
-            joint_z_dim = z_dim
 
         self.unet = ConditionalUnet1D(
             input_dim=cfg.action_dim,
-            global_cond_dim=z_dim + joint_z_dim,
+            global_cond_dim=z_dim,
             diffusion_step_embed_dim=cfg.hidden_dim,
             down_dims=[128, 256, 512],
             kernel_size=5,
             n_groups=8,
         )
 
-        # Option 1: subtask concat into z before U-Net
         num_subtasks = getattr(cfg, "num_subtasks", 0)
         if num_subtasks > 0 and hasattr(self, "subtask_encoder"):
             self.subtask_to_z = nn.Linear(cfg.hidden_dim // 4, z_dim)
@@ -310,12 +298,6 @@ class UnetPolicy(GraphDiTPolicy):
             subtask_embed = self.subtask_encoder(subtask_condition)
             z = z + self.subtask_to_z(subtask_embed)
 
-        if self._use_joint_film and joint_states_history is not None:
-            B_j = joint_states_history.shape[0]
-            joint_flat = joint_states_history.reshape(B_j, -1)
-            joint_enc = self.joint_encoder(joint_flat)
-            z = torch.cat([z, joint_enc], dim=-1)
-
         x = noisy_action.transpose(1, 2)
         ts_embed = self._get_timestep_embed(timesteps)
         noise_pred = self.unet(x, ts_embed, global_cond=z)
@@ -351,12 +333,6 @@ class UnetPolicy(GraphDiTPolicy):
             node_features = self._embed_node_histories(nh, nt)
             z = self._pool_node_latent(node_features)
 
-            if self._use_joint_film and joint_states_history is not None:
-                B = z.shape[0]
-                joint_flat = joint_states_history.reshape(B, -1)
-                joint_enc = self.joint_encoder(joint_flat)
-                z = torch.cat([z, joint_enc], dim=-1)
-
             K = getattr(self.cfg, "num_layers", 6)
             return z.unsqueeze(1).expand(-1, K, -1).contiguous()
 
@@ -380,12 +356,6 @@ class UnetPolicy(GraphDiTPolicy):
             )
             node_features = self._embed_node_histories(nh, nt)
             z = self._pool_node_latent(node_features)
-
-            if self._use_joint_film and joint_states_history is not None:
-                B_j = joint_states_history.shape[0]
-                joint_flat = joint_states_history.reshape(B_j, -1)
-                joint_enc = self.joint_encoder(joint_flat)
-                z = torch.cat([z, joint_enc], dim=-1)
 
             K = getattr(self.cfg, "num_layers", 6)
             z_layers = z.unsqueeze(1).expand(-1, K, -1).contiguous()
@@ -473,22 +443,11 @@ class GraphUnetPolicy(GraphDiTPolicy):
             for _ in range(cfg.num_layers)
         ])
 
-        self._use_joint_film = getattr(cfg, "use_joint_film", False)
         z_dim = getattr(cfg, "z_dim", 64)
-        joint_z_dim = 0
-        if self._use_joint_film:
-            jd = getattr(cfg, "joint_dim", None) or 6
-            hist_len = cfg.action_history_length
-            self.joint_encoder = nn.Sequential(
-                nn.Linear(jd * hist_len, cfg.hidden_dim),
-                nn.GELU(),
-                nn.Linear(cfg.hidden_dim, z_dim),
-            )
-            joint_z_dim = z_dim
 
         self.unet = ConditionalUnet1D(
             input_dim=cfg.action_dim,
-            global_cond_dim=z_dim + joint_z_dim,
+            global_cond_dim=z_dim,
             diffusion_step_embed_dim=cfg.hidden_dim,
             down_dims=[128, 256, 512],
             kernel_size=5,
@@ -668,12 +627,6 @@ class GraphUnetPolicy(GraphDiTPolicy):
             subtask_embed = self.subtask_encoder(subtask_condition)
             z = z + self.subtask_to_z(subtask_embed)
 
-        if self._use_joint_film and joint_states_history is not None:
-            B_j = joint_states_history.shape[0]
-            joint_flat = joint_states_history.reshape(B_j, -1)
-            joint_enc = self.joint_encoder(joint_flat)
-            z = torch.cat([z, joint_enc], dim=-1)
-
         if noisy_action.dim() == 2:
             noisy_action = noisy_action.unsqueeze(1)
 
@@ -715,12 +668,6 @@ class GraphUnetPolicy(GraphDiTPolicy):
             edge_embed = self._compute_and_embed_edges(nh)
             _, z = self._encode_graph(node_features, edge_embed, condition=None)
 
-            if self._use_joint_film and joint_states_history is not None:
-                B = z.shape[0]
-                joint_flat = joint_states_history.reshape(B, -1)
-                joint_enc = self.joint_encoder(joint_flat)
-                z = torch.cat([z, joint_enc], dim=-1)
-
             K = getattr(self.cfg, "num_layers", 6)
             return z.unsqueeze(1).expand(-1, K, -1).contiguous()
 
@@ -747,12 +694,6 @@ class GraphUnetPolicy(GraphDiTPolicy):
             node_features_out, z = self._encode_graph(
                 node_features, edge_embed, condition=None,
             )
-
-            if self._use_joint_film and joint_states_history is not None:
-                B_j = joint_states_history.shape[0]
-                joint_flat = joint_states_history.reshape(B_j, -1)
-                joint_enc = self.joint_encoder(joint_flat)
-                z = torch.cat([z, joint_enc], dim=-1)
 
             K = getattr(self.cfg, "num_layers", 6)
             z_layers = z.unsqueeze(1).expand(-1, K, -1).contiguous()
@@ -860,23 +801,9 @@ class DisentangledGraphUnetPolicy(GraphDiTPolicy):
         self.raw_proj = nn.Linear(raw_node_dim, raw_proj_dim)
         self.graph_z_proj = nn.Linear(z_dim, graph_z_dim)  # compress graph_z to half
 
-        # Joint FiLM (optional)
-        self._use_joint_film = getattr(cfg, "use_joint_film", False)
-        joint_z_dim = 0
-        if self._use_joint_film:
-            jd = getattr(cfg, "joint_dim", None) or 6
-            hist_len = cfg.action_history_length
-            self.joint_encoder = nn.Sequential(
-                nn.Linear(jd * hist_len, cfg.hidden_dim),
-                nn.GELU(),
-                nn.Linear(cfg.hidden_dim, z_dim),
-            )
-            joint_z_dim = z_dim
-
-        # U-Net backbone: cond = cat([graph_z_compressed, raw_proj]) = z_dim (same as raw-only)
         self.unet = ConditionalUnet1D(
             input_dim=cfg.action_dim,
-            global_cond_dim=z_dim + joint_z_dim,
+            global_cond_dim=z_dim,
             diffusion_step_embed_dim=cfg.hidden_dim,
             down_dims=[128, 256, 512],
             kernel_size=5,
@@ -1113,14 +1040,6 @@ class DisentangledGraphUnetPolicy(GraphDiTPolicy):
             subtask_embed = self.subtask_encoder(subtask_condition)
             z = z + self.subtask_to_z(subtask_embed)
 
-        # Joint FiLM (optional)
-        if self._use_joint_film and joint_states_history is not None:
-            B_j = joint_states_history.shape[0]
-            joint_flat = joint_states_history.reshape(B_j, -1)
-            joint_enc = self.joint_encoder(joint_flat)
-            z = torch.cat([z, joint_enc], dim=-1)
-
-        # U-Net
         ts_embed = self._get_timestep_embed(timesteps)
         if noisy_action.dim() == 2:
             noisy_action = noisy_action.unsqueeze(1)

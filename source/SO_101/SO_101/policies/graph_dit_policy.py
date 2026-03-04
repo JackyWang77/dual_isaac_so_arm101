@@ -615,11 +615,11 @@ class GraphDiTPolicyCfg:
     """Edge feature version: 'v1' (quat similarity) or 'v2' (best face alignment, robust to object tilt)."""
     
     joint_dim: int | None = None
-    """Joint states dimension (input only). Typically 6 (5 arm + 1 gripper). Policy uses this as context; it does not predict gripper. If None, joint states are not used."""
+    """Deprecated — kept for checkpoint backward compatibility."""
 
     use_joint_film: bool = False
-    """When True, encode joint_states_history and inject into U-Net via FiLM
-    (concatenated with graph latent z). Only affects GraphUnetPolicy."""
+    """Deprecated — joint FiLM removed (model cheats via joint history).
+    Kept for checkpoint backward compatibility."""
 
     # Dynamic graph configuration
     num_nodes: int = 2

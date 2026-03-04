@@ -252,29 +252,12 @@ class DualArmUnetPolicy(GraphUnetPolicy):
         z_dim = getattr(cfg, "z_dim", 64)
         cross_heads = getattr(cfg, "cross_arm_heads", 4)
 
-        # 每臂单独的 joint encoder（use_joint_film=True 时用）
-        jd_per_arm = arm_dim  # 每臂 joint_dim = arm_action_dim (6: 5 arm + 1 gripper)
-        hist_len = cfg.action_history_length
-        arm_joint_z_dim = z_dim // 2  # 给每臂留一半 z 空间
-
-        # raw_node: 最后一帧 node 信息投影到 arm_joint_z_dim（use_joint_film=False 时用）
         num_nodes = len(cfg.node_configs) if getattr(cfg, "node_configs", None) else getattr(cfg, "num_nodes", 2)
-        raw_node_dim = num_nodes * getattr(cfg, "node_dim", 7)  # N * 7
-        self.raw_node_proj = nn.Linear(raw_node_dim, arm_joint_z_dim)
+        raw_node_dim = num_nodes * getattr(cfg, "node_dim", 7)
+        raw_proj_dim = z_dim // 2
+        self.raw_node_proj = nn.Linear(raw_node_dim, raw_proj_dim)
 
-        self.left_joint_encoder = nn.Sequential(
-            nn.Linear(jd_per_arm * hist_len, cfg.hidden_dim),
-            nn.GELU(),
-            nn.Linear(cfg.hidden_dim, arm_joint_z_dim),
-        )
-        self.right_joint_encoder = nn.Sequential(
-            nn.Linear(jd_per_arm * hist_len, cfg.hidden_dim),
-            nn.GELU(),
-            nn.Linear(cfg.hidden_dim, arm_joint_z_dim),
-        )
-
-        # 每臂的 UNet：cond_dim = z + arm_joint_z_dim（两分支统一，投影后语义对齐）
-        arm_cond_dim = z_dim + arm_joint_z_dim
+        arm_cond_dim = z_dim + raw_proj_dim
         down_dims = (128, 256, 512)
         mid_dim = down_dims[-1]
 
@@ -299,48 +282,9 @@ class DualArmUnetPolicy(GraphUnetPolicy):
         use_cross = getattr(cfg, "use_cross_arm_attn", True)
         self.cross_arm_attn = CrossArmAttention(dim=mid_dim, num_heads=cross_heads) if use_cross else None
 
-        # 删掉父类的单 U-Net（不再使用）
         del self.unet
-
-        # 父类如果有 joint_encoder 也删掉（用各臂独立的）
         if hasattr(self, "joint_encoder"):
             del self.joint_encoder
-
-    # ------------------------------------------------------------------
-    # helpers
-    # ------------------------------------------------------------------
-
-    def _split_joint_history(
-        self, joint_states_history: torch.Tensor | None
-    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-        """
-        joint_states_history: [B, H, joint_dim=12]
-        split → left [B, H, 6], right [B, H, 6]
-        
-        Train order: [left_6, right_6]  (同 train.py 里的 is_dual_arm 逻辑)
-        """
-        if joint_states_history is None:
-            return None, None
-        jd = joint_states_history.shape[-1]
-        half = jd // 2
-        return joint_states_history[..., :half], joint_states_history[..., half:]
-
-    def _encode_arm_joint(
-        self,
-        encoder: nn.Module,
-        joint_hist: torch.Tensor | None,
-        B: int,
-        device: torch.device,
-        z_dim_half: int,
-    ) -> torch.Tensor:
-        if joint_hist is not None:
-            flat = joint_hist.reshape(B, -1)
-            return encoder(flat)
-        return torch.zeros(B, z_dim_half, device=device)
-
-    # ------------------------------------------------------------------
-    # forward
-    # ------------------------------------------------------------------
 
     def forward(
         self,
@@ -371,27 +315,15 @@ class DualArmUnetPolicy(GraphUnetPolicy):
         ts_embed = self._get_timestep_embed(timesteps)
         _, z = self._encode_graph(node_features, edge_embed, condition=None)
 
-        # Option 1: inject subtask into z before U-Net (subtask 直接影响 action 生成)
         if subtask_condition is not None and hasattr(self, "subtask_to_z"):
             subtask_embed = self.subtask_encoder(subtask_condition)
             z = z + self.subtask_to_z(subtask_embed)
 
-        # 2. 各臂 FiLM 条件：use_joint_film=True 用 joint_enc，False 用 raw_node 投影
-        use_joint_film = getattr(self.cfg, "use_joint_film", False)
-        arm_joint_z_dim = self.left_joint_encoder[-1].out_features
+        raw_latest = nh[:, :, -1, :].reshape(B, -1)
+        raw_proj = self.raw_node_proj(raw_latest)
+        z_left = z_right = torch.cat([z, raw_proj], dim=-1)
 
-        if use_joint_film:
-            left_jh, right_jh = self._split_joint_history(joint_states_history)
-            left_jenc = self._encode_arm_joint(self.left_joint_encoder, left_jh, B, device, arm_joint_z_dim)
-            right_jenc = self._encode_arm_joint(self.right_joint_encoder, right_jh, B, device, arm_joint_z_dim)
-            z_left = torch.cat([z, left_jenc], dim=-1)
-            z_right = torch.cat([z, right_jenc], dim=-1)
-        else:
-            raw_latest = nh[:, :, -1, :].reshape(B, -1)  # [B, N*7]
-            raw_proj = self.raw_node_proj(raw_latest)    # [B, arm_joint_z_dim]
-            z_left = z_right = torch.cat([z, raw_proj], dim=-1)
-
-        # 3. 拆分 noisy_action
+        # Split noisy_action
         if noisy_action.dim() == 2:
             noisy_action = noisy_action.unsqueeze(1)  # [B, 1, 12]
         # noisy_action: [B, pred_horizon, 12]
@@ -455,27 +387,12 @@ class DualArmUnetPolicyMLP(UnetPolicy):
         z_dim = getattr(cfg, "z_dim", 64)
         cross_heads = getattr(cfg, "cross_arm_heads", 4)
 
-        jd_per_arm = arm_dim
-        hist_len = cfg.action_history_length
-        arm_joint_z_dim = z_dim // 2
-
-        # raw_node: 最后一帧 node 信息投影到 arm_joint_z_dim（use_joint_film=False 时用）
         num_nodes = len(cfg.node_configs) if getattr(cfg, "node_configs", None) else getattr(cfg, "num_nodes", 2)
         raw_node_dim = num_nodes * getattr(cfg, "node_dim", 7)
-        self.raw_node_proj = nn.Linear(raw_node_dim, arm_joint_z_dim)
+        raw_proj_dim = z_dim // 2
+        self.raw_node_proj = nn.Linear(raw_node_dim, raw_proj_dim)
 
-        self.left_joint_encoder = nn.Sequential(
-            nn.Linear(jd_per_arm * hist_len, cfg.hidden_dim),
-            nn.GELU(),
-            nn.Linear(cfg.hidden_dim, arm_joint_z_dim),
-        )
-        self.right_joint_encoder = nn.Sequential(
-            nn.Linear(jd_per_arm * hist_len, cfg.hidden_dim),
-            nn.GELU(),
-            nn.Linear(cfg.hidden_dim, arm_joint_z_dim),
-        )
-
-        arm_cond_dim = z_dim + arm_joint_z_dim
+        arm_cond_dim = z_dim + raw_proj_dim
         down_dims = (128, 256, 512)
         mid_dim = down_dims[-1]
 
@@ -503,28 +420,6 @@ class DualArmUnetPolicyMLP(UnetPolicy):
         if hasattr(self, "joint_encoder"):
             del self.joint_encoder
 
-    def _split_joint_history(
-        self, joint_states_history: torch.Tensor | None
-    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-        if joint_states_history is None:
-            return None, None
-        jd = joint_states_history.shape[-1]
-        half = jd // 2
-        return joint_states_history[..., :half], joint_states_history[..., half:]
-
-    def _encode_arm_joint(
-        self,
-        encoder: nn.Module,
-        joint_hist: torch.Tensor | None,
-        B: int,
-        device: torch.device,
-        z_dim_half: int,
-    ) -> torch.Tensor:
-        if joint_hist is not None:
-            flat = joint_hist.reshape(B, -1)
-            return encoder(flat)
-        return torch.zeros(B, z_dim_half, device=device)
-
     def forward(
         self,
         obs: torch.Tensor,
@@ -545,34 +440,21 @@ class DualArmUnetPolicyMLP(UnetPolicy):
         B = obs.shape[0]
         device = obs.device
 
-        # 1. MLP encoder → z (复用 UnetPolicy 的 _embed + _pool)
         nh, nt = self._build_node_histories(
             obs, ee_node_history, object_node_history, node_histories, node_types,
         )
         node_features = self._embed_node_histories(nh, nt)
-        z = self._pool_node_latent(node_features)  # [B, z_dim]
+        z = self._pool_node_latent(node_features)
 
-        # Option 1: inject subtask into z before U-Net
         if subtask_condition is not None and hasattr(self, "subtask_to_z"):
             subtask_embed = self.subtask_encoder(subtask_condition)
             z = z + self.subtask_to_z(subtask_embed)
 
-        # 2. 各臂 FiLM 条件：use_joint_film=True 用 joint_enc，False 用 raw_node 投影
-        use_joint_film = getattr(self.cfg, "use_joint_film", False)
-        arm_joint_z_dim = self.left_joint_encoder[-1].out_features
+        raw_latest = nh[:, :, -1, :].reshape(B, -1)
+        raw_proj = self.raw_node_proj(raw_latest)
+        z_left = z_right = torch.cat([z, raw_proj], dim=-1)
 
-        if use_joint_film:
-            left_jh, right_jh = self._split_joint_history(joint_states_history)
-            left_jenc = self._encode_arm_joint(self.left_joint_encoder, left_jh, B, device, arm_joint_z_dim)
-            right_jenc = self._encode_arm_joint(self.right_joint_encoder, right_jh, B, device, arm_joint_z_dim)
-            z_left = torch.cat([z, left_jenc], dim=-1)
-            z_right = torch.cat([z, right_jenc], dim=-1)
-        else:
-            raw_latest = nh[:, :, -1, :].reshape(B, -1)
-            raw_proj = self.raw_node_proj(raw_latest)
-            z_left = z_right = torch.cat([z, raw_proj], dim=-1)
-
-        # 3. 拆分 noisy_action
+        # Split noisy_action
         if noisy_action.dim() == 2:
             noisy_action = noisy_action.unsqueeze(1)
         na_left = noisy_action[..., :self.arm_dim].transpose(1, 2)   # [B, 6, T]
@@ -809,6 +691,19 @@ class DualArmUnetPolicyRawOnly(nn.Module):
             return {"noise_pred": noise_pred}
         return noise_pred
 
+    @classmethod
+    def load(cls, path: str, device: str = "cuda"):
+        checkpoint = torch.load(path, map_location=device, weights_only=False)
+        cfg = checkpoint.get("cfg")
+        if cfg is None:
+            raise ValueError(f"No config in checkpoint: {path}")
+        policy = cls(cfg)
+        policy.load_state_dict(checkpoint["policy_state_dict"], strict=False)
+        policy.to(device)
+        policy.eval()
+        print(f"[{cls.__name__}] Loaded from {path}")
+        return policy
+
 
 # ==============================================================================
 # 6. DualArmDisentangledPolicy — disentangled graph + dual U-Net
@@ -841,29 +736,8 @@ class DualArmDisentangledPolicy(DisentangledGraphUnetPolicy):
 
         z_dim = getattr(cfg, "z_dim", 64)
         cross_heads = getattr(cfg, "cross_arm_heads", 4)
-        self._use_joint_film = getattr(cfg, "use_joint_film", False)
 
-        # Per-arm joint encoders (only used when use_joint_film=True)
-        jd_per_arm = arm_dim
-        hist_len = cfg.action_history_length
-        arm_joint_z_dim = z_dim // 2
-
-        if self._use_joint_film:
-            self.left_joint_encoder = nn.Sequential(
-                nn.Linear(jd_per_arm * hist_len, cfg.hidden_dim),
-                nn.GELU(),
-                nn.Linear(cfg.hidden_dim, arm_joint_z_dim),
-            )
-            self.right_joint_encoder = nn.Sequential(
-                nn.Linear(jd_per_arm * hist_len, cfg.hidden_dim),
-                nn.GELU(),
-                nn.Linear(cfg.hidden_dim, arm_joint_z_dim),
-            )
-
-        # Dual U-Nets: cond = z_base (=z_dim) + optional arm_joint
-        # No joint film → cond = z_dim = 64 (same as raw-only)
-        # With joint film → cond = z_dim + arm_joint_z_dim = 96
-        arm_cond_dim = z_dim + (arm_joint_z_dim if self._use_joint_film else 0)
+        arm_cond_dim = z_dim
         down_dims = (128, 256, 512)
         mid_dim = down_dims[-1]
 
@@ -887,28 +761,9 @@ class DualArmDisentangledPolicy(DisentangledGraphUnetPolicy):
         use_cross = getattr(cfg, "use_cross_arm_attn", True)
         self.cross_arm_attn = CrossArmAttention(dim=mid_dim, num_heads=cross_heads) if use_cross else None
 
-        # Remove the single U-Net from parent
         del self.unet
-
-        # Remove parent's joint_encoder if it exists
         if hasattr(self, "joint_encoder"):
             del self.joint_encoder
-
-    def _split_joint_history(
-        self, joint_states_history: torch.Tensor | None,
-    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-        if joint_states_history is None:
-            return None, None
-        half = joint_states_history.shape[-1] // 2
-        return joint_states_history[..., :half], joint_states_history[..., half:]
-
-    def _encode_arm_joint(
-        self, encoder: nn.Module, joint_hist: torch.Tensor | None,
-        B: int, device: torch.device, z_dim_half: int,
-    ) -> torch.Tensor:
-        if joint_hist is not None:
-            return encoder(joint_hist.reshape(B, -1))
-        return torch.zeros(B, z_dim_half, device=device)
 
     def forward(
         self,
@@ -945,23 +800,13 @@ class DualArmDisentangledPolicy(DisentangledGraphUnetPolicy):
         graph_z_comp = self.graph_z_proj(graph_z)          # [B, z_dim//2]
         z_base = torch.cat([graph_z_comp, raw_feat], dim=-1)  # [B, z_dim]
 
-        # 4. Subtask
         if subtask_condition is not None and hasattr(self, "subtask_to_z"):
             subtask_embed = self.subtask_encoder(subtask_condition)
             z_base = z_base + self.subtask_to_z(subtask_embed)
 
-        # 5. Per-arm conditioning
-        if self._use_joint_film:
-            arm_joint_z_dim = self.left_joint_encoder[-1].out_features
-            left_jh, right_jh = self._split_joint_history(joint_states_history)
-            left_jenc = self._encode_arm_joint(self.left_joint_encoder, left_jh, B, device, arm_joint_z_dim)
-            right_jenc = self._encode_arm_joint(self.right_joint_encoder, right_jh, B, device, arm_joint_z_dim)
-            z_left = torch.cat([z_base, left_jenc], dim=-1)   # [B, z_dim + arm_joint_z_dim]
-            z_right = torch.cat([z_base, right_jenc], dim=-1)
-        else:
-            z_left = z_right = z_base  # [B, z_dim=64], same as raw-only
+        z_left = z_right = z_base
 
-        # 7. Split noisy action
+        # Split noisy action
         ts_embed = self._get_timestep_embed(timesteps)
         if noisy_action.dim() == 2:
             noisy_action = noisy_action.unsqueeze(1)
@@ -1115,5 +960,5 @@ class DualArmDisentangledPolicy(DisentangledGraphUnetPolicy):
         policy.load_state_dict(checkpoint["policy_state_dict"], strict=False)
         policy.to(device)
         policy.eval()
-        print(f"[DualArmUnetPolicyRawOnly] Loaded from {path}")
+        print(f"[{cls.__name__}] Loaded from {path}")
         return policy

@@ -44,7 +44,7 @@ parser.add_argument(
     "--policy_type",
     type=str,
     default="unet",
-    choices=["unet", "graph_unet"],
+    choices=["unet", "graph_unet", "disentangled_graph_unet"],
     help="Policy class to use (default: unet)",
 )
 parser.add_argument(
@@ -102,8 +102,8 @@ from SO_101.tasks.cube_stack.cube_stack_env_cfg import (
     STACK_EPS_Z,
     STACK_EPS_XY,
 )
-from SO_101.policies.graph_unet_policy import UnetPolicy, GraphUnetPolicy
-from SO_101.policies.dual_arm_unet_policy import DualArmUnetPolicy, DualArmUnetPolicyMLP, DualArmUnetPolicyRawOnly
+from SO_101.policies.graph_unet_policy import UnetPolicy, GraphUnetPolicy, DisentangledGraphUnetPolicy
+from SO_101.policies.dual_arm_unet_policy import DualArmUnetPolicy, DualArmUnetPolicyMLP, DualArmUnetPolicyRawOnly, DualArmDisentangledPolicy
 
 # Try to import visualization utilities (if available)
 try:
@@ -296,17 +296,19 @@ def play_graph_unet_policy(
     cfg = checkpoint.get("cfg", None)
 
     # Policy class from checkpoint cfg: arm_action_dim set → dual-arm (graph, MLP, or RawOnly)
+    state_keys = set(checkpoint.get("policy_state_dict", {}).keys())
     if cfg is not None and getattr(cfg, "arm_action_dim", None) is not None:
         if getattr(cfg, "use_raw_only", False):
-            PolicyClass = DualArmUnetPolicyRawOnly  # raw node only, no graph
+            PolicyClass = DualArmUnetPolicyRawOnly
             print(f"[Play] *** RAW ONLY MODE *** No graph encoder, raw node projection only")
-        elif getattr(cfg, "use_graph_encoder", False) is True:
-            PolicyClass = DualArmUnetPolicy  # graph encoder
+        elif any("disentangled_attn_layers" in k for k in state_keys):
+            PolicyClass = DualArmDisentangledPolicy
+        elif any("graph_attention_layers" in k for k in state_keys):
+            PolicyClass = DualArmUnetPolicy
         else:
-            # use_graph_encoder=False 或旧 checkpoint：按 state_dict 推断（graph 含 graph_attention_layers）
-            state_keys = checkpoint.get("policy_state_dict", {}).keys()
-            has_graph = any("graph_attention_layers" in k for k in state_keys)
-            PolicyClass = DualArmUnetPolicy if has_graph else DualArmUnetPolicyMLP
+            PolicyClass = DualArmUnetPolicyMLP
+    elif policy_type == "disentangled_graph_unet":
+        PolicyClass = DisentangledGraphUnetPolicy
     elif policy_type == "graph_unet":
         PolicyClass = GraphUnetPolicy
     else:
@@ -440,6 +442,7 @@ def play_graph_unet_policy(
         "left_ee_position": 24, "left_ee_orientation": 27,
         "right_ee_position": 31, "right_ee_orientation": 34,
         "cube_1_pos": 38, "cube_1_ori": 41, "cube_2_pos": 45, "cube_2_ori": 48,
+        "last_action_all": 52,
         "object_position": 12, "object_orientation": 15,
         "ee_position": 19, "ee_orientation": 22,
         "joint_pos": 0,
@@ -649,6 +652,7 @@ def play_graph_unet_policy(
     # ==========================================================================
     # ema_alpha: 1.0=无平滑，直接用 model 输出；0.5=有平滑
     ema_smoothed_joints = None  # Will be initialized on first action [num_envs, joint_dim]
+    ema_needs_init = [True] * num_envs  # Per-env flag: True = first step, use clone instead of smoothing
     print(f"[Play] EMA smoothing: alpha={ema_alpha} (joints only, gripper excluded)")
 
     # ==========================================================================
@@ -671,6 +675,7 @@ def play_graph_unet_policy(
     ]
     
     step_count = 0
+    _env_just_reset = [True] * num_envs  # Flag: zero out last_action_all on first step after reset
 
     # Record obs only (attention extracted offline)
     record_obs = record_attention and attention_output is not None
@@ -691,6 +696,91 @@ def play_graph_unet_policy(
             _json.dump(records, _f)
         n_ok = sum(1 for r in records if r.get("success"))
         print(f"[Play] Flushed {len(records)} records ({n_ok} success) -> {_out}")
+
+    def _obs_to_tensor(obs_raw):
+        """Convert raw obs (dict or tensor/ndarray) to flat [num_envs, obs_dim] tensor on device."""
+        if isinstance(obs_raw, dict):
+            if "policy" in obs_raw:
+                obs_val = obs_raw["policy"]
+                if isinstance(obs_val, torch.Tensor):
+                    t = obs_val.to(device)
+                elif isinstance(obs_val, np.ndarray):
+                    t = torch.from_numpy(obs_val).to(device)
+                elif isinstance(obs_val, dict):
+                    _dual_arm_policy_order = [
+                        "left_joint_pos", "left_joint_vel", "right_joint_pos", "right_joint_vel",
+                        "left_ee_position", "left_ee_orientation", "right_ee_position", "right_ee_orientation",
+                        "cube_1_pos", "cube_1_ori", "cube_2_pos", "cube_2_ori", "last_action_all",
+                    ]
+                    keys_order = [k for k in _dual_arm_policy_order if k in obs_val]
+                    parts = []
+                    for key in keys_order:
+                        v = obs_val[key]
+                        if isinstance(v, torch.Tensor):
+                            parts.append(v.flatten(start_dim=1).to(device))
+                        elif isinstance(v, np.ndarray):
+                            parts.append(torch.from_numpy(v).flatten(start_dim=1).to(device))
+                        else:
+                            parts.append(torch.tensor(v).flatten(start_dim=1).to(device))
+                    t = torch.cat(parts, dim=1) if parts else None
+                    if t is None:
+                        raise RuntimeError("obs['policy'] is dict but no keys matched")
+                else:
+                    t = torch.tensor(obs_val, device=device)
+            else:
+                obs_keys_order = [
+                    "joint_pos", "joint_vel", "object_position", "object_orientation",
+                    "ee_position", "ee_orientation", "actions",
+                ]
+                obs_list = []
+                for key in obs_keys_order:
+                    if key in obs_raw:
+                        v = obs_raw[key]
+                        if isinstance(v, torch.Tensor):
+                            obs_list.append(v.flatten(start_dim=1).to(device))
+                        elif isinstance(v, np.ndarray):
+                            obs_list.append(torch.from_numpy(v).flatten(start_dim=1).to(device))
+                        else:
+                            obs_list.append(torch.tensor(v).flatten(start_dim=1).to(device))
+                if obs_list:
+                    t = torch.cat(obs_list, dim=1)
+                else:
+                    parts = []
+                    for key, val in obs_raw.items():
+                        if key == "target_object_position":
+                            continue
+                        if isinstance(val, torch.Tensor):
+                            parts.append(val.flatten(start_dim=1).to(device))
+                        elif isinstance(val, np.ndarray):
+                            parts.append(torch.from_numpy(val).flatten(start_dim=1).to(device))
+                        else:
+                            parts.append(torch.tensor(val).flatten(start_dim=1).to(device))
+                    t = torch.cat(parts, dim=1)
+        else:
+            t = torch.from_numpy(obs_raw).to(device) if isinstance(obs_raw, np.ndarray) else obs_raw.to(device)
+        if t.dim() == 1:
+            t = t.unsqueeze(0)
+        elif t.dim() > 2:
+            t = t.view(t.shape[0], -1)
+        if t.shape[1] == 39:
+            t = torch.cat([t[:, :26], t[:, 33:]], dim=1)
+        return t
+
+    def _prefill_node_history_buffers(obs_raw, env_ids=None):
+        """Pre-fill node history buffers with current obs (matches training padding)."""
+        ot = _obs_to_tensor(obs_raw)
+        ids = range(num_envs) if env_ids is None else env_ids
+        if use_node_histories:
+            nf = _extract_node_features_multi(ot)  # [num_envs, N, 7]
+            for i in ids:
+                for t in range(action_history_length):
+                    node_history_buffers[i][:, t, :] = nf[i]
+        else:
+            ee, obj = _extract_node_features_from_obs(ot)  # [num_envs, 7]
+            for i in ids:
+                for t in range(action_history_length):
+                    ee_node_history_buffers[i][t] = ee[i]
+                    object_node_history_buffers[i][t] = obj[i]
 
     def _extract_node_features_from_obs(obs_tensor):
         """Extract EE and Object node features using obs_key_offsets from checkpoint."""
@@ -752,6 +842,11 @@ def play_graph_unet_policy(
         dim = _obs_dims.get("joint_pos", 6)
         return obs_tensor[:, off : off + dim]
     
+    # Pre-fill node history buffers with initial observation (matches training padding
+    # where early-episode histories are padded with copies of the first real frame, not zeros)
+    _prefill_node_history_buffers(obs)
+    print(f"[Play] Pre-filled node history buffers with initial obs (train-inference alignment)")
+
     with torch.inference_mode():
         while simulation_app.is_running() and episode_count < num_episodes:
             # ── DEBUG: first 3 steps, print obs structure and action stats ──
@@ -903,6 +998,17 @@ def play_graph_unet_policy(
                 if num_envs > 1:
                     print(f"[DEBUG step={step_count}] env0 cube_1_pos={obs_tensor[0, _obs_offsets.get('cube_1_pos', 0):_obs_offsets.get('cube_1_pos', 0)+3].tolist()}")
                     print(f"[DEBUG step={step_count}] env1 cube_1_pos={obs_tensor[1, _obs_offsets.get('cube_1_pos', 0):_obs_offsets.get('cube_1_pos', 0)+3].tolist()}")
+
+            # Zero out last_action_all for envs that just reset to prevent
+            # stale extreme actions from previous episode corrupting the policy
+            la_key = "last_action_all"
+            if la_key in _obs_offsets:
+                la_off = _obs_offsets[la_key]
+                la_dim = _obs_dims.get(la_key, action_dim)
+                for env_id in range(num_envs):
+                    if _env_just_reset[env_id]:
+                        obs_tensor[env_id, la_off : la_off + la_dim] = 0.0
+                        _env_just_reset[env_id] = False
 
             # Normalize observations (if stats available)
             # Ensure dimensions match (obs_tensor should be 32 dims after removing target_object_position)
@@ -1140,6 +1246,11 @@ def play_graph_unet_policy(
             )
 
             if needs_replan:
+                if episode_count < 10:
+                    empty_envs = [eid for eid in range(num_envs) if len(action_buffers[eid]) == 0]
+                    sc_str = subtask_condition[0].cpu().tolist() if subtask_condition is not None else "None"
+                    print(f"[REPLAN DEBUG] step={step_count} ep={episode_count} empty_envs={empty_envs} "
+                          f"subtask={sc_str}")
                 # Record obs snapshot (attention extracted offline)
                 if record_obs:
                     obs_keys = ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos"]
@@ -1196,6 +1307,12 @@ def play_graph_unet_policy(
                                 action_trajectory_normalized[env_id, t, :].clone()
                             )
 
+            if needs_replan and episode_count < 10:
+                for env_id in range(num_envs):
+                    if len(action_buffers[env_id]) > 0:
+                        print(f"[REPLAN DEBUG] env={env_id} new_buf_len={len(action_buffers[env_id])} "
+                              f"first_action={action_buffers[env_id][0][:4].tolist()}")
+
             # Pop the first action from each buffer
             actions_list = []
             actions_normalized_list = []
@@ -1237,8 +1354,14 @@ def play_graph_unet_policy(
                 joints = actions[:, joint_indices]
                 if ema_smoothed_joints is None:
                     ema_smoothed_joints = joints.clone()
+                    ema_needs_init = [False] * num_envs
                 else:
-                    ema_smoothed_joints = ema_alpha * joints + (1 - ema_alpha) * ema_smoothed_joints
+                    for env_id in range(num_envs):
+                        if ema_needs_init[env_id]:
+                            ema_smoothed_joints[env_id] = joints[env_id].clone()
+                            ema_needs_init[env_id] = False
+                        else:
+                            ema_smoothed_joints[env_id] = ema_alpha * joints[env_id] + (1 - ema_alpha) * ema_smoothed_joints[env_id]
                 actions_out = actions.clone()
                 for i, idx in enumerate(joint_indices):
                     actions_out[:, idx] = ema_smoothed_joints[:, i]
@@ -1424,25 +1547,38 @@ def play_graph_unet_policy(
 
                         # Reset history buffers for this environment
                         action_history_buffers[i].zero_()
-                        if use_node_histories:
-                            node_history_buffers[i].zero_()
-                        else:
-                            ee_node_history_buffers[i].zero_()
-                            object_node_history_buffers[i].zero_()
                         if (
                             joint_dim is not None
                             and joint_state_history_buffers is not None
                         ):
                             joint_state_history_buffers[i].zero_()
+
+                        # Pre-fill node history with post-reset obs (matches training padding)
+                        # `obs` here is the post-reset observation from env.step() auto-reset
+                        _prefill_node_history_buffers(obs, env_ids=[i])
                         
                         # CRITICAL: Clear action buffer on episode reset!
-                        # This forces re-planning at the start of each new episode
                         action_buffers[i].clear()
                         action_buffers_normalized[i].clear()
+                        if episode_count < 15:
+                            # Verify env actually reset: check cube positions from NEW obs
+                            try:
+                                reset_ot = _obs_to_tensor(obs)
+                                c1_reset = reset_ot[i, _obs_offsets.get("cube_1_pos", 0):_obs_offsets.get("cube_1_pos", 0)+3].tolist()
+                                c2_reset = reset_ot[i, _obs_offsets.get("cube_2_pos", 0):_obs_offsets.get("cube_2_pos", 0)+3].tolist()
+                            except Exception:
+                                c1_reset, c2_reset = "err", "err"
+                            nh_mean = node_history_buffers[i].mean().item() if use_node_histories else 0.0
+                            print(f"[RESET DEBUG] env={i} ep={episode_count} success={is_success} "
+                                  f"terminated={bool(terminated[i])} truncated={is_truncated} "
+                                  f"buf_cleared={len(action_buffers[i])==0} "
+                                  f"node_hist_mean={nh_mean:.4f} "
+                                  f"reset_cube1={c1_reset} reset_cube2={c2_reset}")
 
-                        # Reset EMA state for this environment
-                        if ema_smoothed_joints is not None:
-                            ema_smoothed_joints[i] = 0.0
+                        # Reset EMA state: flag for re-init on next step (same as episode 1)
+                        ema_needs_init[i] = True
+                        # Flag to zero out last_action_all on next obs processing
+                        _env_just_reset[i] = True
 
             # 多 env 同时 done 时必须全部处理完再退出，否则未处理的 env 会留下脏 buffer
             if done.any() and episode_count >= num_episodes:
