@@ -74,20 +74,20 @@ python scripts/graph_unet/train.py \
     --policy_type disentangled_graph_unet \
     --obs_dim 64 \
     --action_dim 12 \
-    --action_history_length 10 \
+    --action_history_length 4 \
     --skip_first_steps 0 \
     --mode "$MODE" \
     --lr_schedule constant \
     --epochs "$EPOCHS" \
     --batch_size 16 \
     --lr 3e-4 \
-    --hidden_dim 64 \
+    --hidden_dim 32 \
     --num_layers 1 \
     --num_heads 4 \
-    --graph_edge_dim 32 \
+    --graph_edge_dim 8 \
     --pred_horizon 20 \
     --exec_horizon 10 \
-    --device cuda \
+    --device cuda \ 
     --obs_keys "$OBS_KEYS" \
     --node_configs "$NODE_CONFIGS" \
     --save_dir "./logs/disentangled_graph/$SUFFIX" \

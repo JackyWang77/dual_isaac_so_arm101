@@ -691,6 +691,53 @@ class DualArmUnetPolicyRawOnly(nn.Module):
             return {"noise_pred": noise_pred}
         return noise_pred
 
+    def predict(
+        self,
+        obs: torch.Tensor,
+        action_history: torch.Tensor | None = None,
+        ee_node_history: torch.Tensor | None = None,
+        object_node_history: torch.Tensor | None = None,
+        joint_states_history: torch.Tensor | None = None,
+        subtask_condition: torch.Tensor | None = None,
+        num_diffusion_steps: int | None = None,
+        deterministic: bool = True,
+        *,
+        node_histories: torch.Tensor | None = None,
+        node_types: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Flow Matching prediction: integrate velocity from t=0 to t=1."""
+        num_steps = num_diffusion_steps or getattr(self.cfg, "num_inference_steps", 10)
+        with torch.no_grad():
+            batch_size = obs.shape[0]
+            device = obs.device
+            pred_horizon = self.pred_horizon
+            action_t = torch.randn(batch_size, pred_horizon, self.cfg.action_dim, device=device)
+            t = torch.zeros(batch_size, device=device)
+            dt = 1.0 / num_steps
+            diffusion_steps = getattr(self.cfg, "diffusion_steps", 100)
+
+            for step in range(num_steps):
+                timesteps = (t * (diffusion_steps - 1)).long().clamp(0, diffusion_steps - 1)
+                velocity = self.forward(
+                    obs,
+                    noisy_action=action_t,
+                    action_history=action_history,
+                    ee_node_history=ee_node_history,
+                    object_node_history=object_node_history,
+                    node_histories=node_histories,
+                    node_types=node_types,
+                    joint_states_history=joint_states_history,
+                    subtask_condition=subtask_condition,
+                    timesteps=timesteps,
+                )
+                action_t = action_t + dt * velocity
+                t = t + dt
+
+            if not deterministic:
+                action_t = action_t + 0.05 * torch.randn_like(action_t)
+
+            return action_t
+
     @classmethod
     def load(cls, path: str, device: str = "cuda"):
         checkpoint = torch.load(path, map_location=device, weights_only=False)

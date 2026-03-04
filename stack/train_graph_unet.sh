@@ -84,10 +84,10 @@ python scripts/graph_unet/train.py \
     --epochs "$EPOCHS" \
     --batch_size 16 \
     --lr 3e-4 \
-    --hidden_dim 64 \
+    --hidden_dim 32 \
     --num_layers 1 \
     --num_heads 4 \
-    --graph_edge_dim 32 \
+    --graph_edge_dim 8 \
     --pred_horizon 20 \
     --exec_horizon 10 \
     --device cuda \

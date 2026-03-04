@@ -907,6 +907,18 @@ def play_graph_unet_policy(
                         obs_tensor_raw = torch.cat(parts, dim=1) if parts else None
                         if obs_tensor_raw is None:
                             raise RuntimeError("obs['policy'] is dict but no keys matched")
+                        if step_count < 1:
+                            exp_keys = 13
+                            exp_dim = 64
+                            ok = (
+                                obs_tensor_raw.shape[1] == exp_dim
+                                and len(keys_order) == exp_keys
+                            )
+                            print(
+                                f"[ALIGN CHECK] policy_obs dict: len(keys_order)={len(keys_order)} "
+                                f"keys={keys_order} obs_dim={obs_tensor_raw.shape[1]} "
+                                f"expected_dim={exp_dim} aligned={ok}"
+                            )
                     else:
                         obs_tensor_raw = torch.tensor(obs_val, device=device)
                     
@@ -1597,19 +1609,34 @@ def play_graph_unet_policy(
                         action_buffers[i].clear()
                         action_buffers_normalized[i].clear()
                         if episode_count < 15:
-                            # Verify env actually reset: check cube positions from NEW obs
+                            # Verify env actually reset: check cube + joint positions from NEW obs
                             try:
                                 reset_ot = _obs_to_tensor(obs)
                                 c1_reset = reset_ot[i, _obs_offsets.get("cube_1_pos", 0):_obs_offsets.get("cube_1_pos", 0)+3].tolist()
                                 c2_reset = reset_ot[i, _obs_offsets.get("cube_2_pos", 0):_obs_offsets.get("cube_2_pos", 0)+3].tolist()
-                            except Exception:
+                                # Joint pos: expect ~(0,0,0,0,0,0.4) per arm if truly post-reset
+                                if "left_joint_pos" in _obs_offsets and "right_joint_pos" in _obs_offsets:
+                                    left_dim = _obs_dims.get("left_joint_pos", 6)
+                                    right_dim = _obs_dims.get("right_joint_pos", 6)
+                                    lo = _obs_offsets["left_joint_pos"]
+                                    ro = _obs_offsets["right_joint_pos"]
+                                    left_jp = reset_ot[i, lo : lo + left_dim].tolist()
+                                    right_jp = reset_ot[i, ro : ro + right_dim].tolist()
+                                    joint_str = f" left_jp={[round(x, 3) for x in left_jp]} right_jp={[round(x, 3) for x in right_jp]}"
+                                else:
+                                    off = _obs_offsets.get("joint_pos", 0)
+                                    dim = _obs_dims.get("joint_pos", 6)
+                                    jp = reset_ot[i, off : off + dim].tolist()
+                                    joint_str = f" joint_pos={[round(x, 3) for x in jp]}"
+                            except Exception as e:
                                 c1_reset, c2_reset = "err", "err"
+                                joint_str = f" joint_err={e!r}"
                             nh_mean = node_history_buffers[i].mean().item() if use_node_histories else 0.0
                             print(f"[RESET DEBUG] env={i} ep={episode_count} success={is_success} "
                                   f"terminated={bool(terminated[i])} truncated={is_truncated} "
                                   f"buf_cleared={len(action_buffers[i])==0} "
                                   f"node_hist_mean={nh_mean:.4f} "
-                                  f"reset_cube1={c1_reset} reset_cube2={c2_reset}")
+                                  f"reset_cube1={c1_reset} reset_cube2={c2_reset}{joint_str}")
 
                         # Reset EMA state: flag for re-init on next step (same as episode 1)
                         ema_needs_init[i] = True
