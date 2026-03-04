@@ -1634,15 +1634,26 @@ def play_graph_unet_policy(
                                     dim = _obs_dims.get("joint_pos", 6)
                                     jp = reset_ot[i, off : off + dim].tolist()
                                     joint_str = f" joint_pos={[round(x, 3) for x in jp]}"
+                                # Also print EE positions to verify they are HOME (not stale from stuck pos)
+                                ee_str = ""
+                                if "left_ee_position" in _obs_offsets:
+                                    lee_off = _obs_offsets["left_ee_position"]
+                                    lee = reset_ot[i, lee_off : lee_off + 3].tolist()
+                                    ee_str += f" left_ee={[round(x, 3) for x in lee]}"
+                                if "right_ee_position" in _obs_offsets:
+                                    ree_off = _obs_offsets["right_ee_position"]
+                                    ree = reset_ot[i, ree_off : ree_off + 3].tolist()
+                                    ee_str += f" right_ee={[round(x, 3) for x in ree]}"
                             except Exception as e:
                                 c1_reset, c2_reset = "err", "err"
                                 joint_str = f" joint_err={e!r}"
+                                ee_str = ""
                             nh_mean = node_history_buffers[i].mean().item() if use_node_histories else 0.0
                             print(f"[RESET DEBUG] env={i} ep={episode_count} success={is_success} "
                                   f"terminated={bool(terminated[i])} truncated={is_truncated} "
                                   f"buf_cleared={len(action_buffers[i])==0} "
                                   f"node_hist_mean={nh_mean:.4f} "
-                                  f"reset_cube1={c1_reset} reset_cube2={c2_reset}{joint_str}")
+                                  f"reset_cube1={c1_reset} reset_cube2={c2_reset}{joint_str}{ee_str}")
 
                         # Reset EMA state: flag for re-init on next step (same as episode 1)
                         ema_needs_init[i] = True
