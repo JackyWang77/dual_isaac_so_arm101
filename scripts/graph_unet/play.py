@@ -842,10 +842,22 @@ def play_graph_unet_policy(
         dim = _obs_dims.get("joint_pos", 6)
         return obs_tensor[:, off : off + dim]
     
-    # Pre-fill node history buffers with initial observation (matches training padding
+    # Pre-fill ALL history buffers with initial observation (matches training padding
     # where early-episode histories are padded with copies of the first real frame, not zeros)
     _prefill_node_history_buffers(obs)
-    print(f"[Play] Pre-filled node history buffers with initial obs (train-inference alignment)")
+    _init_ot = _obs_to_tensor(obs)
+    if joint_dim is not None and joint_state_history_buffers is not None:
+        _init_jp = _extract_joint_states_from_obs(_init_ot)  # [num_envs, joint_dim]
+        for env_id in range(num_envs):
+            for t in range(action_history_length):
+                joint_state_history_buffers[env_id][t] = _init_jp[env_id]
+    if action_mean is not None and action_std is not None:
+        _init_jp2 = _extract_joint_states_from_obs(_init_ot)  # [num_envs, action_dim]
+        for env_id in range(num_envs):
+            _init_act_norm = (_init_jp2[env_id] - action_mean) / action_std
+            for t in range(action_history_length):
+                action_history_buffers[env_id][t] = _init_act_norm
+    print(f"[Play] Pre-filled all history buffers with initial obs (train-inference alignment)")
 
     with torch.inference_mode():
         while simulation_app.is_running() and episode_count < num_episodes:
@@ -1036,17 +1048,56 @@ def play_graph_unet_policy(
                 ee_node_current, object_node_current = _extract_node_features_from_obs(
                     obs_tensor
                 )  # [num_envs, 7]
-            
+
             # Extract current joint states (position + velocity) from raw obs
             if joint_dim is not None:
                 joint_states_current = _extract_joint_states_from_obs(
                     obs_tensor
                 )  # [num_envs, joint_dim]
 
+            # ── CRITICAL FIX: Update node & joint-state history buffers BEFORE ──
+            # ── building the batch, so the current frame is included.          ──
+            # ── Training includes obs[i] in the history at timestep i:         ──
+            # ──   for j in range(max(0, i-H+1), i+1):  # j=i included         ──
+            # ── Without this fix, play lags 1 step behind training.            ──
+            for env_id in range(num_envs):
+                if use_node_histories:
+                    node_history_buffers[env_id] = torch.cat(
+                        [
+                            node_history_buffers[env_id][:, 1:, :],
+                            node_features_current[env_id : env_id + 1].transpose(0, 1),
+                        ],
+                        dim=1,
+                    )  # [N, H, 7]
+                else:
+                    ee_node_history_buffers[env_id] = torch.cat(
+                        [
+                            ee_node_history_buffers[env_id][1:],
+                            ee_node_current[env_id : env_id + 1],
+                        ],
+                        dim=0,
+                    )
+                    object_node_history_buffers[env_id] = torch.cat(
+                        [
+                            object_node_history_buffers[env_id][1:],
+                            object_node_current[env_id : env_id + 1],
+                        ],
+                        dim=0,
+                    )
+
+                if joint_dim is not None and joint_state_history_buffers is not None:
+                    joint_state_history_buffers[env_id] = torch.cat(
+                        [
+                            joint_state_history_buffers[env_id][1:],
+                            joint_states_current[env_id : env_id + 1],
+                        ],
+                        dim=0,
+                    )
+
             # Build action, node, and joint histories for batch
             action_history_batch = []
             joint_state_history_batch = [] if joint_dim is not None else None
-            
+
             for env_id in range(num_envs):
                 action_history_batch.append(
                     action_history_buffers[env_id].clone()
@@ -1399,10 +1450,12 @@ def play_graph_unet_policy(
                         action_for_env[:, g_idx] > gripper_threshold, open_val, close_val
                     )
 
-            # Update history buffers (shift and add new)
+            # Update action history buffer (shift and add new)
+            # NOTE: Node & joint-state histories are updated BEFORE batch building (above)
+            # to match training which includes the current frame in history.
+            # Action history stays here because it needs the EXECUTED action (not available before prediction).
             # IMPORTANT: Store normalized actions in history buffer, as policy expects normalized action_history
             for env_id in range(num_envs):
-                # Shift action history (use normalized actions, not denormalized!)
                 action_history_buffers[env_id] = torch.cat(
                     [
                         action_history_buffers[env_id][1:],
@@ -1412,40 +1465,6 @@ def play_graph_unet_policy(
                     ],
                     dim=0,
                 )
-                
-                # Shift node histories
-                if use_node_histories:
-                    node_history_buffers[env_id] = torch.cat(
-                        [
-                            node_history_buffers[env_id][:, 1:, :],
-                            node_features_current[env_id : env_id + 1].transpose(0, 1),
-                        ],
-                        dim=1,
-                    )  # [N, H, 7]
-                else:
-                    ee_node_history_buffers[env_id] = torch.cat(
-                        [
-                            ee_node_history_buffers[env_id][1:],
-                            ee_node_current[env_id : env_id + 1],
-                        ],
-                        dim=0,
-                    )
-                    object_node_history_buffers[env_id] = torch.cat(
-                        [
-                            object_node_history_buffers[env_id][1:],
-                            object_node_current[env_id : env_id + 1],
-                        ],
-                        dim=0,
-                    )
-
-                if joint_dim is not None and joint_state_history_buffers is not None:
-                    joint_state_history_buffers[env_id] = torch.cat(
-                        [
-                            joint_state_history_buffers[env_id][1:],
-                            joint_states_current[env_id : env_id + 1],
-                        ],
-                        dim=0,
-                    )
             
             # Step environment (send mapped gripper -1/1; buffer already has raw for next policy input)
             obs, rewards, terminated, truncated, info = env.step(action_for_env)
@@ -1546,16 +1565,33 @@ def play_graph_unet_policy(
                         current_episode_rewards[i] = 0.0
 
                         # Reset history buffers for this environment
-                        action_history_buffers[i].zero_()
+                        # Training pads early-episode histories with copies of the
+                        # first real frame, NOT zeros.  Match that here.
+                        # `obs` is the post-reset observation from env.step() auto-reset.
+
+                        # Pre-fill node history with post-reset obs (matches training padding)
+                        _prefill_node_history_buffers(obs, env_ids=[i])
+
+                        # Pre-fill joint-state & action history with post-reset state
+                        reset_ot_tmp = _obs_to_tensor(obs)
+
                         if (
                             joint_dim is not None
                             and joint_state_history_buffers is not None
                         ):
-                            joint_state_history_buffers[i].zero_()
+                            reset_joint = _extract_joint_states_from_obs(reset_ot_tmp)  # [num_envs, joint_dim]
+                            for t in range(action_history_length):
+                                joint_state_history_buffers[i][t] = reset_joint[i]
 
-                        # Pre-fill node history with post-reset obs (matches training padding)
-                        # `obs` here is the post-reset observation from env.step() auto-reset
-                        _prefill_node_history_buffers(obs, env_ids=[i])
+                        # Pre-fill action history with normalized initial joint positions
+                        # (approximates training's padding with actions[0] ≈ initial joint pos)
+                        if action_mean is not None and action_std is not None:
+                            reset_jp = _extract_joint_states_from_obs(reset_ot_tmp)  # [num_envs, action_dim]
+                            init_action_normalized = (reset_jp[i] - action_mean) / action_std
+                            for t in range(action_history_length):
+                                action_history_buffers[i][t] = init_action_normalized
+                        else:
+                            action_history_buffers[i].zero_()
                         
                         # CRITICAL: Clear action buffer on episode reset!
                         action_buffers[i].clear()
