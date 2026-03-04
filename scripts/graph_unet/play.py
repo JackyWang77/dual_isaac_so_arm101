@@ -1502,6 +1502,20 @@ def play_graph_unet_policy(
             
             # Check for episode completion and reset history buffers + action buffers
             if done.any():
+                # CRITICAL FIX: Isaac Lab step() auto-reset calls _reset_idx() but
+                # does NOT call write_data_to_sim()+sim.forward() afterwards (unlike
+                # reset() which does). This means body transforms — and therefore EE
+                # positions read by FrameTransformer — are STALE (still from the
+                # previous episode). Force FK update here so obs has correct EE pos.
+                try:
+                    _base = env.unwrapped if hasattr(env, "unwrapped") else env
+                    _base.scene.write_data_to_sim()
+                    _base.sim.forward()
+                    _base.scene.update(dt=_base.physics_dt)
+                    obs = _base.observation_manager.compute()
+                except Exception as _e:
+                    print(f"[Play] WARNING: FK flush after reset failed: {_e}")
+
                 done_indices = [i for i in range(num_envs) if done[i]]
                 if episode_count < 5:
                     sf = _get_success_flags(info)
