@@ -865,6 +865,22 @@ def play_graph_unet_policy(
                 action_history_buffers[env_id][t] = _init_act_norm
     print(f"[Play] Pre-filled all history buffers with initial obs (train-inference alignment)")
 
+    # Save home EE node features for fixing stale body transforms after auto-reset.
+    # env.reset() correctly calls sim.forward(), so the initial obs has correct EE positions.
+    # After step() auto-reset, body transforms (EE/cube positions from FrameTransformer)
+    # are STALE because step() does NOT call sim.forward() after _reset_idx().
+    # We save the home node features here and use them to fix obs for reset envs.
+    _home_node_features = _extract_node_features_multi(_init_ot) if use_node_histories else None  # [num_envs, N, 7]
+    _home_ee_node, _home_obj_node = (None, None) if use_node_histories else _extract_node_features_from_obs(_init_ot)
+    # Also save EE pos/ori as flat slices for fixing obs_tensor directly
+    _home_ee_slices = {}
+    for _hk in ["left_ee_position", "left_ee_orientation", "right_ee_position", "right_ee_orientation"]:
+        if _hk in _obs_offsets:
+            _hd = _obs_dims.get(_hk, 3 if "position" in _hk else 4)
+            _home_ee_slices[_hk] = _init_ot[0, _obs_offsets[_hk] : _obs_offsets[_hk] + _hd].clone()
+    if _home_ee_slices:
+        print(f"[Play] Saved home EE positions for multi-env FK fix: {list(_home_ee_slices.keys())}")
+
     with torch.inference_mode():
         while simulation_app.is_running() and episode_count < num_episodes:
             # Process observations
@@ -1453,19 +1469,39 @@ def play_graph_unet_policy(
             
             # Check for episode completion and reset history buffers + action buffers
             if done.any():
-                # CRITICAL FIX: Isaac Lab step() auto-reset calls _reset_idx() but
-                # does NOT call write_data_to_sim()+sim.forward() afterwards (unlike
-                # reset() which does). This means body transforms — and therefore EE
-                # positions read by FrameTransformer — are STALE (still from the
-                # previous episode). Force FK update here so obs has correct EE pos.
-                try:
-                    _base = env.unwrapped if hasattr(env, "unwrapped") else env
-                    _base.scene.write_data_to_sim()
-                    _base.sim.forward()
-                    _base.scene.update(dt=_base.physics_dt)
-                    obs = _base.observation_manager.compute()
-                except Exception as _e:
-                    print(f"[Play] WARNING: FK flush after reset failed: {_e}")
+                # FIX for stale EE positions after auto-reset (multi-env safe).
+                # Isaac Lab step() auto-reset calls _reset_idx() but NOT sim.forward(),
+                # so body transforms (EE positions from FrameTransformer) are stale.
+                # Old approach: sim.forward() for ALL envs → breaks non-reset envs
+                # (extra physics step causes drift/random motion).
+                # New approach: overwrite stale EE positions in obs with saved home
+                # positions for ONLY the reset envs. Joint positions are already
+                # correct from _reset_idx(). Cube positions may be slightly stale
+                # but correct after one more env.step().
+                if _home_ee_slices:
+                    try:
+                        if isinstance(obs, dict) and "policy" in obs and isinstance(obs["policy"], dict):
+                            for env_id in range(num_envs):
+                                if done[env_id]:
+                                    for _hk, _hv in _home_ee_slices.items():
+                                        if _hk in obs["policy"]:
+                                            obs["policy"][_hk][env_id] = _hv.to(obs["policy"][_hk].device)
+                        else:
+                            # obs is tensor or concatenated: fix via _obs_offsets
+                            _obs_t_fix = _obs_to_tensor(obs)
+                            for env_id in range(num_envs):
+                                if done[env_id]:
+                                    for _hk, _hv in _home_ee_slices.items():
+                                        _ho = _obs_offsets[_hk]
+                                        _hd = len(_hv)
+                                        _obs_t_fix[env_id, _ho : _ho + _hd] = _hv
+                            # Write back to obs (tensor case)
+                            if isinstance(obs, dict) and "policy" in obs and isinstance(obs["policy"], torch.Tensor):
+                                obs["policy"] = _obs_t_fix
+                            elif isinstance(obs, torch.Tensor):
+                                obs = _obs_t_fix
+                    except Exception as _e:
+                        print(f"[Play] WARNING: EE position fix after reset failed: {_e}")
 
                 done_indices = [i for i in range(num_envs) if done[i]]
                 for i in range(num_envs):
