@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """
 DualArmDisentangledPolicyGated: 门控融合版 Disentangled，不 concat，用可学习 gate 注入 graph。
-z_base = raw_feat + gate * graph_z_comp，gate = sigmoid(graph_gate_logit)，初始 ~0.11 便于先当 raw baseline 训。
+z_base = raw_feat + gate * graph_z_comp，gate = sigmoid(graph_gate_logit)，初始 -1.7 -> ~0.15 试更快收敛。
 loss() 返回 metrics/graph_gate_weight 供 TensorBoard 监控。
 """
 
@@ -16,7 +16,7 @@ class DualArmDisentangledPolicyGated(DualArmDisentangledPolicy):
     """Dual-arm disentangled graph + dual U-Net, with learnable gated fusion.
 
     Replaces raw/graph concat with: z_base = raw_feat + gate * graph_z_comp,
-    gate = sigmoid(graph_gate_logit). Initial gate ~0.11 so training starts as raw baseline.
+    gate = sigmoid(graph_gate_logit). Initial logit -1.7 (gate ~0.15) for faster convergence.
     Exposes metrics/graph_gate_weight in loss() for TensorBoard.
     """
 
@@ -26,12 +26,17 @@ class DualArmDisentangledPolicyGated(DualArmDisentangledPolicy):
         z_dim = getattr(cfg, "z_dim", 64)
         raw_node_dim = self.raw_proj.in_features
         graph_z_in = self.graph_z_proj.in_features
+        self._z_dim = z_dim
+        per_gate = getattr(cfg, "per_gate", False)
 
         # Full-dim projections (no half concat)
         self.raw_proj = torch.nn.Linear(raw_node_dim, z_dim)
         self.graph_z_proj = torch.nn.Linear(graph_z_in, z_dim)
-        # Gate init -2 -> sigmoid ~0.11, so early training relies on raw
-        self.graph_gate_logit = torch.nn.Parameter(torch.tensor([-2.0]))
+        # Gate init -1.7 -> sigmoid ~0.15; scalar (1) or per-dim (z_dim) when per_gate=True
+        if per_gate:
+            self.graph_gate_logit = torch.nn.Parameter(torch.full((z_dim,), -1.7))
+        else:
+            self.graph_gate_logit = torch.nn.Parameter(torch.tensor([-1.7]))
 
     def forward(
         self,
@@ -64,7 +69,7 @@ class DualArmDisentangledPolicyGated(DualArmDisentangledPolicy):
         raw_latest = nh[:, :, -1, :].reshape(B, -1)
         raw_feat = self.raw_proj(raw_latest)                    # [B, z_dim]
         graph_z_comp = self.graph_z_proj(graph_z)                # [B, z_dim]
-        gate = torch.sigmoid(self.graph_gate_logit).to(device)  # scalar
+        gate = torch.sigmoid(self.graph_gate_logit).to(device)  # [1] or [z_dim]
         z_base = raw_feat + gate * graph_z_comp                 # [B, z_dim]
 
         if subtask_condition is not None and hasattr(self, "subtask_to_z"):
@@ -123,5 +128,6 @@ class DualArmDisentangledPolicyGated(DualArmDisentangledPolicy):
             node_histories=node_histories,
             node_types=node_types,
         )
-        result["metrics/graph_gate_weight"] = torch.sigmoid(self.graph_gate_logit).detach()
+        g = torch.sigmoid(self.graph_gate_logit).detach()
+        result["metrics/graph_gate_weight"] = g.mean() if g.numel() > 1 else g.squeeze()
         return result

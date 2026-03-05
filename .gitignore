@@ -61,3 +61,13 @@ logs/
 
 # Pre-Trained Checkpoints
 /.pretrained_checkpoints/
+
+# Attention pipeline outputs (run_attention_pipeline, episode_to_animation, episode_to_frames)
+attention_output/*.gif
+attention_output/*.pdf
+attention_output/*.png
+attention_output/heatmaps_*/
+attention_output/image/
+attention_output/obs_records.json
+attention_output/obs_with_attn_*.json
+attention_output/ep*_indices.json

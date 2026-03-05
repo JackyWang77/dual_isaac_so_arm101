@@ -691,6 +691,20 @@ def play_graph_unet_policy(
     all_replan_records = []
     completed_episodes = []
 
+    def _to_json_serializable(obj):
+        """Recursively convert tensors/ndarrays to lists so json.dump works."""
+        if hasattr(obj, "cpu") and callable(obj.cpu):
+            return obj.cpu().tolist()
+        if hasattr(obj, "tolist") and callable(obj.tolist):
+            return obj.tolist()
+        if hasattr(obj, "item") and callable(obj.item) and getattr(obj, "ndim", -1) == 0:
+            return obj.item()
+        if isinstance(obj, dict):
+            return {k: _to_json_serializable(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [_to_json_serializable(x) for x in obj]
+        return obj
+
     def _flush_records(records, completed, out_path_str, current_ep_id):
         """Incremental save: write all records so far with success labels."""
         import json as _json
@@ -698,8 +712,9 @@ def play_graph_unet_policy(
         for r in records:
             r["success"] = success_dict.get((r["env_id"], r["episode_id"]), False)
         _out = os.path.abspath(out_path_str)
+        records_serializable = _to_json_serializable(records)
         with open(_out, "w") as _f:
-            _json.dump(records, _f)
+            _json.dump(records_serializable, _f)
         n_ok = sum(1 for r in records if r.get("success"))
         print(f"[Play] Flushed {len(records)} records ({n_ok} success) -> {_out}")
 

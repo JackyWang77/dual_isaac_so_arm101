@@ -12,7 +12,15 @@
 Python module serving as a project/extension template.
 """
 
-# Register Gym environments.
-from .tasks import *
+# Register Gym environments (skip when omni/Isaac Sim not available, e.g. offline extract_attention_offline.py).
+try:
+    from .tasks import *
+except (ImportError, ModuleNotFoundError) as e:
+    import warnings
+    warnings.warn(f"SO_101.tasks not loaded ({e}). Gym envs will not be registered.")
 # Register UI extensions.
-from .ui_extension_example import *
+try:
+    from .ui_extension_example import *
+except (ImportError, ModuleNotFoundError) as e:
+    import warnings
+    warnings.warn(f"SO_101.ui_extension_example not loaded ({e}).")

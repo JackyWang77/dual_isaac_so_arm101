@@ -1,53 +1,52 @@
 #!/bin/bash
-# End-to-end attention analysis pipeline:
-#   1. Play (record obs) → 2. Extract attention → 3. Classify phases → 4. Visualize
+# Attention pipeline: Step 1 = record obs (play with record_attention).
+# Step 2–4 (extract attn, classify, visualize) run later after choosing episode(s).
+#
+# Model/params aligned with play_disentangled_graph_gated. Collects 10 episodes by default.
 #
 # Usage:
-#   ./stack/run_attention_pipeline.sh <checkpoint_path> [num_episodes] [output_dir]
-#   ./stack/run_attention_pipeline.sh ./logs/graph_unet_full/.../best_model.pt
-#   ./stack/run_attention_pipeline.sh ./logs/graph_unet_full/.../best_model.pt 20
-#   NUM_ENVS=2 ./stack/run_attention_pipeline.sh ./logs/.../best_model.pt 20 ./attn_results
+#   ./stack/run_attention_pipeline.sh [checkpoint_path] [num_episodes] [output_dir]
+#   ./stack/run_attention_pipeline.sh
+#   ./stack/run_attention_pipeline.sh ./logs/graph_unet_full/.../gate_graph/best_model.pt 20
 set -e
 cd "$(dirname "$0")/.."
 
-CHECKPOINT="${1:-}"
+ATTN_CHECKPOINT="./logs/graph_unet_full/stack_joint_t1_gripper_flow_matching/gate_graph/best_model.pt"
+CHECKPOINT="${1:-$ATTN_CHECKPOINT}"
 NUM_EPISODES="${2:-10}"
 OUT_DIR="${3:-./attention_output}"
 
-if [ -z "$CHECKPOINT" ]; then
-    CHECKPOINT=$(ls -t ./logs/graph_unet_full/stack_joint*/*/best_model.pt 2>/dev/null | head -1)
-fi
 if [ -z "$CHECKPOINT" ] || [ ! -f "$CHECKPOINT" ]; then
-    echo "Usage: $0 <checkpoint_path> [num_episodes=10] [output_dir=./attention_output]"
+    echo "Usage: $0 [checkpoint_path] [num_episodes=10] [output_dir=./attention_output]"
+    echo "  Checkpoint default: $ATTN_CHECKPOINT"
     exit 1
 fi
 
+# Same as play_disentangled_graph_gated.sh
 NUM_ENVS="${NUM_ENVS:-1}"
 EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-10}"
 EXEC_HORIZON="${EXEC_HORIZON:-10}"
-EMA="${EMA:-0.9}"
+EMA="${EMA:-0.8}"
 
 mkdir -p "$OUT_DIR"
 
 OBS_JSON="$OUT_DIR/obs_records.json"
-ATTN_JSON="$OUT_DIR/obs_with_attn.json"
-CLASS_JSON="$OUT_DIR/classified.json"
-FIG_DIR="$OUT_DIR/figs"
 
 echo "========================================================"
-echo "Attention Analysis Pipeline"
+echo "Attention Pipeline — Step 1: Record observations"
+echo "  Model:       disentangled_graph_unet_gated (same as play_disentangled_graph_gated)"
 echo "  Checkpoint:  $CHECKPOINT"
 echo "  Episodes:    $NUM_EPISODES (envs=$NUM_ENVS)"
-echo "  Output dir:  $OUT_DIR"
+echo "  Output:      $OBS_JSON"
 echo "========================================================"
 
 # ── Step 1: Record observations ──────────────────────────────
 echo ""
-echo "═══ Step 1/4: Recording observations ═══"
+echo "═══ Step 1: Recording observations ═══"
 python scripts/graph_unet/play.py \
     --task SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-Play-v0 \
     --checkpoint "$CHECKPOINT" \
-    --policy_type graph_unet \
+    --policy_type disentangled_graph_unet_gated \
     --num_envs "$NUM_ENVS" \
     --num_episodes "$NUM_EPISODES" \
     --episode_length_s "$EPISODE_LENGTH_S" \
@@ -65,37 +64,8 @@ fi
 N_TOTAL=$(python3 -c "import json; print(len(json.load(open('$OBS_JSON'))))")
 N_SUCCESS=$(python3 -c "import json; print(sum(1 for r in json.load(open('$OBS_JSON')) if r.get('success')))")
 echo "Recorded: $N_TOTAL total records, $N_SUCCESS from successful episodes"
-
-if [ "$N_SUCCESS" -eq 0 ]; then
-    echo "WARNING: No successful episodes. Attention extraction will be empty."
-    echo "Try increasing num_episodes or check model quality."
-    exit 1
-fi
-
-# ── Step 2: Extract attention (offline, through graph encoder) ──
-echo ""
-echo "═══ Step 2/4: Extracting attention weights ═══"
-python scripts/extract_attention_offline.py \
-    --obs_records "$OBS_JSON" \
-    --checkpoint "$CHECKPOINT" \
-    --output "$ATTN_JSON" \
-    --success_only
-
-# ── Step 3: Classify phases by distance ──────────────────────
-echo ""
-echo "═══ Step 3/4: Classifying phases ═══"
-python scripts/classify_attention_by_distance.py "$ATTN_JSON" -o "$CLASS_JSON"
-
-# ── Step 4: Visualize ────────────────────────────────────────
-echo ""
-echo "═══ Step 4/4: Generating figures ═══"
-python scripts/visualize_attention.py "$CLASS_JSON" --output "$FIG_DIR"
-
 echo ""
 echo "========================================================"
-echo "Pipeline complete!"
-echo "  Raw obs:      $OBS_JSON"
-echo "  With attn:    $ATTN_JSON"
-echo "  Classified:   $CLASS_JSON"
-echo "  Figures:      $FIG_DIR/"
+echo "Step 1 done. Raw obs: $OBS_JSON"
+echo "Step 2–4 (extract attn, classify, visualize) to be run after choosing episode(s)."
 echo "========================================================"

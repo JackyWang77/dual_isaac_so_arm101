@@ -194,6 +194,12 @@ class EventCfg:
 
     # cube_1: right side; cube_2: left side (original spawn zones)
     # Target for stacking = TARGET_XY (0.117, -0.011)
+    #
+    # Generalization test: to test SR on larger range, use pose_range below and compare to baseline.
+    #   Larger range: cube_1 x=(-0.06, 0.04) y=(-0.22, -0.10); cube_2 x=(-0.06, 0.04) y=(0.10, 0.22).
+    #   Original area per cube: 0.04*0.04=0.0016.  Larger area: 0.10*0.12=0.012.
+    #   Ratio orig/current per cube = 0.0016/0.012 = 2/15 ≈ 13.33%.  P(both in orig) = (2/15)^2 ≈ 1.78%.
+    #   Expected Stack SR if no generalization = 1.78%*70% ≈ 1.24%.  SR > 1.24% → generalization; SR ≤ ~1.24% → little.
     reset_cube_1 = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",

@@ -571,7 +571,10 @@ class GraphDiTPolicyCfg:
 
     z_dim: int = 64
     """Graph latent dimension for RL heads (layer-wise z^k pooled from node features)."""
-    
+
+    per_gate: bool = False
+    """If True, use per-dimension gate (z_dim values) in gated policy; else scalar gate. Only for DualArmDisentangledPolicyGated."""
+
     num_layers: int = 6
     """Number of Graph-DiT layers."""
     

@@ -856,6 +856,7 @@ def train_graph_unet_policy(
     action_offset: int = 1,
     apply_gripper_mapping: bool = True,
     use_cross_arm_attn: bool = False,
+    per_gate: bool = False,
     node_configs: list[dict] | None = None,
     graph_edge_dim: int = 128,
     save_every: int = 200,
@@ -1089,6 +1090,8 @@ def train_graph_unet_policy(
         cfg_kwargs["arm_action_dim"] = action_dim // 2
         cfg_kwargs["cross_arm_heads"] = 4
         cfg_kwargs["use_cross_arm_attn"] = use_cross_arm_attn
+    if is_dual_arm and policy_type == "disentangled_graph_unet_gated":
+        cfg_kwargs["per_gate"] = per_gate
 
     # Create policy network (policy_type 优先: unet→MLP, graph_unet→graph, disentangled→disentangled, use_raw_only→RawOnly)
     if is_dual_arm and use_raw_only:
@@ -1096,7 +1099,7 @@ def train_graph_unet_policy(
         print(f"\n[Train] *** RAW ONLY MODE *** No graph encoder, conditioning = raw node projection only")
     elif is_dual_arm and policy_type == "disentangled_graph_unet_gated":
         PolicyClass = DualArmDisentangledPolicyGated  # gated fusion: raw + gate*graph, no concat
-        print(f"\n[Train] *** DISENTANGLED GRAPH GATED *** pos/rot attention + gated fusion (metrics/graph_gate_weight)")
+        print(f"\n[Train] *** DISENTANGLED GRAPH GATED *** pos/rot attention + gated fusion (metrics/graph_gate_weight) per_gate={per_gate}")
     elif is_dual_arm and policy_type == "disentangled_graph_unet":
         PolicyClass = DualArmDisentangledPolicy  # disentangled pos/rot graph + dual UNets
         print(f"\n[Train] *** DISENTANGLED GRAPH *** pos/rot separate attention + raw residual")
@@ -1614,6 +1617,12 @@ def main():
         help="Disable gripper mapping (default: >-0.25→1, <=-0.25→-1 for indices 5,11).",
     )
     parser.add_argument(
+        "--per_gate",
+        type=str,
+        default="false",
+        help="If true, use per-dimension gate (64 values) in gated policy; default false (scalar gate). Only for policy_type=disentangled_graph_unet_gated.",
+    )
+    parser.add_argument(
         "--cross_attention",
         type=str,
         default="false",
@@ -1719,6 +1728,7 @@ def main():
         action_offset=args.action_offset,
         apply_gripper_mapping=not args.no_gripper_mapping,
         use_cross_arm_attn=(getattr(args, "cross_attention", "false") == "true"),
+        per_gate=(getattr(args, "per_gate", "false") == "true"),
         node_configs=getattr(args, "node_configs", None),
         graph_edge_dim=args.graph_edge_dim,
         save_every=args.save_every,

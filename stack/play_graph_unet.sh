@@ -35,5 +35,5 @@ python scripts/graph_unet/play.py \
     --episode_length_s "$EPISODE_LENGTH_S" \
     --num_diffusion_steps 15 \
     --exec_horizon "$EXEC_HORIZON" \
-    --ema "$EMA" 
+    --ema "$EMA"
     # --headless true
