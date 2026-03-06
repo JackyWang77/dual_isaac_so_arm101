@@ -174,11 +174,21 @@ def play_graph_unet_policy(
         env_cfg.episode_length_s = episode_length_s
         print(f"[Play] Override episode_length_s = {episode_length_s}")
     env = gym.make(task_name, cfg=env_cfg)
-    
+
+    # Get env_origins for converting world-frame obs to local frame (multi-env fix).
+    # Isaac Lab's observation terms (ee_position_w, object_position_w) return world
+    # coordinates. With num_envs=1 the env is at the origin so world≈local. With
+    # num_envs>1 each env is offset in world space, making positions out-of-distribution
+    # for the model (trained on single-env data near origin).
+    _base_env = env.unwrapped if hasattr(env, "unwrapped") else env
+    _env_origins = _base_env.scene.env_origins.clone()  # [num_envs, 3]
+    if num_envs > 1:
+        print(f"[Play] env_origins[0]={_env_origins[0].tolist()}, env_origins[1]={_env_origins[1].tolist()}")
+
     # Get observation and action spaces
     obs_space = env.observation_space
     action_space = env.action_space
-    
+
     print(f"[Play] Observation space: {obs_space}")
     print(f"[Play] Action space: {action_space}")
     
@@ -785,6 +795,12 @@ def play_graph_unet_policy(
             t = t.view(t.shape[0], -1)
         if t.shape[1] == 39:
             t = torch.cat([t[:, :26], t[:, 33:]], dim=1)
+        # Convert world-frame positions to local frame (same fix as main loop)
+        if num_envs > 1:
+            for _pk in ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos"]:
+                if _pk in _obs_offsets:
+                    _po = _obs_offsets[_pk]
+                    t[:, _po : _po + 3] -= _env_origins
         return t
 
     def _prefill_node_history_buffers(obs_raw, env_ids=None):
@@ -1048,6 +1064,16 @@ def play_graph_unet_policy(
                     if _env_just_reset[env_id]:
                         obs_tensor[env_id, la_off : la_off + la_dim] = 0.0
                         _env_just_reset[env_id] = False
+
+            # Convert world-frame positions to local (env-relative) frame.
+            # obs terms ee_position_w / object_position_w return world coords.
+            # Training data was collected at the origin → subtract env_origins.
+            if num_envs > 1:
+                _pos_keys = ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos"]
+                for _pk in _pos_keys:
+                    if _pk in _obs_offsets:
+                        _po = _obs_offsets[_pk]
+                        obs_tensor[:, _po : _po + 3] -= _env_origins
 
             # Normalize observations (if stats available)
             # Ensure dimensions match (obs_tensor should be 32 dims after removing target_object_position)
