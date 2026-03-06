@@ -1,5 +1,6 @@
 #!/bin/bash
 # Play/Test DualArmDisentangledPolicyGated - Dual Cube Stack task (gated fusion)
+# Uses Large env (wider cube spawn range) for generalization test.
 cd "$(dirname "$0")/.."
 
 CHECKPOINT="${1:-}"
@@ -15,7 +16,7 @@ if [ -z "$CHECKPOINT" ] || [ ! -f "$CHECKPOINT" ]; then
 fi
 
 echo "========================================"
-echo "Playing DualArmDisentangledPolicyGated - Stack (gated fusion)"
+echo "Playing DualArmDisentangledPolicyGated - Stack (Large env, generalization)"
 echo "Checkpoint: $CHECKPOINT"
 echo "========================================"
 
@@ -26,7 +27,7 @@ EXEC_HORIZON="${EXEC_HORIZON:-10}"
 EMA="${EMA:-1}"
 
 python scripts/graph_unet/play.py \
-    --task SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-Play-v0 \
+    --task SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-Play-Large-v0 \
     --checkpoint "$CHECKPOINT" \
     --policy_type disentangled_graph_unet_gated \
     --num_envs "$NUM_ENVS" \

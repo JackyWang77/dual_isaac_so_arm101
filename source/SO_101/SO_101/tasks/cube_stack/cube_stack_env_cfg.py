@@ -222,6 +222,31 @@ class EventCfg:
 
 
 @configclass
+class EventCfgLarge(EventCfg):
+    """Larger cube spawn range for generalization test (same obs/action as default)."""
+
+    reset_cube_1 = EventTerm(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={
+            "pose_range": {"x": (-0.06, 0.04), "y": (-0.22, -0.10), "z": (0.0, 0.0)},
+            "velocity_range": {},
+            "asset_cfg": SceneEntityCfg("cube_1", body_names="Cube1"),
+        },
+    )
+
+    reset_cube_2 = EventTerm(
+        func=mdp.reset_root_state_uniform,
+        mode="reset",
+        params={
+            "pose_range": {"x": (-0.06, 0.04), "y": (0.10, 0.22), "z": (0.0, 0.0)},
+            "velocity_range": {},
+            "asset_cfg": SceneEntityCfg("cube_2", body_names="Cube2"),
+        },
+    )
+
+
+@configclass
 class CubeStackRewardsCfg:
     """Stack cube_1 and cube_2 at fixed target (center), any order."""
 

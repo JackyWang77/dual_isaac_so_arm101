@@ -8,7 +8,7 @@
 from isaaclab.envs.mimic_env_cfg import MimicEnvCfg, SubTaskConfig
 from isaaclab.utils import configclass
 
-from .cube_stack_env_cfg import CubeStackSubtaskCfg
+from .cube_stack_env_cfg import CubeStackSubtaskCfg, EventCfgLarge
 from .joint_pos_env_cfg import DualSoArm101CubeStackJointPosEnvCfg
 
 
@@ -93,3 +93,12 @@ class DualCubeStackJointStatesMimicEnvCfg_PLAY(DualCubeStackJointStatesMimicEnvC
             open_command_expr={"jaw_joint": 0.4},
             close_command_expr={"jaw_joint": 0.0002},
         )
+
+
+@configclass
+class DualCubeStackJointStatesMimicEnvCfg_PLAY_Large(DualCubeStackJointStatesMimicEnvCfg_PLAY):
+    """Play config with larger cube spawn range for generalization test (same obs/action as Mimic)."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.events = EventCfgLarge()

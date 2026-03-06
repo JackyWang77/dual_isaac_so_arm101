@@ -20,7 +20,7 @@ echo "Playing dual-arm Stack (policy from checkpoint)"
 echo "Checkpoint: $CHECKPOINT"
 echo "========================================"
 
-NUM_ENVS="${NUM_ENVS:-1}"
+NUM_ENVS="${NUM_ENVS:-100}"
 NUM_EPISODES="${NUM_EPISODES:-1000}"
 EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-10}"
 EXEC_HORIZON="${EXEC_HORIZON:-10}"
@@ -35,4 +35,4 @@ python scripts/graph_unet/play.py \
     --num_diffusion_steps 15 \
     --exec_horizon "$EXEC_HORIZON" \
     --ema "$EMA" \
-    # --headless true
+    --headless true
