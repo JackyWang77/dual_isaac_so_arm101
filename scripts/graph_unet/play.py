@@ -1353,6 +1353,55 @@ def play_graph_unet_policy(
                     predict_kw["object_node_history"] = object_node_history_tensor
                 action_trajectory_normalized = policy.predict(**predict_kw)
 
+                # ── MULTI-ENV DIAGNOSTIC (step 0 only) ──────────────────────────
+                if step_count == 0 and num_envs > 1:
+                    print(f"\n{'='*70}")
+                    print(f"[MULTI-ENV DIAG] num_envs={num_envs}, batch predict shape={action_trajectory_normalized.shape}")
+                    # Print env 0 batched output (first 3 actions of trajectory)
+                    a0_batched = action_trajectory_normalized[0, :3, :].cpu()
+                    print(f"[MULTI-ENV DIAG] env0 BATCHED actions[0:3]:")
+                    for t in range(min(3, a0_batched.shape[0])):
+                        print(f"  t={t}: {a0_batched[t].tolist()}")
+
+                    # Run single-env predict with just env 0's data
+                    single_kw = {}
+                    for k, v in predict_kw.items():
+                        if isinstance(v, torch.Tensor) and v.dim() >= 1 and v.shape[0] == num_envs:
+                            single_kw[k] = v[0:1]  # slice env 0 only
+                        else:
+                            single_kw[k] = v
+                    # Use same random seed for fair comparison
+                    torch.manual_seed(42)
+                    a0_single = policy.predict(**single_kw)
+                    torch.manual_seed(42)
+                    # Re-run batched with same seed to compare
+                    a0_batched_seeded = policy.predict(**predict_kw)
+
+                    a0s = a0_single[0, :3, :].cpu()
+                    a0b = a0_batched_seeded[0, :3, :].cpu()
+                    print(f"[MULTI-ENV DIAG] env0 SINGLE  actions[0:3] (seed=42):")
+                    for t in range(min(3, a0s.shape[0])):
+                        print(f"  t={t}: {a0s[t].tolist()}")
+                    print(f"[MULTI-ENV DIAG] env0 BATCHED actions[0:3] (seed=42):")
+                    for t in range(min(3, a0b.shape[0])):
+                        print(f"  t={t}: {a0b[t].tolist()}")
+                    diff = (a0s - a0b).abs().max().item()
+                    print(f"[MULTI-ENV DIAG] max diff single vs batched: {diff:.6f}")
+                    if diff > 0.01:
+                        print(f"[MULTI-ENV DIAG] *** MODEL BATCH BUG: same env0 inputs give different outputs! ***")
+                    else:
+                        print(f"[MULTI-ENV DIAG] Model output matches (batch-safe). Issue is elsewhere.")
+
+                    # Print raw obs for env 0,1
+                    for eid in range(min(2, num_envs)):
+                        print(f"[MULTI-ENV DIAG] env{eid} obs_norm[:8]={obs_tensor_normalized[eid, :8].cpu().tolist()}")
+                        if use_node_histories:
+                            nh = node_histories_tensor[eid, :, -1, :3].cpu()  # last timestep, pos only
+                            print(f"[MULTI-ENV DIAG] env{eid} node_pos(latest): {nh.tolist()}")
+                    print(f"{'='*70}\n")
+                    # Use the original (non-seeded) prediction
+                # ── END DIAGNOSTIC ──────────────────────────────────────────────
+
                 # Denormalize full 6-dim; buffer stores this raw; env gets gripper mapped to -1/1 only at step
                 if action_mean is not None and action_std is not None:
                     action_trajectory = (
