@@ -1,34 +1,22 @@
-tract_attention_first_record.sh 
-Traceback (most recent call last):
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/extract_attention_offline.py", line 20, in <module>
-    from SO_101.policies.graph_unet_policy import GraphUnetPolicy
-  File "/mnt/ssd/dual_isaac_so_arm101/source/SO_101/SO_101/__init__.py", line 16, in <module>
-    from .tasks import *
-  File "/mnt/ssd/dual_isaac_so_arm101/source/SO_101/SO_101/tasks/__init__.py", line 17, in <module>
-    from isaaclab_tasks.utils import import_packages
-  File "/mnt/ssd/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/__init__.py", line 33, in <module>
-    from .utils import import_packages
-  File "/mnt/ssd/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/utils/__init__.py", line 9, in <module>
-    from .parse_cfg import get_checkpoint_path, load_cfg_from_registry, parse_env_cfg
-  File "/mnt/ssd/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/utils/parse_cfg.py", line 16, in <module>
-    from isaaclab.envs import DirectRLEnvCfg, ManagerBasedRLEnvCfg
-  File "/mnt/ssd/IsaacLab/source/isaaclab/isaaclab/envs/__init__.py", line 45, in <module>
-    from . import mdp, ui
-  File "/mnt/ssd/IsaacLab/source/isaaclab/isaaclab/envs/mdp/__init__.py", line 18, in <module>
-    from .actions import *  # noqa: F401, F403
-    ^^^^^^^^^^^^^^^^^^^^^^
-  File "/mnt/ssd/IsaacLab/source/isaaclab/isaaclab/envs/mdp/actions/__init__.py", line 8, in <module>
-    from .actions_cfg import *
-  File "/mnt/ssd/IsaacLab/source/isaaclab/isaaclab/envs/mdp/actions/actions_cfg.py", line 9, in <module>
-    from isaaclab.managers.action_manager import ActionTerm, ActionTermCfg
-  File "/mnt/ssd/IsaacLab/source/isaaclab/isaaclab/managers/__init__.py", line 13, in <module>
-    from .action_manager import ActionManager, ActionTerm
-  File "/mnt/ssd/IsaacLab/source/isaaclab/isaaclab/managers/action_manager.py", line 21, in <module>
-    from isaaclab.assets import AssetBase
-  File "/mnt/ssd/IsaacLab/source/isaaclab/isaaclab/assets/__init__.py", line 41, in <module>
-    from .articulation import Articulation, ArticulationCfg, ArticulationData
-  File "/mnt/ssd/IsaacLab/source/isaaclab/isaaclab/assets/articulation/__init__.py", line 8, in <module>
-    from .articulation import Articulation
-  File "/mnt/ssd/IsaacLab/source/isaaclab/isaaclab/assets/articulation/articulation.py", line 17, in <module>
-    import omni.physics.tensors.impl.api as physx
-ModuleNotFoundError: No module named 'omni.physics'
+
+======================================================================
+[MULTI-ENV DIAG] num_envs=10, batch predict shape=torch.Size([10, 20, 12])
+[MULTI-ENV DIAG] env0 BATCHED actions[0:3]:
+  t=0: [0.30479490756988525, 2.8643786907196045, -2.3831613063812256, 1.21114981174469, 0.9796290993690491, -0.7411885261535645, 2.2100372314453125, 0.2029993087053299, -0.1499287635087967, -1.3904005289077759, 0.5125697255134583, 0.10599279403686523]
+  t=1: [0.1330198049545288, 3.2202272415161133, -2.2220683097839355, 1.5167657136917114, 0.5291573405265808, -0.7139853835105896, 2.137442111968994, 0.300009548664093, -0.4571545422077179, -1.062799096107483, 0.7076435089111328, 0.32044559717178345]
+  t=2: [0.4746752083301544, 2.997786521911621, -2.362401008605957, 1.7210770845413208, 0.7667592763900757, -0.6927115321159363, 1.9918221235275269, 0.3985263407230377, -0.5748536586761475, -0.5812948942184448, 0.7829656600952148, 0.24773961305618286]
+[MULTI-ENV DIAG] env0 SINGLE  actions[0:3] (seed=42):
+  t=0: [0.2532169818878174, 3.1699252128601074, -2.5337681770324707, 1.6786366701126099, 0.710904598236084, -0.8621582984924316, 2.305203914642334, 0.010381732136011124, -0.017926789820194244, -1.5680105686187744, 0.5292799472808838, 0.19911235570907593]
+  t=1: [0.383897989988327, 3.2700581550598145, -2.751237630844116, 2.0116138458251953, 0.8962408304214478, -0.9447013735771179, 2.2784011363983154, 0.20971707999706268, -0.20385703444480896, -1.1705816984176636, 0.6987757086753845, 0.5672231316566467]
+  t=2: [0.36992794275283813, 3.1029305458068848, -2.312880277633667, 1.8966121673583984, 0.9003387093544006, -1.1701266765594482, 2.0791213512420654, 0.1838764101266861, -0.3670671284198761, -0.7052674293518066, 0.848558783531189, 0.5755645632743835]
+[MULTI-ENV DIAG] env0 BATCHED actions[0:3] (seed=42):
+  t=0: [0.2532374858856201, 3.1701927185058594, -2.5338499546051025, 1.6784402132034302, 0.7110893726348877, -0.8620547652244568, 2.305469036102295, 0.010220171883702278, -0.017944399267435074, -1.567854881286621, 0.5292287468910217, 0.19907774031162262]
+  t=1: [0.38382184505462646, 3.270406723022461, -2.7512567043304443, 2.011446714401245, 0.8963242173194885, -0.9445146918296814, 2.2787868976593018, 0.20963507890701294, -0.20396788418293, -1.1705005168914795, 0.6988434195518494, 0.5672125220298767]
+  t=2: [0.3698830306529999, 3.1028952598571777, -2.312872886657715, 1.8965373039245605, 0.9003550410270691, -1.169987440109253, 2.078921318054199, 0.18380936980247498, -0.36707472801208496, -0.7052234411239624, 0.8484746813774109, 0.5755088925361633]
+[MULTI-ENV DIAG] max diff single vs batched: 0.000386
+[MULTI-ENV DIAG] Model output matches (batch-safe). Issue is elsewhere.
+[MULTI-ENV DIAG] env0 obs_norm[:8]=[-2.3689262866973877, 0.10523530840873718, -0.19495618343353271, -5.651566028594971, 2.246446371078491, 0.3321778178215027, -0.1064651757478714, 0.06818366050720215]
+[MULTI-ENV DIAG] env0 node_pos(latest): [[127.03589630126953, -37.69378662109375, 4.56605339050293], [127.03589630126953, -45.59895324707031, 4.56605339050293], [110.79316711425781, -34.48069763183594, -1.0821501016616821], [111.77396392822266, -30.14047622680664, -1.0821501016616821]]
+[MULTI-ENV DIAG] env1 obs_norm[:8]=[-2.3689262866973877, 0.10523530840873718, -0.19495618343353271, -5.651566028594971, 2.246446371078491, 0.3321778178215027, -0.1064651757478714, 0.06818366050720215]
+[MULTI-ENV DIAG] env1 node_pos(latest): [[127.03589630126953, 1.8320598602294922, 4.56605339050293], [127.03589630126953, -6.073108673095703, 4.56605339050293], [110.98101806640625, -0.6536692380905151, -1.0821501016616821], [110.93633270263672, 3.9373085498809814, -1.0821501016616821]]
+======================================================================

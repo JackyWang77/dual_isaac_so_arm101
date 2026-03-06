@@ -19,7 +19,7 @@ echo "Playing DisentangledGraphUnetPolicy - Stack"
 echo "Checkpoint: $CHECKPOINT"
 echo "========================================"
 
-NUM_ENVS="${NUM_ENVS:-1}"
+NUM_ENVS="${NUM_ENVS:-100}"
 NUM_EPISODES="${NUM_EPISODES:-1000}"
 EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-10}"
 EXEC_HORIZON="${EXEC_HORIZON:-10}"

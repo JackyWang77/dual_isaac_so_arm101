@@ -19,11 +19,11 @@ echo "Playing DualArmDisentangledPolicyGated - Stack (gated fusion)"
 echo "Checkpoint: $CHECKPOINT"
 echo "========================================"
 
-NUM_ENVS="${NUM_ENVS:-10}"
+NUM_ENVS="${NUM_ENVS:-100}"
 NUM_EPISODES="${NUM_EPISODES:-1000}"
 EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-10}"
 EXEC_HORIZON="${EXEC_HORIZON:-10}"
-EMA="${EMA:-0.8}"
+EMA="${EMA:-1}"
 
 python scripts/graph_unet/play.py \
     --task SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-Play-v0 \
@@ -34,5 +34,5 @@ python scripts/graph_unet/play.py \
     --episode_length_s "$EPISODE_LENGTH_S" \
     --num_diffusion_steps 15 \
     --exec_horizon "$EXEC_HORIZON" \
-    --ema "$EMA"
-    # --headless true
+    --ema "$EMA" \
+    --headless true

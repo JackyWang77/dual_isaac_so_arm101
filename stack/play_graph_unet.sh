@@ -1,5 +1,5 @@
 #!/bin/bash
-# Play/Test GraphUnetPolicy - Dual Cube Stack task
+# Play/Test dual-arm Stack (GraphUnet / RawOnly / Gated — policy auto-detected from checkpoint)
 cd "$(dirname "$0")/.."
 
 CHECKPOINT="${1:-}"
@@ -11,15 +11,15 @@ fi
 if [ -z "$CHECKPOINT" ] || [ ! -f "$CHECKPOINT" ]; then
     echo "Usage: $0 [checkpoint_path]"
     echo "  Auto-detects from ./logs/graph_unet_full/stack_joint*/"
+    echo "  Pass any dual-arm stack checkpoint (raw_only / gated / graph_unet); policy type is auto-detected."
     exit 1
 fi
 
 echo "========================================"
-echo "Playing GraphUnetPolicy - Stack"
+echo "Playing dual-arm Stack (policy from checkpoint)"
 echo "Checkpoint: $CHECKPOINT"
 echo "========================================"
 
-# 与 play_unet.sh 对齐；大批量: NUM_ENVS=64 NUM_EPISODES=1000
 NUM_ENVS="${NUM_ENVS:-1}"
 NUM_EPISODES="${NUM_EPISODES:-1000}"
 EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-10}"
@@ -29,11 +29,10 @@ EMA="${EMA:-0.8}"
 python scripts/graph_unet/play.py \
     --task SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-Play-v0 \
     --checkpoint "$CHECKPOINT" \
-    --policy_type graph_unet \
     --num_envs "$NUM_ENVS" \
     --num_episodes "$NUM_EPISODES" \
     --episode_length_s "$EPISODE_LENGTH_S" \
     --num_diffusion_steps 15 \
     --exec_horizon "$EXEC_HORIZON" \
-    --ema "$EMA"
+    --ema "$EMA" \
     # --headless true

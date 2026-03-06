@@ -469,6 +469,15 @@ def play_graph_unet_policy(
         "object_position": 3, "object_orientation": 4, "ee_position": 3, "ee_orientation": 4,
         "left_joint_pos": 6, "right_joint_pos": 6, "joint_pos": 6,
     }
+    # Expected obs dim from checkpoint (for validating dict-concatenated policy obs)
+    _expected_obs_dim = None
+    if _obs_offsets and _obs_dims:
+        _expected_obs_dim = max(
+            _obs_offsets[k] + _obs_dims.get(k, 3 if "pos" in k or "position" in k else 4)
+            for k in _obs_offsets
+        )
+        if "cube_1_pos" in _obs_offsets and "cube_2_pos" in _obs_offsets:
+            print(f"[Play] Obs layout: cube_1_pos @ {_obs_offsets['cube_1_pos']}, cube_2_pos @ {_obs_offsets['cube_2_pos']}, expected_obs_dim={_expected_obs_dim}")
 
     action_history_length = (
         policy.cfg.action_history_length
@@ -795,12 +804,11 @@ def play_graph_unet_policy(
             t = t.view(t.shape[0], -1)
         if t.shape[1] == 39:
             t = torch.cat([t[:, :26], t[:, 33:]], dim=1)
-        # Convert world-frame positions to local frame (same fix as main loop)
-        if num_envs > 1:
-            for _pk in ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos"]:
-                if _pk in _obs_offsets:
-                    _po = _obs_offsets[_pk]
-                    t[:, _po : _po + 3] -= _env_origins
+        # Convert world-frame positions to local frame (same as main loop; always, including single-env)
+        for _pk in ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos"]:
+            if _pk in _obs_offsets:
+                _po = _obs_offsets[_pk]
+                t[:, _po : _po + 3] -= _env_origins
         return t
 
     def _prefill_node_history_buffers(obs_raw, env_ids=None):
@@ -903,14 +911,17 @@ def play_graph_unet_policy(
     # We save the home node features here and use them to fix obs for reset envs.
     _home_node_features = _extract_node_features_multi(_init_ot) if use_node_histories else None  # [num_envs, N, 7]
     _home_ee_node, _home_obj_node = (None, None) if use_node_histories else _extract_node_features_from_obs(_init_ot)
-    # Also save EE pos/ori as flat slices for fixing obs_tensor directly
-    _home_ee_slices = {}
-    for _hk in ["left_ee_position", "left_ee_orientation", "right_ee_position", "right_ee_orientation"]:
-        if _hk in _obs_offsets:
-            _hd = _obs_dims.get(_hk, 3 if "position" in _hk else 4)
-            _home_ee_slices[_hk] = _init_ot[0, _obs_offsets[_hk] : _obs_offsets[_hk] + _hd].clone()
-    if _home_ee_slices:
-        print(f"[Play] Saved home EE positions for multi-env FK fix: {list(_home_ee_slices.keys())}")
+    # Per-env home EE pos/ori for fixing stale obs after reset (each env must use its own home, not env 0)
+    _home_ee_per_env = []
+    for _ei in range(num_envs):
+        _slices = {}
+        for _hk in ["left_ee_position", "left_ee_orientation", "right_ee_position", "right_ee_orientation"]:
+            if _hk in _obs_offsets:
+                _hd = _obs_dims.get(_hk, 3 if "position" in _hk else 4)
+                _slices[_hk] = _init_ot[_ei, _obs_offsets[_hk] : _obs_offsets[_hk] + _hd].clone()
+        _home_ee_per_env.append(_slices)
+    if _home_ee_per_env and _home_ee_per_env[0]:
+        print(f"[Play] Saved per-env home EE for multi-env FK fix: {list(_home_ee_per_env[0].keys())}")
 
     with torch.inference_mode():
         while simulation_app.is_running() and episode_count < num_episodes:
@@ -946,17 +957,22 @@ def play_graph_unet_policy(
                         obs_tensor_raw = torch.cat(parts, dim=1) if parts else None
                         if obs_tensor_raw is None:
                             raise RuntimeError("obs['policy'] is dict but no keys matched")
+                        exp_dim = _expected_obs_dim if _expected_obs_dim is not None else 64
+                        exp_keys = 13
+                        ok = (
+                            obs_tensor_raw.shape[1] == exp_dim
+                            and len(keys_order) == exp_keys
+                        )
                         if step_count < 1:
-                            exp_keys = 13
-                            exp_dim = 64
-                            ok = (
-                                obs_tensor_raw.shape[1] == exp_dim
-                                and len(keys_order) == exp_keys
-                            )
                             print(
                                 f"[ALIGN CHECK] policy_obs dict: len(keys_order)={len(keys_order)} "
                                 f"keys={keys_order} obs_dim={obs_tensor_raw.shape[1]} "
                                 f"expected_dim={exp_dim} aligned={ok}"
+                            )
+                        if not ok and _expected_obs_dim is not None and obs_tensor_raw.shape[1] != _expected_obs_dim:
+                            print(
+                                f"[Play] WARNING: policy obs dim {obs_tensor_raw.shape[1]} != checkpoint expected {_expected_obs_dim}. "
+                                "cube_1_pos / cube_2_pos (and node features) may be misaligned — check env obs term names match training OBS_KEYS."
                             )
                     else:
                         obs_tensor_raw = torch.tensor(obs_val, device=device)
@@ -1067,13 +1083,20 @@ def play_graph_unet_policy(
 
             # Convert world-frame positions to local (env-relative) frame.
             # obs terms ee_position_w / object_position_w return world coords.
-            # Training data was collected at the origin → subtract env_origins.
-            if num_envs > 1:
-                _pos_keys = ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos"]
-                for _pk in _pos_keys:
-                    if _pk in _obs_offsets:
-                        _po = _obs_offsets[_pk]
-                        obs_tensor[:, _po : _po + 3] -= _env_origins
+            # Training data was collected at the origin → subtract env_origins (always, including single-env).
+            _pos_keys = ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos"]
+            for _pk in _pos_keys:
+                if _pk in _obs_offsets:
+                    _po = _obs_offsets[_pk]
+                    obs_tensor[:, _po : _po + 3] -= _env_origins
+
+            # Sanity: first step print cube positions (raw-only uses latest node = EE + cube_1 + cube_2)
+            if step_count == 0 and "cube_1_pos" in _obs_offsets and "cube_2_pos" in _obs_offsets:
+                o1, o2 = _obs_offsets["cube_1_pos"], _obs_offsets["cube_2_pos"]
+                for eid in range(min(2, num_envs)):
+                    c1 = obs_tensor[eid, o1 : o1 + 3].tolist()
+                    c2 = obs_tensor[eid, o2 : o2 + 3].tolist()
+                    print(f"[Play] env{eid} cube_1_pos (local)={c1} cube_2_pos (local)={c2}")
 
             # Normalize observations (if stats available)
             # Ensure dimensions match (obs_tensor should be 32 dims after removing target_object_position)
@@ -1565,27 +1588,31 @@ def play_graph_unet_policy(
                 # Old approach: sim.forward() for ALL envs → breaks non-reset envs
                 # (extra physics step causes drift/random motion).
                 # New approach: overwrite stale EE positions in obs with saved home
-                # positions for ONLY the reset envs. Joint positions are already
-                # correct from _reset_idx(). Cube positions may be slightly stale
-                # but correct after one more env.step().
-                if _home_ee_slices:
+                # positions for ONLY the reset envs (each env uses its own home, not env 0).
+                if _home_ee_per_env:
                     try:
                         if isinstance(obs, dict) and "policy" in obs and isinstance(obs["policy"], dict):
                             for env_id in range(num_envs):
-                                if done[env_id]:
-                                    for _hk, _hv in _home_ee_slices.items():
+                                if done[env_id] and env_id < len(_home_ee_per_env):
+                                    for _hk, _hv in _home_ee_per_env[env_id].items():
                                         if _hk in obs["policy"]:
-                                            obs["policy"][_hk][env_id] = _hv.to(obs["policy"][_hk].device)
+                                            val = _hv.to(obs["policy"][_hk].device)
+                                            # _home_ee_per_env is in LOCAL frame (from _obs_to_tensor). Main loop subtracts _env_origins again → double subtract.
+                                            # Write WORLD frame (local + origin) so main loop subtracts once.
+                                            if _hk in ("left_ee_position", "right_ee_position") and _hv.numel() >= 3:
+                                                val = val.clone()
+                                                val[:3] = val[:3] + _env_origins[env_id].to(val.device)
+                                            obs["policy"][_hk][env_id] = val
                         else:
-                            # obs is tensor or concatenated: fix via _obs_offsets
                             _obs_t_fix = _obs_to_tensor(obs)
                             for env_id in range(num_envs):
-                                if done[env_id]:
-                                    for _hk, _hv in _home_ee_slices.items():
+                                if done[env_id] and env_id < len(_home_ee_per_env):
+                                    for _hk, _hv in _home_ee_per_env[env_id].items():
                                         _ho = _obs_offsets[_hk]
                                         _hd = len(_hv)
                                         _obs_t_fix[env_id, _ho : _ho + _hd] = _hv
-                            # Write back to obs (tensor case)
+                                        if _hk in ("left_ee_position", "right_ee_position") and _hd >= 3:
+                                            _obs_t_fix[env_id, _ho : _ho + 3] += _env_origins[env_id].to(_obs_t_fix.device)
                             if isinstance(obs, dict) and "policy" in obs and isinstance(obs["policy"], torch.Tensor):
                                 obs["policy"] = _obs_t_fix
                             elif isinstance(obs, torch.Tensor):
