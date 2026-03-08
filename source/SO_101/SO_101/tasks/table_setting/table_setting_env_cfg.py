@@ -27,15 +27,15 @@ from . import mdp
 
 ASSETS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../assets"))
 
-# Target positions: fork left of plate, knife right of plate (on tray)
-# Tray center is at X=0.22. Fork goes left (+Y), knife goes right (-Y).
-FORK_TARGET_XY = (0.22, 0.05)
-KNIFE_TARGET_XY = (0.22, -0.05)
-TARGET_Z = 0.015  # Should match tray/plate surface height
+# Target positions: from experiment (fork x 0.23-0.28, y 0.14-0.22, z ~0.008; knife x 0.22-0.25, y -0.10--0.16, z ~-0.004)
+FORK_TARGET_XY = (0.255, 0.18)
+FORK_TARGET_Z = 0.0076
+KNIFE_TARGET_XY = (0.2366, -0.1288)
+KNIFE_TARGET_Z = 0.0068
 
-# Subtask thresholds (tight: must be precisely placed, not just nearby)
-PLACE_EPS_XY = 0.015   # 1.5cm XY tolerance (was 4cm — too loose, triggered false success)
-PLACE_EPS_Z = 0.005    # 5mm Z tolerance (was 1.5cm — too loose, must match plate height)
+# Subtask thresholds (from experiment ranges)
+PLACE_EPS_XY = 0.05
+PLACE_EPS_Z = 0.01
 
 JAW_OPEN = 0.4
 JAW_CLOSED = 0.0
@@ -49,7 +49,7 @@ class TableSettingSubtaskCfg(ObsGroup):
         func=mdp.object_placed_at_target,
         params={
             "target_xy": FORK_TARGET_XY,
-            "target_z": TARGET_Z,
+            "target_z": FORK_TARGET_Z,
             "target_eps_xy": PLACE_EPS_XY,
             "target_eps_z": PLACE_EPS_Z,
             "object_cfg": SceneEntityCfg("fork"),
@@ -59,7 +59,7 @@ class TableSettingSubtaskCfg(ObsGroup):
         func=mdp.object_placed_at_target,
         params={
             "target_xy": KNIFE_TARGET_XY,
-            "target_z": TARGET_Z,
+            "target_z": KNIFE_TARGET_Z,
             "target_eps_xy": PLACE_EPS_XY,
             "target_eps_z": PLACE_EPS_Z,
             "object_cfg": SceneEntityCfg("knife"),
@@ -97,7 +97,7 @@ class TableSettingSceneCfg(InteractiveSceneCfg):
         init_state=AssetBaseCfg.InitialStateCfg(
             # Rotate 90° around Z so long edge runs left-right (Y direction)
             # Moved further from arms (X: 0.17→0.22) to avoid gripper collision
-            pos=[0.22, 0.0, 0.005], rot=[0.7071, 0, 0, 0.7071]
+            pos=[0.22, 0.0, 0.0], rot=[0.7071, 0, 0, 0.7071]
         ),
         spawn=UsdFileCfg(
             usd_path=os.path.join(ASSETS_DIR, "tray.usd"),
@@ -108,7 +108,7 @@ class TableSettingSceneCfg(InteractiveSceneCfg):
     plate = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Plate",
         init_state=AssetBaseCfg.InitialStateCfg(
-            pos=[0.22, 0.0, 0.01], rot=[1, 0, 0, 0]
+            pos=[0.22, 0.0, 0.002], rot=[1, 0, 0, 0]
         ),
         spawn=UsdFileCfg(
             usd_path=os.path.join(ASSETS_DIR, "plate.usd"),
@@ -333,35 +333,17 @@ class TerminationsCfg:
         params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("knife")},
     )
     success = DoneTerm(
-        func=mdp.both_placed_and_released,
+        func=mdp.both_placed_stable,
         params={
             "fork_target_xy": FORK_TARGET_XY,
             "knife_target_xy": KNIFE_TARGET_XY,
-            "target_z": TARGET_Z,
+            "fork_target_z": FORK_TARGET_Z,
+            "knife_target_z": KNIFE_TARGET_Z,
             "eps_xy": PLACE_EPS_XY,
             "eps_z": PLACE_EPS_Z,
-            "gripper_open_threshold": 0.1,
+            "stable_steps_required": 10,
             "fork_cfg": SceneEntityCfg("fork"),
             "knife_cfg": SceneEntityCfg("knife"),
-            "right_arm_cfg": SceneEntityCfg("right_arm"),
-            "left_arm_cfg": SceneEntityCfg("left_arm"),
-        },
-    )
-    table_setting_success = DoneTerm(
-        func=mdp.both_placed_released_stable,
-        params={
-            "fork_target_xy": FORK_TARGET_XY,
-            "knife_target_xy": KNIFE_TARGET_XY,
-            "target_z": TARGET_Z,
-            "eps_xy": PLACE_EPS_XY,
-            "eps_z": PLACE_EPS_Z,
-            "gripper_open_threshold": 0.1,
-            "vel_threshold": 0.001,
-            "stable_steps_required": 50,
-            "fork_cfg": SceneEntityCfg("fork"),
-            "knife_cfg": SceneEntityCfg("knife"),
-            "right_arm_cfg": SceneEntityCfg("right_arm"),
-            "left_arm_cfg": SceneEntityCfg("left_arm"),
         },
     )
 

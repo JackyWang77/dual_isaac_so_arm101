@@ -65,6 +65,7 @@ class DualTableSettingJointStatesMimicEnvCfg(
             ),
         ]
         self.subtask_configs["dual_arm"] = subtask_configs
+        self.all_complete_description = "🎉 完成 fork 和 knife"
 
 
 @configclass

@@ -61,7 +61,7 @@ parser.add_argument(
 parser.add_argument(
     "--num_success_steps",
     type=int,
-    default=10,
+    default=5,
     help="Number of continuous steps with task success for concluding a demo as successful. Default is 10.",
 )
 parser.add_argument(
@@ -787,7 +787,9 @@ def run_simulation_loop(
                                 eef_name = list(env.cfg.subtask_configs.keys())[0]
                                 configs = env.cfg.subtask_configs[eef_name]
 
-                                current_task_desc = "🎉 All Done!"  # Default: all done
+                                current_task_desc = getattr(
+                                    env.cfg, "all_complete_description", "🎉 All Done!"
+                                )
 
                                 # Iterate through all subtasks to find the first "incomplete" task
                                 for i, cfg in enumerate(configs):
@@ -927,6 +929,14 @@ def main() -> None:
 
     # Create environment
     env = create_environment(env_cfg)
+
+    # Disable manager debug visualization to avoid Isaac Lab UI bug
+    # (TypeError: 'bool' object is not iterable in manager_live_visualizer)
+    if hasattr(env, "termination_manager") and hasattr(env.termination_manager, "set_debug_vis"):
+        try:
+            env.termination_manager.set_debug_vis(False)
+        except Exception:
+            pass
 
     # Run simulation loop
     current_recorded_demo_count = run_simulation_loop(env, None, success_term, rate_limiter)
