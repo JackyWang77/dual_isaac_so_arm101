@@ -167,8 +167,8 @@ import isaaclab_mimic.envs  # noqa: F401
 import SO_101.tasks  # noqa: F401  # Registers custom SO-100 tasks
 from isaaclab_mimic.ui.instruction_display import InstructionDisplay, show_subtask_instructions
 
-# Import ROS2 device for teleoperation
-from SO_101.devices import Se3ROS2, Se3ROS2Cfg
+# ROS2 devices (Se3ROS2, JointStatesROS2) imported lazily when teleop is ros2/joint_states
+# to avoid loading rclpy when using keyboard/spacemouse (rclpy may be built for different Python).
 
 if args_cli.enable_pinocchio:
     import isaaclab_tasks.manager_based.manipulation.pick_place  # noqa: F401
@@ -353,7 +353,9 @@ def setup_teleop_device(callbacks: dict[str, Callable]) -> object:
             elif args_cli.teleop_device.lower() == "spacemouse":
                 teleop_interface = Se3SpaceMouse(Se3SpaceMouseCfg(pos_sensitivity=0.2, rot_sensitivity=0.5))
             elif args_cli.teleop_device.lower() == "ros2":
-                # Create ROS2 teleop device
+                # Create ROS2 teleop device (lazy import to avoid rclpy unless needed)
+                from SO_101.devices import Se3ROS2, Se3ROS2Cfg
+
                 ros2_cfg = Se3ROS2Cfg(
                     ee_pose_topic=args_cli.ros2_ee_pose_topic,
                     num_dof=8,  # 3 pos + 4 quat + 1 gripper (auto-converts from euler)
@@ -369,8 +371,11 @@ def setup_teleop_device(callbacks: dict[str, Callable]) -> object:
                 # Create Joint States ROS2 device (single arm 6 dof or dual arm 12 dof)
                 from SO_101.devices import JointStatesROS2, JointStatesROS2Cfg
 
-                _is_dual_cube_stack_joint_states = "Dual-Cube-Stack-Joint-States-Mimic" in args_cli.task
-                if _is_dual_cube_stack_joint_states:
+                _is_dual_arm_joint_states = (
+                    "Dual-Cube-Stack-Joint-States-Mimic" in args_cli.task
+                    or "Dual-Table-Setting-Joint-States-Mimic" in args_cli.task
+                )
+                if _is_dual_arm_joint_states:
                     # Dual arm: right 6 + left 6 (same order as env action)
                     _joint_names = [
                         "shoulder_pan_joint",
