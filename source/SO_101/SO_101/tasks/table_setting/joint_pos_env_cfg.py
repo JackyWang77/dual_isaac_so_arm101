@@ -78,7 +78,7 @@ class DualSoArm101TableSettingJointPosEnvCfg(TableSettingEnvCfg):
         self.scene.fork = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Fork",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.23, 0.22, 0.01], rot=[0.7071, 0, 0, -0.7071]
+                pos=[0.23, 0.28, 0.01], rot=[0.7071, 0, 0, -0.7071]
             ),
             spawn=UsdFileCfg(
                 usd_path=os.path.join(ASSETS_DIR, "fork.usd"),
@@ -92,7 +92,7 @@ class DualSoArm101TableSettingJointPosEnvCfg(TableSettingEnvCfg):
         self.scene.knife = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Knife",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.23, -0.22, 0.01], rot=[0.7071, 0, 0, -0.7071]
+                pos=[0.23, -0.27, 0.01], rot=[0.7071, 0, 0, -0.7071]
             ),
             spawn=UsdFileCfg(
                 usd_path=os.path.join(ASSETS_DIR, "knife.usd"),
