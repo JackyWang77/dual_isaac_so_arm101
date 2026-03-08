@@ -73,11 +73,12 @@ class DualSoArm101TableSettingJointPosEnvCfg(TableSettingEnvCfg):
         self.decimation = 4
         self.sim.render_interval = self.decimation
 
-        # Fork: dynamic rigid object, spawns left side
+        # Fork: dynamic rigid object, spawns left side OUTSIDE tray
+        # Rotated 90° around Z so it spawns vertically (perpendicular to tray)
         self.scene.fork = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Fork",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.17, 0.15, 0.01], rot=[1, 0, 0, 0]
+                pos=[0.08, 0.12, 0.01], rot=[0.7071, 0, 0, 0.7071]
             ),
             spawn=UsdFileCfg(
                 usd_path=os.path.join(ASSETS_DIR, "fork.usd"),
@@ -86,11 +87,12 @@ class DualSoArm101TableSettingJointPosEnvCfg(TableSettingEnvCfg):
             ),
         )
 
-        # Knife: dynamic rigid object, spawns right side
+        # Knife: dynamic rigid object, spawns right side OUTSIDE tray
+        # Rotated 90° around Z so it spawns vertically (perpendicular to tray)
         self.scene.knife = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Knife",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.17, -0.15, 0.01], rot=[1, 0, 0, 0]
+                pos=[0.08, -0.12, 0.01], rot=[0.7071, 0, 0, 0.7071]
             ),
             spawn=UsdFileCfg(
                 usd_path=os.path.join(ASSETS_DIR, "knife.usd"),

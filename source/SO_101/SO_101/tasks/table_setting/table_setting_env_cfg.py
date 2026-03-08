@@ -28,9 +28,9 @@ from . import mdp
 ASSETS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../assets"))
 
 # Target positions: fork left of plate, knife right of plate (on tray)
-# Closer to plate edge for realistic table setting
-FORK_TARGET_XY = (0.17, 0.03)
-KNIFE_TARGET_XY = (0.17, -0.03)
+# Tray center is at X=0.22. Fork goes left (+Y), knife goes right (-Y).
+FORK_TARGET_XY = (0.22, 0.05)
+KNIFE_TARGET_XY = (0.22, -0.05)
 TARGET_Z = 0.015  # Should match tray/plate surface height
 
 # Subtask thresholds (tight: must be precisely placed, not just nearby)
@@ -96,7 +96,8 @@ class TableSettingSceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Tray",
         init_state=AssetBaseCfg.InitialStateCfg(
             # Rotate 90° around Z so long edge runs left-right (Y direction)
-            pos=[0.17, 0.0, 0.005], rot=[0.7071, 0, 0, 0.7071]
+            # Moved further from arms (X: 0.17→0.22) to avoid gripper collision
+            pos=[0.22, 0.0, 0.005], rot=[0.7071, 0, 0, 0.7071]
         ),
         spawn=UsdFileCfg(
             usd_path=os.path.join(ASSETS_DIR, "tray.usd"),
@@ -107,7 +108,7 @@ class TableSettingSceneCfg(InteractiveSceneCfg):
     plate = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Plate",
         init_state=AssetBaseCfg.InitialStateCfg(
-            pos=[0.17, 0.0, 0.01], rot=[1, 0, 0, 0]
+            pos=[0.22, 0.0, 0.01], rot=[1, 0, 0, 0]
         ),
         spawn=UsdFileCfg(
             usd_path=os.path.join(ASSETS_DIR, "plate.usd"),
