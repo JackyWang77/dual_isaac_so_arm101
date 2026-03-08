@@ -181,7 +181,12 @@ def play_graph_unet_policy(
     # num_envs>1 each env is offset in world space, making positions out-of-distribution
     # for the model (trained on single-env data near origin).
     _base_env = env.unwrapped if hasattr(env, "unwrapped") else env
-    _env_origins = _base_env.scene.env_origins.clone()  # [num_envs, 3]
+    _env_origins = _base_env.scene.env_origins.clone().to(device=device, dtype=torch.float32)  # [num_envs, 3]
+    if _env_origins.shape[0] != num_envs:
+        raise RuntimeError(
+            f"[Play] env_origins shape {_env_origins.shape[0]} != num_envs {num_envs}. "
+            "Multi-env play requires scene.env_origins to match num_envs."
+        )
     if num_envs > 1:
         print(f"[Play] env_origins[0]={_env_origins[0].tolist()}, env_origins[1]={_env_origins[1].tolist()}")
 
@@ -805,10 +810,11 @@ def play_graph_unet_policy(
         if t.shape[1] == 39:
             t = torch.cat([t[:, :26], t[:, 33:]], dim=1)
         # Convert world-frame positions to local frame (same as main loop; always, including single-env)
+        _origins = _env_origins.to(t.device)
         for _pk in ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos"]:
             if _pk in _obs_offsets:
                 _po = _obs_offsets[_pk]
-                t[:, _po : _po + 3] -= _env_origins
+                t[:, _po : _po + 3] -= _origins
         return t
 
     def _prefill_node_history_buffers(obs_raw, env_ids=None):
@@ -977,12 +983,17 @@ def play_graph_unet_policy(
                     else:
                         obs_tensor_raw = torch.tensor(obs_val, device=device)
                     
-                    # Ensure correct shape [num_envs, obs_dim]
+                    # Ensure correct shape [num_envs, obs_dim] (critical for multi-env)
                     if len(obs_tensor_raw.shape) == 1:
                         obs_tensor_raw = obs_tensor_raw.unsqueeze(0)
                     elif len(obs_tensor_raw.shape) > 2:
                         obs_tensor_raw = obs_tensor_raw.view(
                             obs_tensor_raw.shape[0], -1
+                        )
+                    if obs_tensor_raw.shape[0] != num_envs:
+                        raise RuntimeError(
+                            f"[Play] policy obs batch size {obs_tensor_raw.shape[0]} != num_envs {num_envs}. "
+                            "Ensure env returns batched obs['policy'] with shape [num_envs, ...] per key."
                         )
                     
                     # Check if dimensions match training (32) or raw env (39 with target_object_position)
@@ -1084,11 +1095,13 @@ def play_graph_unet_policy(
             # Convert world-frame positions to local (env-relative) frame.
             # obs terms ee_position_w / object_position_w return world coords.
             # Training data was collected at the origin → subtract env_origins (always, including single-env).
+            # Must match num_envs so each env gets its own origin (no broadcast bugs).
             _pos_keys = ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos"]
+            _origins = _env_origins.to(obs_tensor.device)
             for _pk in _pos_keys:
                 if _pk in _obs_offsets:
                     _po = _obs_offsets[_pk]
-                    obs_tensor[:, _po : _po + 3] -= _env_origins
+                    obs_tensor[:, _po : _po + 3] -= _origins
 
             # Sanity: first step print cube positions (raw-only uses latest node = EE + cube_1 + cube_2)
             if step_count == 0 and "cube_1_pos" in _obs_offsets and "cube_2_pos" in _obs_offsets:
@@ -1386,6 +1399,13 @@ def play_graph_unet_policy(
                             "obs": obs_snap,
                         })
 
+                # ── SUBTASK DIAGNOSTIC (first 5 replans of episode 0) ──
+                if subtask_condition is not None and step_count < 300:
+                    sc0 = subtask_condition[0].cpu().tolist()
+                    replan_envs = [e for e in range(num_envs) if len(action_buffers[e]) == 0]
+                    print(f"[SUBTASK DIAG] step={step_count} phase_src={phase_source} "
+                          f"env0_cond={sc0} replan_envs={replan_envs[:5]}")
+
                 predict_kw = dict(
                     obs=obs_tensor_normalized,
                     action_history=action_history_tensor,
@@ -1463,6 +1483,14 @@ def play_graph_unet_policy(
                         print(
                             f"[Play] Warning: No action normalization stats, using normalized actions directly"
                         )
+
+                # ── ACTION DIAGNOSTIC (first 80 steps for env 0) ──
+                if step_count < 300 and len(action_buffers[0]) == 0:
+                    a0 = action_trajectory[0, 0, :]  # first action for env 0
+                    left_norm = a0[:6].norm().item()
+                    right_norm = a0[6:].norm().item()
+                    print(f"[ACTION DIAG] step={step_count} env0 left_norm={left_norm:.4f} right_norm={right_norm:.4f} "
+                          f"left={a0[:6].cpu().tolist()} right={a0[6:].cpu().tolist()}")
 
                 # Fill buffers with raw 6-dim (normalized raw for policy input; buffer = unmapped original)
                 for env_id in range(num_envs):
@@ -1604,19 +1632,26 @@ def play_graph_unet_policy(
                                                 val[:3] = val[:3] + _env_origins[env_id].to(val.device)
                                             obs["policy"][_hk][env_id] = val
                         else:
+                            # obs["policy"] is Tensor: only overwrite rows for done envs with world-frame EE
+                            # so next iteration's single subtract yields local for all (no double-subtract for non-done).
                             _obs_t_fix = _obs_to_tensor(obs)
+                            _origins = _env_origins.to(_obs_t_fix.device)
                             for env_id in range(num_envs):
                                 if done[env_id] and env_id < len(_home_ee_per_env):
                                     for _hk, _hv in _home_ee_per_env[env_id].items():
                                         _ho = _obs_offsets[_hk]
                                         _hd = len(_hv)
-                                        _obs_t_fix[env_id, _ho : _ho + _hd] = _hv
+                                        val = _hv.to(_obs_t_fix.device)
                                         if _hk in ("left_ee_position", "right_ee_position") and _hd >= 3:
-                                            _obs_t_fix[env_id, _ho : _ho + 3] += _env_origins[env_id].to(_obs_t_fix.device)
-                            if isinstance(obs, dict) and "policy" in obs and isinstance(obs["policy"], torch.Tensor):
-                                obs["policy"] = _obs_t_fix
-                            elif isinstance(obs, torch.Tensor):
-                                obs = _obs_t_fix
+                                            val = val.clone()
+                                            val[:3] = val[:3] + _origins[env_id]
+                                        _obs_t_fix[env_id, _ho : _ho + _hd] = val
+                            done_indices_t = torch.tensor([i for i in range(num_envs) if done[i]], device=_obs_t_fix.device)
+                            if done_indices_t.numel() > 0 and isinstance(obs, dict) and "policy" in obs and isinstance(obs["policy"], torch.Tensor):
+                                obs["policy"][done_indices_t] = _obs_t_fix[done_indices_t]
+                            elif done_indices_t.numel() > 0 and isinstance(obs, torch.Tensor):
+                                obs = obs.clone()
+                                obs[done_indices_t] = _obs_t_fix[done_indices_t]
                     except Exception as _e:
                         print(f"[Play] WARNING: EE position fix after reset failed: {_e}")
 
