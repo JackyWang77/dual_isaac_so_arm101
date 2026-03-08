@@ -28,13 +28,14 @@ from . import mdp
 ASSETS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../assets"))
 
 # Target positions: fork left of plate, knife right of plate (on tray)
-FORK_TARGET_XY = (0.17, 0.045)
-KNIFE_TARGET_XY = (0.17, -0.045)
-TARGET_Z = 0.015
+# Closer to plate edge for realistic table setting
+FORK_TARGET_XY = (0.17, 0.03)
+KNIFE_TARGET_XY = (0.17, -0.03)
+TARGET_Z = 0.015  # Should match tray/plate surface height
 
-# Subtask thresholds
-PLACE_EPS_XY = 0.04
-PLACE_EPS_Z = 0.015
+# Subtask thresholds (tight: must be precisely placed, not just nearby)
+PLACE_EPS_XY = 0.015   # 1.5cm XY tolerance (was 4cm — too loose, triggered false success)
+PLACE_EPS_Z = 0.005    # 5mm Z tolerance (was 1.5cm — too loose, must match plate height)
 
 JAW_OPEN = 0.4
 JAW_CLOSED = 0.0
@@ -94,7 +95,8 @@ class TableSettingSceneCfg(InteractiveSceneCfg):
     tray = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/Tray",
         init_state=AssetBaseCfg.InitialStateCfg(
-            pos=[0.17, 0.0, 0.005], rot=[1, 0, 0, 0]
+            # Rotate 90° around Z so long edge runs left-right (Y direction)
+            pos=[0.17, 0.0, 0.005], rot=[0.7071, 0, 0, 0.7071]
         ),
         spawn=UsdFileCfg(
             usd_path=os.path.join(ASSETS_DIR, "tray.usd"),
@@ -208,11 +210,13 @@ class EventCfg:
 
     reset_all = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
 
+    # pose_range is OFFSET from init_state. Fork init_state is [0.17, 0.15, 0.01].
+    # Small jitter around spawn position, not absolute coordinates.
     reset_fork = EventTerm(
         func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
-            "pose_range": {"x": (-0.02, 0.02), "y": (0.12, 0.18), "z": (0.0, 0.0)},
+            "pose_range": {"x": (-0.02, 0.02), "y": (-0.03, 0.03), "z": (0.0, 0.0)},
             "velocity_range": {},
             "asset_cfg": SceneEntityCfg("fork"),
         },
@@ -222,7 +226,7 @@ class EventCfg:
         func=mdp.reset_root_state_uniform,
         mode="reset",
         params={
-            "pose_range": {"x": (-0.02, 0.02), "y": (-0.18, -0.12), "z": (0.0, 0.0)},
+            "pose_range": {"x": (-0.02, 0.02), "y": (-0.03, 0.03), "z": (0.0, 0.0)},
             "velocity_range": {},
             "asset_cfg": SceneEntityCfg("knife"),
         },
