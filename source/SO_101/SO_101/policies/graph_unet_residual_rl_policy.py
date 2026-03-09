@@ -303,6 +303,7 @@ class GraphUnetResidualRLCfg:
     # EMA smoothing for base_action (joints only, gripper excluded)
     ema_alpha: float = 1.0  # EMA weight: 1.0 = no smoothing (raw model output)
     joint_dim: int = 5  # Number of joint dimensions (gripper is excluded from EMA)
+    arm_action_dim: int = 6  # per-arm block: 5 joints + 1 gripper (always 6)
 
     # advantage weighted regression
     beta: float = 1.0
@@ -627,20 +628,20 @@ class GraphUnetResidualRLPolicy(nn.Module):
         actor_obs_dim = get_obs_dim_for_mode(cfg.actor_obs_mode)
         critic_obs_dim = get_obs_dim_for_mode(cfg.critic_obs_mode)
 
-        # Actor input dim: obs_selected + base_action (6 dims) + z_bar
-        # Actor outputs 6 dims (arm + gripper); Zero Init so initial delta ≈ 0 (safe start)
-        base_action_dim_for_actor = 6
+        # Actor input dim: obs_selected + base_action (action_dim dims) + z_bar
+        # Actor outputs action_dim dims; Zero Init so initial delta ≈ 0 (safe start)
+        base_action_dim_for_actor = cfg.action_dim
         actor_in_dim = actor_obs_dim + base_action_dim_for_actor + cfg.z_dim
         self.actor = ResidualGaussianActor(
             in_dim=actor_in_dim,
-            action_dim=6,  # Full 6D: arm + gripper (RL controls gripper with per-channel alpha)
+            action_dim=cfg.action_dim,
             hidden=cfg.actor_hidden,
             act=cfg.activation,
             log_std_init=cfg.log_std_init,
             log_std_min=cfg.log_std_min,
             log_std_max=cfg.log_std_max,
         )
-        self.actor_action_dim = 6
+        self.actor_action_dim = cfg.action_dim
 
         # Critic: bar head only (U-Net single z)
         self.critic = DeepValueCritic(
@@ -667,6 +668,16 @@ class GraphUnetResidualRLPolicy(nn.Module):
         else:
             self.alpha = nn.Parameter(torch.tensor(cfg.alpha_init, dtype=torch.float32))
             self.alpha_net = None
+
+        # Compute joint/gripper indices for per-arm processing
+        self.num_arms = max(1, cfg.action_dim // cfg.arm_action_dim)
+        self.joint_indices = []
+        self.gripper_indices = []
+        for arm_i in range(self.num_arms):
+            base = arm_i * cfg.arm_action_dim
+            self.joint_indices.extend(range(base, base + cfg.arm_action_dim - 1))  # 5 joints per arm
+            self.gripper_indices.append(base + cfg.arm_action_dim - 1)  # gripper is last in each arm block
+        print(f"[GraphUnetResidualRLPolicy] num_arms={self.num_arms}, joint_indices={self.joint_indices}, gripper_indices={self.gripper_indices}")
 
         # Residual mask
         if cfg.residual_action_mask is not None:
@@ -1024,11 +1035,10 @@ class GraphUnetResidualRLPolicy(nn.Module):
         base_actions = []
         for i in range(B):
             base_actions.append(self._base_action_buffers[i].pop(0))
-        base_action_5d = torch.stack(base_actions, dim=0)  # [B, 5] - Graph-DiT outputs 5D (arm joints only)
+        base_action_full = torch.stack(base_actions, dim=0)  # [B, backbone_action_dim]
 
-        # Apply EMA smoothing to joints only (gripper excluded)
-        # Graph-DiT outputs 5D, so base_action_5d is already [B, 5] (all arm joints)
-        joints = base_action_5d  # [B, 5] - all are arm joints
+        # Apply EMA smoothing to joint dims only (grippers excluded)
+        joints = base_action_full[:, self.joint_indices]  # [B, joint_dim] (5 or 10)
 
         # Initialize EMA state if needed
         if self._ema_smoothed_joints is None:
@@ -1047,9 +1057,10 @@ class GraphUnetResidualRLPolicy(nn.Module):
             self.ema_alpha * joints + (1 - self.ema_alpha) * self._ema_smoothed_joints
         )
 
-        # Graph-DiT outputs 5D, so we return 5D (gripper is handled separately or padded later)
-        # Return normalized 5D action (arm joints only)
-        return self._ema_smoothed_joints  # [B, 5] - smoothed arm joints
+        # Write smoothed joints back, keep grippers as-is
+        result = base_action_full.clone()
+        result[:, self.joint_indices] = self._ema_smoothed_joints
+        return result  # [B, backbone_action_dim] - full action with EMA on joints only
 
     # -----------------------------
     # Main act()
@@ -1116,22 +1127,17 @@ class GraphUnetResidualRLPolicy(nn.Module):
             deterministic=True,
         )
         
-        # Denormalize base_action for execution (arm 5D; gripper from backbone 6th dim or fallback)
-        a_base_norm_5d = a_base_norm[:, :5]  # [B, 5] - arm only
+        # Denormalize base_action for execution (full action_dim: joints + grippers for all arms)
+        act_dim = self.cfg.action_dim
+        a_base_norm_full = a_base_norm[:, :act_dim]  # [B, action_dim] - truncate to action_dim if backbone outputs more
+        if a_base_norm_full.shape[-1] < act_dim:
+            # Pad if backbone outputs fewer dims than action_dim
+            pad = torch.zeros(B, act_dim - a_base_norm_full.shape[-1], device=a_base_norm_full.device, dtype=a_base_norm_full.dtype)
+            a_base_norm_full = torch.cat([a_base_norm_full, pad], dim=-1)
         if self.action_mean is not None and self.action_std is not None:
-            a_base_5d = a_base_norm_5d * self.action_std[:5] + self.action_mean[:5]  # [B, 5]
+            a_base = a_base_norm_full * self.action_std[:act_dim] + self.action_mean[:act_dim]  # [B, action_dim]
         else:
-            a_base_5d = a_base_norm_5d  # [B, 5]
-        
-        # Gripper: backbone outputs 6D → use 6th dim (denormalized); 5D → pad 0
-        if a_base_norm.shape[-1] >= 6:
-            if self.action_mean is not None and self.action_std is not None:
-                a_base_gripper = a_base_norm[:, 5:6] * self.action_std[5:6] + self.action_mean[5:6]  # [B, 1]
-            else:
-                a_base_gripper = a_base_norm[:, 5:6]  # [B, 1]
-        else:
-            a_base_gripper = torch.zeros(B, 1, device=a_base_5d.device, dtype=a_base_5d.dtype)
-        a_base = torch.cat([a_base_5d, a_base_gripper], dim=-1)  # [B, 6]
+            a_base = a_base_norm_full  # [B, action_dim]
 
         # ============================================================
         # 3. z_layers (high-frequency! called every step with temporal history)
@@ -1142,15 +1148,11 @@ class GraphUnetResidualRLPolicy(nn.Module):
         z_bar, w = self.aggregate_latent(z_layers)
 
         # 5. Actor: select obs based on actor_obs_mode
-        # Actor input: NORMALIZED (obs_norm, a_base_norm full 6D including gripper, z_bar)
+        # Actor input: NORMALIZED (obs_norm, a_base_norm full action_dim, z_bar)
         obs_actor = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
-        # FIX: Expand a_base_norm to 6D for Actor input (backbone may return 5D arm-only)
-        if a_base_norm.shape[-1] == 5:
-            gripper_pad = torch.zeros(B, 1, device=a_base_norm.device, dtype=a_base_norm.dtype)
-            a_base_norm_6d = torch.cat([a_base_norm, gripper_pad], dim=-1)  # [B, 6]
-        else:
-            a_base_norm_6d = a_base_norm
-        x = torch.cat([obs_actor, a_base_norm_6d, z_bar], dim=-1)  # [B, obs_dim + 6 + z_dim]
+        # Ensure a_base_norm matches action_dim for actor input
+        a_base_norm_for_actor = a_base_norm_full  # [B, action_dim]
+        x = torch.cat([obs_actor, a_base_norm_for_actor, z_bar], dim=-1)  # [B, obs_dim + action_dim + z_dim]
         dist = self.actor.dist(x)
         
         # Actor outputs 6D delta (arm + gripper)
@@ -1164,7 +1166,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
 
         # Denormalize delta for execution
         if self.action_mean is not None and self.action_std is not None:
-            delta = delta_norm * self.action_std
+            delta = delta_norm * self.action_std[:act_dim]
         else:
             delta = delta_norm
 
@@ -1196,11 +1198,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             # We need to pad with 0 for gripper, or use the final action 'a' which is 6D
             # Actually, we should store the final action 'a' (6D) after normalization
             # But for now, let's pad a_base_norm to 6D if needed
-            action_for_history = a_base_norm
-            if action_for_history.shape[-1] == 5:
-                # Pad with 0 for gripper (Graph-DiT doesn't output gripper)
-                gripper_pad = torch.zeros(B, 1, device=action_for_history.device, dtype=action_for_history.dtype)
-                action_for_history = torch.cat([action_for_history, gripper_pad], dim=-1)  # [B, 6]
+            action_for_history = a_base_norm_full  # [B, action_dim] - full normalized action
             self.history_buffer.update(
                 ee_node=ee_node,
                 obj_node=obj_node,

@@ -435,18 +435,26 @@ class GraphDiTRLTrainer:
 
                 action_dim = action.shape[-1]
                 action_for_sim = action.clone()
-                if action_dim >= 6:
-                    joints = action_for_sim[:, :5]
+                # Process each arm block: [5 joints, 1 gripper] × num_arms
+                arm_block = 6  # 5 joints + 1 gripper
+                for arm_i in range(action_dim // arm_block):
+                    base = arm_i * arm_block
+                    # EMA smoothing on joints (currently no-op with ema_alpha=1.0)
+                    joints_slice = slice(base, base + 5)
                     if self._ema_smoothed_joints is None:
-                        self._ema_smoothed_joints = joints.clone()
-                    else:
-                        ema_alpha = 1.0  # 1.0=no smoothing (graph_unet prefers raw)
-                        self._ema_smoothed_joints = ema_alpha * joints + (1 - ema_alpha) * self._ema_smoothed_joints
-                    action_for_sim[:, :5] = self._ema_smoothed_joints
-                    action_for_sim[:, 5] = torch.where(
-                        action_for_sim[:, 5] > -0.2,
+                        self._ema_smoothed_joints = action_for_sim[:, :action_dim].clone()
+                    ema_alpha = 1.0  # 1.0=no smoothing (raw model output)
+                    self._ema_smoothed_joints[:, joints_slice] = (
+                        ema_alpha * action_for_sim[:, joints_slice]
+                        + (1 - ema_alpha) * self._ema_smoothed_joints[:, joints_slice]
+                    )
+                    action_for_sim[:, joints_slice] = self._ema_smoothed_joints[:, joints_slice]
+                    # Threshold gripper to binary +1/-1
+                    gripper_idx = base + 5
+                    action_for_sim[:, gripper_idx] = torch.where(
+                        action_for_sim[:, gripper_idx] > -0.2,
                         torch.tensor(1.0, device=action.device, dtype=action.dtype),
-                        torch.tensor(-1.0, device=action.device, dtype=action.dtype)
+                        torch.tensor(-1.0, device=action.device, dtype=action.dtype),
                     )
 
             next_obs, reward, terminated, truncated, env_info = self.env.step(action_for_sim)
@@ -864,11 +872,12 @@ def main():
             pass
         return 1
 
-    action_dim_env = get_action_dim(action_space)  # Environment action dim (usually 6)
-    action_dim_rl = 6  # RL outputs 6D (arm + gripper); per-channel alpha: arm low, gripper full
+    action_dim_env = get_action_dim(action_space)  # Environment action dim (6 single, 12 dual)
+    action_dim_rl = action_dim_env  # RL outputs same dim as env (6 single, 12 dual)
 
     print(f"[Main] obs_dim: {obs_dim}, action_dim_env: {action_dim_env}, action_dim_rl: {action_dim_rl}")
-    print(f"[Main] RL outputs 6D; arm uses alpha_learned, gripper uses 1.0 (full override)")
+    num_arms = max(1, action_dim_rl // 6)
+    print(f"[Main] RL outputs {action_dim_rl}D ({num_arms} arm(s)); arm uses alpha_learned, gripper uses 1.0")
 
     # Create policy config
     obs_structure = getattr(backbone_policy.cfg, "obs_structure", None)
@@ -884,7 +893,7 @@ def main():
         num_layers=backbone_policy.cfg.num_layers,
         device=device,
         obs_structure=obs_structure,
-        robot_state_dim=6,
+        robot_state_dim=action_dim_rl,
         residual_action_mask=residual_action_mask,
         c_delta_reg=args.c_delta_reg,
         cEnt=args.c_ent,

@@ -186,3 +186,24 @@ class DualSoArm101CubeStackJointPosEnvCfg_PLAY(DualSoArm101CubeStackJointPosEnvC
             scale=1.0,
             use_default_offset=False,
         )
+
+
+@configclass
+class CubeStackRLEnvCfg(DualSoArm101CubeStackJointPosEnvCfg):
+    """Dual-arm cube stack for RL fine-tuning. Joint position arms + binary grippers."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Override grippers to binary: RL outputs +1/-1 → BinaryJointPosition maps to open/close
+        self.actions.right_gripper_action = mdp.BinaryJointPositionActionCfg(
+            asset_name="right_arm",
+            joint_names=["jaw_joint"],
+            open_command_expr={"jaw_joint": 0.4},
+            close_command_expr={"jaw_joint": 0.0},
+        )
+        self.actions.left_gripper_action = mdp.BinaryJointPositionActionCfg(
+            asset_name="left_arm",
+            joint_names=["jaw_joint"],
+            open_command_expr={"jaw_joint": 0.4},
+            close_command_expr={"jaw_joint": 0.0},
+        )
