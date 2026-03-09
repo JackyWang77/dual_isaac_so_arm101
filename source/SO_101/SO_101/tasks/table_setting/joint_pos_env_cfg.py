@@ -78,7 +78,7 @@ class DualSoArm101TableSettingJointPosEnvCfg(TableSettingEnvCfg):
         self.scene.fork = RigidObjectCfg(
             prim_path="{ENV_REGEX_NS}/Fork",
             init_state=RigidObjectCfg.InitialStateCfg(
-                pos=[0.25, 0.30, 0.0], rot=[0.7071, 0, 0, -0.7071]
+                pos=[0.25, 0.24, 0.0], rot=[0.7071, 0, 0, -0.7071]
             ),
             spawn=UsdFileCfg(
                 usd_path=os.path.join(ASSETS_DIR, "fork.usd"),
