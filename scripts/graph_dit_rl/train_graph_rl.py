@@ -24,13 +24,13 @@ from isaaclab.app import AppLauncher
 
 # CLI args
 parser = argparse.ArgumentParser(description="Train GraphDiT + Residual RL Policy")
-parser.add_argument("--task", type=str, default="SO-ARM101-Lift-Cube-RL-v0",
-                    help="SO-ARM101-Lift-Cube-RL-v0: Position+Rotation (training), SO-ARM101-Lift-Cube-v0: Position only")
+parser.add_argument("--task", type=str, default="SO-ARM101-Dual-Cube-Stack-RL-v0",
+                    help="SO-ARM101-Dual-Cube-Stack-RL-v0 (dual arm RL), SO-ARM101-Dual-Cube-Stack-v0 (original rewards)")
 parser.add_argument("--pretrained_checkpoint", type=str, required=True,
                     help="Pretrained Graph-Unet checkpoint (residual RL is Unet-only)")
-parser.add_argument("--policy_type", type=str, default="unet",
-                    choices=["unet", "graph_unet"],
-                    help="Backbone policy: 'unet' (MLP + U-Net) or 'graph_unet' (Graph Attention + U-Net)")
+parser.add_argument("--policy_type", type=str, default="dual_arm_gated",
+                    choices=["unet", "graph_unet", "dual_arm", "dual_arm_gated"],
+                    help="Backbone policy (auto-detected from checkpoint if dual arm)")
 parser.add_argument("--num_envs", type=int, default=128)
 parser.add_argument("--max_iterations", type=int, default=500)
 parser.add_argument("--seed", type=int, default=42)
@@ -84,6 +84,8 @@ from torch.utils.tensorboard import SummaryWriter
 import SO_101.tasks  # noqa: F401 Register envs
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
 from SO_101.policies.graph_unet_policy import GraphUnetPolicy, UnetPolicy
+from SO_101.policies.dual_arm_unet_policy import DualArmDisentangledPolicy
+from SO_101.policies.dual_arm_unet_policy_gated import DualArmDisentangledPolicyGated
 from SO_101.policies.graph_unet_residual_rl_policy import (
     GraphUnetBackboneAdapter,
     GraphUnetResidualRLCfg,
@@ -274,6 +276,9 @@ class GraphDiTRLTrainer:
 
         # EMA smoothing for joints
         self._ema_smoothed_joints = None
+        # Dual arm detection
+        self._is_dual_arm = (cfg.action_dim == 12)
+        self._robot_state_dim = cfg.robot_state_dim
 
         # Buffer
         self.buffer = RolloutBuffer(self.num_envs, steps_per_env, device)
@@ -309,9 +314,8 @@ class GraphDiTRLTrainer:
         policy.init_env_buffers(self.num_envs)
         
         # History buffers for Graph-DiT (optimized: single tensor per history type)
-        # NOTE: GraphDiT expects 6 dimensions for joint states (was trained with 6)
-        # The residual RL config's joint_dim=5 is only for EMA smoothing, not for joint state extraction
-        graph_dit_joint_dim = 6  # Always 6 for GraphDiT compatibility
+        # Joint state dim: 6 for single arm, 12 for dual arm
+        graph_dit_joint_dim = cfg.robot_state_dim
         
         # Use provided action_history_length (from Graph-DiT config)
         # CRITICAL: action_history must use action_dim_env (6), not cfg.action_dim (5)
@@ -344,7 +348,12 @@ class GraphDiTRLTrainer:
 
         # 成功率：与 play / play_rl 一致，仅用 truncated + 高度（不用 env_info log，标量不可用）
         obs_structure = getattr(cfg, "obs_structure", None)
-        if obs_structure is not None and "object_position" in obs_structure:
+        if obs_structure is not None and "cube_1_pos" in obs_structure:
+            # Dual arm: use cube_1 Z for stack success (cube_1 is top cube)
+            obj_pos_start, _ = obs_structure["cube_1_pos"]
+            self.OBJ_HEIGHT_IDX = obj_pos_start + 2  # Z
+            print(f"[Trainer] OBJ_HEIGHT_IDX = {self.OBJ_HEIGHT_IDX} (from cube_1_pos, dual arm)")
+        elif obs_structure is not None and "object_position" in obs_structure:
             obj_pos_start, _ = obs_structure["object_position"]
             self.OBJ_HEIGHT_IDX = obj_pos_start + 2  # Z
             print(f"[Trainer] OBJ_HEIGHT_IDX = {self.OBJ_HEIGHT_IDX} (from obs_structure)")
@@ -396,7 +405,7 @@ class GraphDiTRLTrainer:
                 obs_norm = obs
 
             ee_node_current, object_node_current = self.policy._extract_nodes_from_obs(obs)
-            joint_states_current = obs[:, :6]
+            joint_states_current = obs[:, :self._robot_state_dim]
 
             action_history = self.action_history
             ee_node_history = self.ee_node_history.clone()
@@ -431,7 +440,9 @@ class GraphDiTRLTrainer:
 
                 delta = info.get("delta", None)
                 if delta is not None:
-                    delta_norms_all.append(torch.norm(delta[:, :5], dim=-1).mean().item())
+                    # Log joint delta norms (exclude grippers)
+                    joint_delta = torch.cat([delta[:, :5], delta[:, 6:11]], dim=-1) if self._is_dual_arm else delta[:, :5]
+                    delta_norms_all.append(torch.norm(joint_delta, dim=-1).mean().item())
 
                 action_dim = action.shape[-1]
                 action_for_sim = action.clone()
@@ -783,8 +794,26 @@ def main():
     # Get device from AppLauncher (or use default)
     device = getattr(args, "device", "cuda")
 
-    # Load pretrained backbone (UnetPolicy or GraphUnetPolicy)
-    BackboneClass = GraphUnetPolicy if args.policy_type == "graph_unet" else UnetPolicy
+    # Load pretrained backbone (auto-detect from checkpoint or CLI flag)
+    _backbone_classes = {
+        "graph_unet": GraphUnetPolicy,
+        "unet": UnetPolicy,
+        "dual_arm_gated": DualArmDisentangledPolicyGated,
+        "dual_arm": DualArmDisentangledPolicy,
+    }
+    # Auto-detect: if checkpoint cfg has arm_action_dim → dual arm
+    _ckpt_preview = torch.load(args.pretrained_checkpoint, map_location="cpu", weights_only=False)
+    _ckpt_cfg = _ckpt_preview.get("cfg", None)
+    if _ckpt_cfg is not None and getattr(_ckpt_cfg, "arm_action_dim", None) is not None:
+        # Dual arm checkpoint - detect gated vs non-gated
+        if "graph_gate_logit" in _ckpt_preview.get("model_state_dict", {}):
+            args.policy_type = "dual_arm_gated"
+        else:
+            args.policy_type = "dual_arm"
+        print(f"[Main] Auto-detected dual arm checkpoint: policy_type={args.policy_type}")
+    del _ckpt_preview
+
+    BackboneClass = _backbone_classes.get(args.policy_type, GraphUnetPolicy)
     print(f"\n[Main] Loading pretrained {BackboneClass.__name__}: {args.pretrained_checkpoint}")
     backbone_policy = BackboneClass.load(args.pretrained_checkpoint, device=device)
     backbone_policy.eval()
@@ -800,8 +829,7 @@ def main():
         print(f"[Main] ⚠️  WARNING: node_to_z not found in backbone!")
     print(f"[Main] Graph-Unet loaded and frozen (except node_to_z)")
 
-    # Gripper comes from backbone (6th dim); no separate gripper model
-    print(f"[Main] Using backbone for all 6 action dimensions (including gripper)")
+    print(f"[Main] Using backbone for all {_backbone_action_dim} action dimensions (including gripper)")
 
     # Create backbone adapter
     backbone = GraphUnetBackboneAdapter(backbone_policy)
@@ -885,6 +913,9 @@ def main():
 
     # No mask: RL controls all 6 dims; per-channel alpha in policy (arm low, gripper full)
     residual_action_mask = torch.ones(action_dim_env, device=device)
+
+    _robot_state_dim = 12 if is_dual_arm else 6
+    _joint_dim = 10 if is_dual_arm else 5  # joints only, no grippers
 
     policy_cfg = GraphUnetResidualRLCfg(
         obs_dim=obs_dim,
@@ -1035,7 +1066,7 @@ def main():
         lr=args.lr,
         max_grad_norm=args.max_grad_norm,
         action_history_length=action_history_length,
-        action_dim_env=action_dim_env,  # Pass environment action dim (6) for history buffer
+        action_dim_env=action_dim_env,  # Pass environment action dim (6 or 12) for history buffer
         best_sr_window=getattr(args, "best_sr_window", 200),
         best_sr_require_consistent=getattr(args, "best_sr_require_consistent", False),
     )
