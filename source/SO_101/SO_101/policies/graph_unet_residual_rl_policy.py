@@ -907,22 +907,29 @@ class GraphUnetResidualRLPolicy(nn.Module):
         if mode == "full":
             return obs
         elif mode == "robot_state" or mode == "robot_state_only":
+            s = self.cfg.obs_structure
+            if s is not None and "left_joint_pos" in s:
+                return torch.cat([
+                    obs[:, s["left_joint_pos"][0]:s["left_joint_pos"][1]],
+                    obs[:, s["right_joint_pos"][0]:s["right_joint_pos"][1]],
+                ], dim=-1)
             robot_state_dim = self.cfg.robot_state_dim
             return obs[:, :robot_state_dim]
         elif mode == "joint_object_ee":
             cfg = self.cfg
             s = cfg.obs_structure
-            j_end = cfg.robot_state_dim
             if s is not None and "left_ee_position" in s:
-                # Dual arm: joint(12) + left_ee(7) + right_ee(7) + cube_1(7) + cube_2(7) = 40
+                # Dual arm: left_pos(6) + right_pos(6) + left_ee(7) + right_ee(7) + cube_1(7) + cube_2(7) = 40
                 return torch.cat([
-                    obs[:, :j_end],
+                    obs[:, s["left_joint_pos"][0]:s["left_joint_pos"][1]],
+                    obs[:, s["right_joint_pos"][0]:s["right_joint_pos"][1]],
                     obs[:, s["left_ee_position"][0]:s["left_ee_orientation"][1]],
                     obs[:, s["right_ee_position"][0]:s["right_ee_orientation"][1]],
                     obs[:, s["cube_1_pos"][0]:s["cube_1_ori"][1]],
                     obs[:, s["cube_2_pos"][0]:s["cube_2_ori"][1]],
                 ], dim=-1)
             elif s is not None:
+                j_end = s.get("joint_pos", (0, cfg.robot_state_dim))[1] if "joint_pos" in s else cfg.robot_state_dim
                 obj_start = s["object_position"][0]
                 obj_end = s["object_orientation"][1]
                 ee_start = s["ee_position"][0]
@@ -1131,7 +1138,14 @@ class GraphUnetResidualRLPolicy(nn.Module):
         # ============================================================
         B = obs.shape[0]
         ee_node, obj_node = self._extract_nodes_from_obs(obs)
-        joint_states = obs[:, :self.cfg.robot_state_dim]
+        s = self.cfg.obs_structure
+        if s is not None and "left_joint_pos" in s:
+            joint_states = torch.cat([
+                obs[:, s["left_joint_pos"][0]:s["left_joint_pos"][1]],
+                obs[:, s["right_joint_pos"][0]:s["right_joint_pos"][1]],
+            ], dim=-1)
+        else:
+            joint_states = obs[:, :self.cfg.robot_state_dim]
         
         # Get histories from buffer (for predict() call)
         if self.history_buffer is not None:

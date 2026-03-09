@@ -190,7 +190,13 @@ class DualSoArm101CubeStackJointPosEnvCfg_PLAY(DualSoArm101CubeStackJointPosEnvC
 
 @configclass
 class CubeStackRLEnvCfg(DualSoArm101CubeStackJointPosEnvCfg):
-    """Dual-arm cube stack for RL fine-tuning. Joint position arms + binary grippers."""
+    """Dual-arm cube stack for RL fine-tuning. Joint position arms + binary grippers.
+
+    Uses CubeStackRLRewardsCfg: lower weight for BC-learned skills (lift),
+    higher weight for stack alignment precision + gripper release + success bonus.
+    """
+
+    rewards: CubeStackRLRewardsCfg = CubeStackRLRewardsCfg()
 
     def __post_init__(self):
         super().__post_init__()

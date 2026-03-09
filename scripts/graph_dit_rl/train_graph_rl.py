@@ -43,7 +43,7 @@ parser.add_argument("--best_sr_require_consistent", action="store_true",
                     help="Only save best when current SR >= sr_window - 15%% (avoid lucky flukes)")
 
 # Rollout config
-parser.add_argument("--steps_per_env", type=int, default=160, help="Steps per env per iteration (>150 留缓冲，episode 3s=150步; 超时=判负)")
+parser.add_argument("--steps_per_env", type=int, default=400, help="Steps per env per iteration (must >= env max_episode_steps=400 to avoid premature rollout truncation)")
 parser.add_argument("--num_epochs", type=int, default=5, help="Epochs per iteration")
 parser.add_argument("--mini_batch_size", type=int, default=64)
 parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
@@ -339,30 +339,50 @@ class GraphDiTRLTrainer:
         self.action_std = None
 
         print(f"[Trainer] num_envs: {self.num_envs}, steps_per_env: {steps_per_env}")
-        if steps_per_env <= 150:
+        if steps_per_env < 400:
             print(
-                f"[Trainer] ⚠️ WARNING: steps_per_env={steps_per_env} <= 150 (episode_length). "
-                "超时 episode 可能采不完→SR 虚高！建议 steps_per_env > 150 留缓冲"
+                f"[Trainer] ⚠️ WARNING: steps_per_env={steps_per_env} < 400 (env max_episode_steps). "
+                "Episodes may be truncated by rollout before env termination! "
+                "Dataset mean=251, P95=339, env_max=400. Recommend steps_per_env >= 400."
             )
         print(f"[Trainer] trainable params: {sum(p.numel() for p in trainable_params):,}")
 
-        # 成功率：与 play / play_rl 一致，仅用 truncated + 高度（不用 env_info log，标量不可用）
-        obs_structure = getattr(cfg, "obs_structure", None)
-        if obs_structure is not None and "cube_1_pos" in obs_structure:
-            # Dual arm: use cube_1 Z for stack success (cube_1 is top cube)
-            obj_pos_start, _ = obs_structure["cube_1_pos"]
-            self.OBJ_HEIGHT_IDX = obj_pos_start + 2  # Z
-            print(f"[Trainer] OBJ_HEIGHT_IDX = {self.OBJ_HEIGHT_IDX} (from cube_1_pos, dual arm)")
-        elif obs_structure is not None and "object_position" in obs_structure:
-            obj_pos_start, _ = obs_structure["object_position"]
-            self.OBJ_HEIGHT_IDX = obj_pos_start + 2  # Z
-            print(f"[Trainer] OBJ_HEIGHT_IDX = {self.OBJ_HEIGHT_IDX} (from obs_structure)")
-        else:
-            self.OBJ_HEIGHT_IDX = 14
-            print(f"[Trainer] OBJ_HEIGHT_IDX = {self.OBJ_HEIGHT_IDX} (default)")
-        self.SUCCESS_HEIGHT = 0.10  # 与 play / play_rl 一致
-        print(f"[Trainer] Success: timeout=失败, 否则 height>={self.SUCCESS_HEIGHT}m=成功 (与 play 一致)")
+        # Success detection: use env termination signals from info dict
+        # Isaac Lab returns Episode_Termination/success, Episode_Termination/stack_success etc.
+        print(f"[Trainer] Success: using env termination signals (Episode_Termination/success)")
+        print(f"[Trainer] truncated=timeout=failure, terminated+success_signal=success")
         print(f"[Trainer] Best-model: SR_{self.best_sr_window}ep window, consistent_check={self.best_sr_require_consistent}")
+
+    def _check_success_from_info(self, env_info, env_idx: int) -> bool:
+        """Check success from env termination signals (same logic as play.py _get_success_flags)."""
+        if not isinstance(env_info, dict):
+            return False
+        log = env_info.get("log") or env_info.get("extra_info")
+        if not isinstance(log, dict):
+            return False
+        for key in (
+            "Episode_Termination/success",
+            "Episode_Termination/stack_success",
+            "success",
+            "episode_success",
+            "termination_success",
+        ):
+            if key in log:
+                val = log[key]
+                if isinstance(val, torch.Tensor):
+                    if val.dim() == 0:
+                        return bool(val.item())
+                    if val.dim() >= 1 and val.shape[0] > env_idx:
+                        return bool(val[env_idx].item() > 0.5)
+                elif isinstance(val, np.ndarray):
+                    if val.ndim == 0:
+                        return bool(val.item())
+                    if val.ndim >= 1 and val.shape[0] > env_idx:
+                        return bool(val[env_idx] > 0.5)
+                elif isinstance(val, (bool, int, float)):
+                    return bool(val)
+        # No success signal found but terminated (not truncated) - could be cube dropping
+        return False
 
     def set_normalization_stats(
         self,
@@ -405,7 +425,14 @@ class GraphDiTRLTrainer:
                 obs_norm = obs
 
             ee_node_current, object_node_current = self.policy._extract_nodes_from_obs(obs)
-            joint_states_current = obs[:, :self._robot_state_dim]
+            obs_struct = getattr(self.cfg, "obs_structure", None)
+            if obs_struct is not None and "left_joint_pos" in obs_struct:
+                joint_states_current = torch.cat([
+                    obs[:, obs_struct["left_joint_pos"][0]:obs_struct["left_joint_pos"][1]],
+                    obs[:, obs_struct["right_joint_pos"][0]:obs_struct["right_joint_pos"][1]],
+                ], dim=-1)
+            else:
+                joint_states_current = obs[:, :self._robot_state_dim]
 
             action_history = self.action_history
             ee_node_history = self.ee_node_history.clone()
@@ -502,15 +529,11 @@ class GraphDiTRLTrainer:
                 for i in done_envs.tolist():
                     self.episode_rewards.append(ep_rewards[i].item())
                     self.episode_lengths.append(ep_lengths[i].item())
-                    # 超时判负：truncated(timeout)=0，否则 height>=0.1=成功
-                    # Isaac Lab 在 reset 之后才计算 obs，next_obs 对 done env 是 reset 后的新 episode 初始 obs
-                    # 必须用 obs（step 前 = 终止前最后一帧）判断 success
-                    obj_height = obs[i, self.OBJ_HEIGHT_IDX].item()
                     is_truncated = bool(truncated[i].item() if hasattr(truncated[i], "item") else truncated[i])
                     if is_truncated:
-                        is_success = False  # 超时=判负，计入分母
+                        is_success = False
                     else:
-                        is_success = obj_height >= self.SUCCESS_HEIGHT
+                        is_success = self._check_success_from_info(env_info, i)
                     rollout_successes.append(float(is_success))
                     self.episode_successes.append(float(is_success))
 
@@ -829,6 +852,7 @@ def main():
         print(f"[Main] ⚠️  WARNING: node_to_z not found in backbone!")
     print(f"[Main] Graph-Unet loaded and frozen (except node_to_z)")
 
+    _backbone_action_dim = getattr(backbone_policy.cfg, "action_dim", 6)
     print(f"[Main] Using backbone for all {_backbone_action_dim} action dimensions (including gripper)")
 
     # Create backbone adapter
@@ -914,8 +938,9 @@ def main():
     # No mask: RL controls all 6 dims; per-channel alpha in policy (arm low, gripper full)
     residual_action_mask = torch.ones(action_dim_env, device=device)
 
+    is_dual_arm = (action_dim_rl == 12)
     _robot_state_dim = 12 if is_dual_arm else 6
-    _joint_dim = 10 if is_dual_arm else 5  # joints only, no grippers
+    _joint_dim = 10 if is_dual_arm else 5
 
     policy_cfg = GraphUnetResidualRLCfg(
         obs_dim=obs_dim,
@@ -924,7 +949,8 @@ def main():
         num_layers=backbone_policy.cfg.num_layers,
         device=device,
         obs_structure=obs_structure,
-        robot_state_dim=action_dim_rl,
+        robot_state_dim=_robot_state_dim,
+        joint_dim=_joint_dim,
         residual_action_mask=residual_action_mask,
         c_delta_reg=args.c_delta_reg,
         cEnt=args.c_ent,
