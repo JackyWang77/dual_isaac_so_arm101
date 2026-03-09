@@ -15,7 +15,7 @@ from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from SO_101.robots.so_arm101_roscon import SO_ARM101_ROSCON_HIGH_PD_CFG
-from SO_101.tasks.cube_stack.cube_stack_env_cfg import CubeStackEnvCfg, CubeStackSubtaskCfg
+from SO_101.tasks.cube_stack.cube_stack_env_cfg import CubeStackEnvCfg, CubeStackRLRewardsCfg, CubeStackSubtaskCfg
 
 from . import mdp
 from isaaclab.markers.config import FRAME_MARKER_CFG  # noqa: E402

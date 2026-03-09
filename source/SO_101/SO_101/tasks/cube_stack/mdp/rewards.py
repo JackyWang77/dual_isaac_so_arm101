@@ -137,3 +137,84 @@ def cube_near_target_xy(
     ).unsqueeze(0).expand(pos.shape[0], -1)
     xy_dist = torch.norm(pos - target, dim=1)
     return (1 - torch.tanh(xy_dist / xy_std))
+
+
+# =========================================================
+# RL fine-tuning rewards (for residual RL on top of BC)
+# =========================================================
+
+def gripper_release_when_stacked(
+    env: ManagerBasedRLEnv,
+    xy_threshold: float = 0.015,
+    z_tolerance: float = 0.01,
+    jaw_open: float = 0.4,
+    cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
+    cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
+    right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
+    left_arm_cfg: SceneEntityCfg = SceneEntityCfg("left_arm"),
+) -> torch.Tensor:
+    """Reward opening grippers when cubes are stacked (either order).
+
+    BC sometimes "doesn't dare to release" - this encourages letting go
+    once the stack is aligned.
+    """
+    c1: RigidObject = env.scene[cube_1_cfg.name]
+    c2: RigidObject = env.scene[cube_2_cfg.name]
+    right_arm = env.scene[right_arm_cfg.name]
+    left_arm = env.scene[left_arm_cfg.name]
+
+    p1 = c1.data.root_pos_w[:, :3]
+    p2 = c2.data.root_pos_w[:, :3]
+
+    # Check if cubes are stacked (either order)
+    xy_dist = torch.norm(p1[:, :2] - p2[:, :2], dim=1)
+    z_diff = torch.abs(p1[:, 2] - p2[:, 2])
+    is_stacked = ((xy_dist < xy_threshold) & (z_diff > z_tolerance)).float()
+
+    # Gripper openness: 0=closed, 1=fully open
+    right_open = (right_arm.data.joint_pos[:, -1] / jaw_open).clamp(0, 1)
+    left_open = (left_arm.data.joint_pos[:, -1] / jaw_open).clamp(0, 1)
+
+    return is_stacked * (right_open + left_open) * 0.5
+
+
+def stack_success_bonus(
+    env: ManagerBasedRLEnv,
+    expected_height: float = 0.018,
+    eps_z: float = 0.005,
+    eps_xy: float = 0.012,
+    gripper_open_threshold: float = 0.1,
+    cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
+    cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
+    right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
+    left_arm_cfg: SceneEntityCfg = SceneEntityCfg("left_arm"),
+) -> torch.Tensor:
+    """Large one-time bonus when stack success conditions are met.
+
+    Looser than termination criterion (no velocity/stability check)
+    so the agent gets rewarded more frequently during learning.
+    """
+    c1: RigidObject = env.scene[cube_1_cfg.name]
+    c2: RigidObject = env.scene[cube_2_cfg.name]
+    right_arm = env.scene[right_arm_cfg.name]
+    left_arm = env.scene[left_arm_cfg.name]
+
+    p1 = c1.data.root_pos_w[:, :3]
+    p2 = c2.data.root_pos_w[:, :3]
+
+    # Check both stacking orders: 1-on-2 or 2-on-1
+    z_diff_1on2 = p1[:, 2] - p2[:, 2]
+    z_diff_2on1 = p2[:, 2] - p1[:, 2]
+    xy_dist = torch.norm(p1[:, :2] - p2[:, :2], dim=1)
+
+    ok_1on2 = (torch.abs(z_diff_1on2 - expected_height) < eps_z) & (xy_dist < eps_xy)
+    ok_2on1 = (torch.abs(z_diff_2on1 - expected_height) < eps_z) & (xy_dist < eps_xy)
+    stacked = (ok_1on2 | ok_2on1).float()
+
+    # Both grippers open
+    both_open = (
+        (right_arm.data.joint_pos[:, -1] > gripper_open_threshold)
+        & (left_arm.data.joint_pos[:, -1] > gripper_open_threshold)
+    ).float()
+
+    return stacked * both_open

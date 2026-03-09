@@ -364,11 +364,20 @@ class LayerWiseGateNet(nn.Module):
 
 
 class AdaptiveAlphaNet(nn.Module):
-    """State-dependent per-dim alpha: alpha_vec = f(z_bar, obs) -> [B, 6].
-    Arm (0-4): [0, 0.3]; Gripper (5): always 1.0."""
-    def __init__(self, in_dim: int, hidden: Tuple[int, ...], act: str = "silu", alpha_init: float = 0.10):
+    """State-dependent per-dim alpha: alpha_vec = f(z_bar, obs) -> [B, action_dim].
+    Arm joints: [0, 0.3]; Grippers: always 1.0.
+    Supports single arm (6D: joints 0-4, gripper 5) and
+    dual arm (12D: left joints 0-4, left gripper 5, right joints 6-10, right gripper 11)."""
+    def __init__(self, in_dim: int, hidden: Tuple[int, ...], act: str = "silu",
+                 alpha_init: float = 0.10, action_dim: int = 6):
         super().__init__()
-        self.net = mlp(in_dim, hidden, 6, act=act)
+        self.action_dim = action_dim
+        # Gripper indices
+        if action_dim == 12:
+            self.gripper_indices = [5, 11]
+        else:
+            self.gripper_indices = [5]
+        self.net = mlp(in_dim, hidden, action_dim, act=act)
         # Init last layer so initial output ~alpha_init/0.3 for arm (sigmoid scale)
         init_val = alpha_init / 0.3
         init_val = max(0.01, min(0.99, init_val))
@@ -378,9 +387,10 @@ class AdaptiveAlphaNet(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: [B, z_dim + obs_dim]
-        raw = torch.sigmoid(self.net(x))  # [B, 6], range (0, 1)
-        alpha_vec = raw * 0.3  # Arm: [0, 0.3]
-        alpha_vec[:, 5] = 1.0  # Gripper: full override
+        raw = torch.sigmoid(self.net(x))  # [B, action_dim], range (0, 1)
+        alpha_vec = raw * 0.3  # Arm joints: [0, 0.3]
+        for gi in self.gripper_indices:
+            alpha_vec[:, gi] = 1.0  # Gripper: full override
         return alpha_vec
 
 
@@ -611,36 +621,41 @@ class GraphUnetResidualRLPolicy(nn.Module):
         self.gate = None
 
         # Compute actual obs dim for Actor/Critic (based on obs_mode)
+        act_dim = cfg.action_dim  # 6 for single arm, 12 for dual arm
         def get_obs_dim_for_mode(mode: str) -> int:
             if mode == "full":
                 return cfg.obs_dim
             elif mode == "robot_state" or mode == "robot_state_only":
                 return cfg.robot_state_dim
             elif mode == "joint_object_ee":
-                return 20  # joint_pos(6) + object(7) + ee(7)
+                # Dual arm: joint_pos(12) + 2*object(7) + 2*ee(7) = 40
+                # Single arm: joint_pos(6) + object(7) + ee(7) = 20
+                if act_dim == 12:
+                    return 40
+                return 20
             elif isinstance(mode, tuple) and len(mode) == 2:
                 start, end = mode
                 return end - start
             else:
                 raise ValueError(f"Unknown obs_mode: {mode}")
-        
+
         actor_obs_dim = get_obs_dim_for_mode(cfg.actor_obs_mode)
         critic_obs_dim = get_obs_dim_for_mode(cfg.critic_obs_mode)
 
-        # Actor input dim: obs_selected + base_action (6 dims) + z_bar
-        # Actor outputs 6 dims (arm + gripper); Zero Init so initial delta ≈ 0 (safe start)
-        base_action_dim_for_actor = 6
+        # Actor input dim: obs_selected + base_action (action_dim) + z_bar
+        # Zero Init so initial delta ≈ 0 (safe start)
+        base_action_dim_for_actor = act_dim
         actor_in_dim = actor_obs_dim + base_action_dim_for_actor + cfg.z_dim
         self.actor = ResidualGaussianActor(
             in_dim=actor_in_dim,
-            action_dim=6,  # Full 6D: arm + gripper (RL controls gripper with per-channel alpha)
+            action_dim=act_dim,
             hidden=cfg.actor_hidden,
             act=cfg.activation,
             log_std_init=cfg.log_std_init,
             log_std_min=cfg.log_std_min,
             log_std_max=cfg.log_std_max,
         )
-        self.actor_action_dim = 6
+        self.actor_action_dim = act_dim
 
         # Critic: bar head only (U-Net single z)
         self.critic = DeepValueCritic(
@@ -656,12 +671,13 @@ class GraphUnetResidualRLPolicy(nn.Module):
         self.use_adaptive_alpha = getattr(cfg, "use_adaptive_alpha", False)
         if self.use_adaptive_alpha:
             alpha_in_dim = cfg.z_dim + actor_obs_dim
-            print(f"[GraphUnetResidualRLPolicy] AdaptiveAlphaNet: in_dim={alpha_in_dim} (z_dim={cfg.z_dim} + actor_obs_dim={actor_obs_dim})")
+            print(f"[GraphUnetResidualRLPolicy] AdaptiveAlphaNet: in_dim={alpha_in_dim} (z_dim={cfg.z_dim} + actor_obs_dim={actor_obs_dim}), action_dim={act_dim}")
             self.alpha_net = AdaptiveAlphaNet(
                 alpha_in_dim,
                 getattr(cfg, "alpha_hidden", (64,)),
                 act=cfg.activation,
                 alpha_init=cfg.alpha_init,
+                action_dim=act_dim,
             )
             self.alpha = None  # Unused when adaptive
         else:
@@ -764,16 +780,25 @@ class GraphUnetResidualRLPolicy(nn.Module):
     def _compute_alpha_vec(
         self, z_bar: torch.Tensor, obs_actor: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Compute alpha_vec [B, 6]. Returns (alpha_vec, alpha_mean_for_log)."""
+        """Compute alpha_vec [B, action_dim]. Returns (alpha_vec, alpha_mean_for_log)."""
+        act_dim = self.cfg.action_dim
+        if act_dim == 12:
+            joint_indices = [0, 1, 2, 3, 4, 6, 7, 8, 9, 10]
+            gripper_indices = [5, 11]
+        else:
+            joint_indices = [0, 1, 2, 3, 4]
+            gripper_indices = [5]
+
         if self.use_adaptive_alpha:
             x = torch.cat([z_bar, obs_actor], dim=-1)
             alpha_vec = self.alpha_net(x)
-            alpha_mean = alpha_vec[:, :5].mean()  # Arm dims only for logging
+            alpha_mean = alpha_vec[:, joint_indices].mean()  # Arm dims only for logging
         else:
             alpha_scalar = torch.clamp(self.alpha, 0.0, 0.3)
             B = z_bar.shape[0]
-            alpha_vec = torch.ones(B, 6, device=z_bar.device, dtype=z_bar.dtype) * alpha_scalar
-            alpha_vec[:, 5] = 1.0
+            alpha_vec = torch.ones(B, act_dim, device=z_bar.device, dtype=z_bar.dtype) * alpha_scalar
+            for gi in gripper_indices:
+                alpha_vec[:, gi] = 1.0
             alpha_mean = alpha_scalar
         return alpha_vec, alpha_mean
 
@@ -803,47 +828,57 @@ class GraphUnetResidualRLPolicy(nn.Module):
     # -----------------------------
     def _extract_nodes_from_obs(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Extract ee_node and obj_node from obs
-        
+        Extract ee_node and obj_node from obs.
+
+        For dual arm (obs_structure has 'left_ee_position'), concatenates
+        left_ee + right_ee as ee_node and cube_1 + cube_2 as obj_node,
+        then averages to [B, 7] to match the graph encoder's expected input.
+
         Args:
             obs: [B, obs_dim]
-        
+
         Returns:
             ee_node: [B, 7] - position(3) + orientation(4)
             obj_node: [B, 7] - position(3) + orientation(4)
         """
         cfg = self.cfg
-        
-        if cfg.obs_structure is not None:
-            obs_struct = cfg.obs_structure
+        obs_struct = cfg.obs_structure
+
+        if obs_struct is not None and "left_ee_position" in obs_struct:
+            # Dual arm obs structure
+            lee_pos = obs[:, obs_struct["left_ee_position"][0]:obs_struct["left_ee_position"][1]]
+            lee_ori = obs[:, obs_struct["left_ee_orientation"][0]:obs_struct["left_ee_orientation"][1]]
+            ree_pos = obs[:, obs_struct["right_ee_position"][0]:obs_struct["right_ee_position"][1]]
+            ree_ori = obs[:, obs_struct["right_ee_orientation"][0]:obs_struct["right_ee_orientation"][1]]
+            c1_pos = obs[:, obs_struct["cube_1_pos"][0]:obs_struct["cube_1_pos"][1]]
+            c1_ori = obs[:, obs_struct["cube_1_ori"][0]:obs_struct["cube_1_ori"][1]]
+            c2_pos = obs[:, obs_struct["cube_2_pos"][0]:obs_struct["cube_2_pos"][1]]
+            c2_ori = obs[:, obs_struct["cube_2_ori"][0]:obs_struct["cube_2_ori"][1]]
+            # Average both EEs and both cubes → [B, 7] each
+            ee_node = (torch.cat([lee_pos, lee_ori], dim=-1) + torch.cat([ree_pos, ree_ori], dim=-1)) * 0.5
+            obj_node = (torch.cat([c1_pos, c1_ori], dim=-1) + torch.cat([c2_pos, c2_ori], dim=-1)) * 0.5
+        elif obs_struct is not None:
+            # Single arm obs structure
             obj_pos = obs[:, obs_struct["object_position"][0]:obs_struct["object_position"][1]]
             obj_ori = obs[:, obs_struct["object_orientation"][0]:obs_struct["object_orientation"][1]]
             ee_pos = obs[:, obs_struct["ee_position"][0]:obs_struct["ee_position"][1]]
             ee_ori = obs[:, obs_struct["ee_orientation"][0]:obs_struct["ee_orientation"][1]]
+            ee_node = torch.cat([ee_pos, ee_ori], dim=-1)
+            obj_node = torch.cat([obj_pos, obj_ori], dim=-1)
         else:
-            # Default structure: [joint_pos(6), joint_vel(6), obj_pos(3), obj_ori(4), ee_pos(3), ee_ori(4), ...]
-            # WARNING: This default assumes joint_pos(6) + joint_vel(6) = 12 before object_position
-            # This matches graph_unet_policy default: object_position = obs[:, 12:15]
-            # If obs_structure is None, both should use the same default indices
-            # CRITICAL: Always pass obs_structure from Graph-DiT config to avoid inconsistency!
             import warnings
             warnings.warn(
-                "obs_structure is None! Using default indices. "
-                "This may be inconsistent with Graph-DiT default indices. "
-                "Please ensure obs_structure is passed from Graph-DiT config.",
+                "obs_structure is None! Using default indices.",
                 UserWarning
             )
-            # Default: [joint_pos(6), joint_vel(6), obj_pos(3), obj_ori(4), ee_pos(3), ee_ori(4), ...]
-            # object_position starts at index 12 (6 + 6)
-            object_start_idx = 12  # joint_pos(6) + joint_vel(6)
+            object_start_idx = 12
             obj_pos = obs[:, object_start_idx:object_start_idx + 3]
             obj_ori = obs[:, object_start_idx + 3:object_start_idx + 7]
             ee_pos = obs[:, object_start_idx + 7:object_start_idx + 10]
             ee_ori = obs[:, object_start_idx + 10:object_start_idx + 14]
-        
-        ee_node = torch.cat([ee_pos, ee_ori], dim=-1)      # [B, 7]
-        obj_node = torch.cat([obj_pos, obj_ori], dim=-1)   # [B, 7]
-        
+            ee_node = torch.cat([ee_pos, ee_ori], dim=-1)
+            obj_node = torch.cat([obj_pos, obj_ori], dim=-1)
+
         return ee_node, obj_node
 
     def _select_obs_for_rl(self, obs: torch.Tensor, mode: str) -> torch.Tensor:
@@ -864,11 +899,19 @@ class GraphUnetResidualRLPolicy(nn.Module):
             robot_state_dim = self.cfg.robot_state_dim
             return obs[:, :robot_state_dim]
         elif mode == "joint_object_ee":
-            # joint_pos(6) + object_pos(3)+object_ori(4) + ee_pos(3)+ee_ori(4) = 20 dims
             cfg = self.cfg
-            if cfg.obs_structure is not None:
-                s = cfg.obs_structure
-                j_end = cfg.robot_state_dim
+            s = cfg.obs_structure
+            j_end = cfg.robot_state_dim
+            if s is not None and "left_ee_position" in s:
+                # Dual arm: joint(12) + left_ee(7) + right_ee(7) + cube_1(7) + cube_2(7) = 40
+                return torch.cat([
+                    obs[:, :j_end],
+                    obs[:, s["left_ee_position"][0]:s["left_ee_orientation"][1]],
+                    obs[:, s["right_ee_position"][0]:s["right_ee_orientation"][1]],
+                    obs[:, s["cube_1_pos"][0]:s["cube_1_ori"][1]],
+                    obs[:, s["cube_2_pos"][0]:s["cube_2_ori"][1]],
+                ], dim=-1)
+            elif s is not None:
                 obj_start = s["object_position"][0]
                 obj_end = s["object_orientation"][1]
                 ee_start = s["ee_position"][0]
@@ -879,7 +922,6 @@ class GraphUnetResidualRLPolicy(nn.Module):
                     obs[:, ee_start:ee_end],
                 ], dim=-1)
             else:
-                # Default: joint(0:6), object(12:19), ee(19:26)
                 return torch.cat([
                     obs[:, :6],
                     obs[:, 12:19],
@@ -1024,17 +1066,14 @@ class GraphUnetResidualRLPolicy(nn.Module):
         base_actions = []
         for i in range(B):
             base_actions.append(self._base_action_buffers[i].pop(0))
-        base_action_5d = torch.stack(base_actions, dim=0)  # [B, 5] - Graph-DiT outputs 5D (arm joints only)
+        base_action = torch.stack(base_actions, dim=0)  # [B, action_dim] from backbone
 
-        # Apply EMA smoothing to joints only (gripper excluded)
-        # Graph-DiT outputs 5D, so base_action_5d is already [B, 5] (all arm joints)
-        joints = base_action_5d  # [B, 5] - all are arm joints
+        # Apply EMA smoothing to joints only (grippers excluded)
+        joints = base_action[:, :self.joint_dim]  # [B, joint_dim]
 
-        # Initialize EMA state if needed
         if self._ema_smoothed_joints is None:
             self._ema_smoothed_joints = joints.clone()
         elif self._ema_smoothed_joints.shape[0] != B:
-            # Resize if batch size changed
             old_smoothed = self._ema_smoothed_joints
             self._ema_smoothed_joints = torch.zeros(
                 B, self.joint_dim, device=joints.device, dtype=joints.dtype
@@ -1042,14 +1081,14 @@ class GraphUnetResidualRLPolicy(nn.Module):
             if old_smoothed.shape[0] <= B:
                 self._ema_smoothed_joints[: old_smoothed.shape[0]] = old_smoothed
 
-        # Apply EMA: smoothed = alpha * new + (1 - alpha) * old
         self._ema_smoothed_joints = (
             self.ema_alpha * joints + (1 - self.ema_alpha) * self._ema_smoothed_joints
         )
 
-        # Graph-DiT outputs 5D, so we return 5D (gripper is handled separately or padded later)
-        # Return normalized 5D action (arm joints only)
-        return self._ema_smoothed_joints  # [B, 5] - smoothed arm joints
+        # Return full base_action with smoothed joints
+        result = base_action.clone()
+        result[:, :self.joint_dim] = self._ema_smoothed_joints
+        return result
 
     # -----------------------------
     # Main act()
@@ -1116,22 +1155,22 @@ class GraphUnetResidualRLPolicy(nn.Module):
             deterministic=True,
         )
         
-        # Denormalize base_action for execution (arm 5D; gripper from backbone 6th dim or fallback)
-        a_base_norm_5d = a_base_norm[:, :5]  # [B, 5] - arm only
+        # Denormalize base_action for execution
+        act_dim = self.cfg.action_dim  # 6 or 12
+        backbone_out_dim = a_base_norm.shape[-1]
+
         if self.action_mean is not None and self.action_std is not None:
-            a_base_5d = a_base_norm_5d * self.action_std[:5] + self.action_mean[:5]  # [B, 5]
+            denorm_dim = min(backbone_out_dim, act_dim)
+            a_base_denorm = a_base_norm[:, :denorm_dim] * self.action_std[:denorm_dim] + self.action_mean[:denorm_dim]
         else:
-            a_base_5d = a_base_norm_5d  # [B, 5]
-        
-        # Gripper: backbone outputs 6D → use 6th dim (denormalized); 5D → pad 0
-        if a_base_norm.shape[-1] >= 6:
-            if self.action_mean is not None and self.action_std is not None:
-                a_base_gripper = a_base_norm[:, 5:6] * self.action_std[5:6] + self.action_mean[5:6]  # [B, 1]
-            else:
-                a_base_gripper = a_base_norm[:, 5:6]  # [B, 1]
+            a_base_denorm = a_base_norm[:, :min(backbone_out_dim, act_dim)]
+
+        # Pad to act_dim if backbone outputs fewer dims
+        if a_base_denorm.shape[-1] < act_dim:
+            pad = torch.zeros(B, act_dim - a_base_denorm.shape[-1], device=a_base_denorm.device, dtype=a_base_denorm.dtype)
+            a_base = torch.cat([a_base_denorm, pad], dim=-1)
         else:
-            a_base_gripper = torch.zeros(B, 1, device=a_base_5d.device, dtype=a_base_5d.dtype)
-        a_base = torch.cat([a_base_5d, a_base_gripper], dim=-1)  # [B, 6]
+            a_base = a_base_denorm[:, :act_dim]
 
         # ============================================================
         # 3. z_layers (high-frequency! called every step with temporal history)
@@ -1142,29 +1181,29 @@ class GraphUnetResidualRLPolicy(nn.Module):
         z_bar, w = self.aggregate_latent(z_layers)
 
         # 5. Actor: select obs based on actor_obs_mode
-        # Actor input: NORMALIZED (obs_norm, a_base_norm full 6D including gripper, z_bar)
+        # Actor input: NORMALIZED (obs_norm, a_base_norm padded to act_dim, z_bar)
         obs_actor = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
-        # FIX: Expand a_base_norm to 6D for Actor input (backbone may return 5D arm-only)
-        if a_base_norm.shape[-1] == 5:
-            gripper_pad = torch.zeros(B, 1, device=a_base_norm.device, dtype=a_base_norm.dtype)
-            a_base_norm_6d = torch.cat([a_base_norm, gripper_pad], dim=-1)  # [B, 6]
+        # Pad a_base_norm to act_dim if needed
+        if a_base_norm.shape[-1] < act_dim:
+            pad = torch.zeros(B, act_dim - a_base_norm.shape[-1], device=a_base_norm.device, dtype=a_base_norm.dtype)
+            a_base_norm_full = torch.cat([a_base_norm, pad], dim=-1)
         else:
-            a_base_norm_6d = a_base_norm
-        x = torch.cat([obs_actor, a_base_norm_6d, z_bar], dim=-1)  # [B, obs_dim + 6 + z_dim]
+            a_base_norm_full = a_base_norm[:, :act_dim]
+        x = torch.cat([obs_actor, a_base_norm_full, z_bar], dim=-1)
         dist = self.actor.dist(x)
         
-        # Actor outputs 6D delta (arm + gripper)
+        # Actor outputs act_dim delta
         if deterministic:
-            delta_norm = dist.mean  # [B, 6]
+            delta_norm = dist.mean  # [B, act_dim]
         else:
-            delta_norm = dist.rsample()  # [B, 6]
+            delta_norm = dist.rsample()  # [B, act_dim]
             delta_norm = torch.clamp(delta_norm, -1.0, 1.0)
 
         delta_norm = torch.clamp(delta_norm, -1.0, 1.0)
 
         # Denormalize delta for execution
         if self.action_mean is not None and self.action_std is not None:
-            delta = delta_norm * self.action_std
+            delta = delta_norm * self.action_std[:act_dim]
         else:
             delta = delta_norm
 
@@ -1176,7 +1215,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
         obs_actor = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
         alpha_vec, alpha_mean = self._compute_alpha_vec(z_bar, obs_actor)
 
-        a = a_base + alpha_vec * delta  # [B, 6]
+        a = a_base + alpha_vec * delta  # [B, act_dim]
         alpha = alpha_mean  # for info
 
         # Debug: diagnose 0% SR (print first 3 acts only)
@@ -1191,20 +1230,16 @@ class GraphUnetResidualRLPolicy(nn.Module):
 
         # 7. Update history buffer (AFTER computing action)
         if self.history_buffer is not None:
-            # Use normalized action for history (matches training data format)
-            # Graph-DiT outputs 5D, but history buffer expects 6D (with gripper)
-            # We need to pad with 0 for gripper, or use the final action 'a' which is 6D
-            # Actually, we should store the final action 'a' (6D) after normalization
-            # But for now, let's pad a_base_norm to 6D if needed
             action_for_history = a_base_norm
-            if action_for_history.shape[-1] == 5:
-                # Pad with 0 for gripper (Graph-DiT doesn't output gripper)
-                gripper_pad = torch.zeros(B, 1, device=action_for_history.device, dtype=action_for_history.dtype)
-                action_for_history = torch.cat([action_for_history, gripper_pad], dim=-1)  # [B, 6]
+            # Pad to act_dim if backbone outputs fewer dims
+            if action_for_history.shape[-1] < act_dim:
+                pad = torch.zeros(B, act_dim - action_for_history.shape[-1],
+                                  device=action_for_history.device, dtype=action_for_history.dtype)
+                action_for_history = torch.cat([action_for_history, pad], dim=-1)
             self.history_buffer.update(
                 ee_node=ee_node,
                 obj_node=obj_node,
-                action=action_for_history,  # Store normalized action [B, 6]
+                action=action_for_history,
                 joint_states=joint_states,
             )
 
@@ -1282,12 +1317,13 @@ class GraphUnetResidualRLPolicy(nn.Module):
         # ============================================================
         obs_actor = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
         B_loss = obs_norm.shape[0]
-        if a_base_norm.shape[-1] == 5:
-            gripper_pad = torch.zeros(B_loss, 1, device=a_base_norm.device, dtype=a_base_norm.dtype)
-            a_base_norm_6d = torch.cat([a_base_norm, gripper_pad], dim=-1)
+        act_dim = self.cfg.action_dim
+        if a_base_norm.shape[-1] < act_dim:
+            pad = torch.zeros(B_loss, act_dim - a_base_norm.shape[-1], device=a_base_norm.device, dtype=a_base_norm.dtype)
+            a_base_norm_full = torch.cat([a_base_norm, pad], dim=-1)
         else:
-            a_base_norm_6d = a_base_norm
-        x = torch.cat([obs_actor, a_base_norm_6d, z_bar_new], dim=-1)
+            a_base_norm_full = a_base_norm[:, :act_dim]
+        x = torch.cat([obs_actor, a_base_norm_full, z_bar_new], dim=-1)
         dist = self.actor.dist(x)
 
         # Recover delta in denormalized space (same alpha_vec as act())
@@ -1299,7 +1335,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             delta = delta * self.residual_action_mask
 
         if self.action_mean is not None and self.action_std is not None:
-            delta_norm = delta / (self.action_std + 1e-8)
+            delta_norm = delta / (self.action_std[:act_dim] + 1e-8)
         else:
             delta_norm = delta
         delta_norm = torch.clamp(delta_norm, -1.0, 1.0)
