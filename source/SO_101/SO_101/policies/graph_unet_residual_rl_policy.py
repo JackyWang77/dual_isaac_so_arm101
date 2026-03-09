@@ -301,7 +301,7 @@ class GraphUnetResidualRLCfg:
     alpha_hidden: Tuple[int, ...] = (64,)  # Hidden dims for adaptive alpha net
 
     # EMA smoothing for base_action (joints only, gripper excluded)
-    ema_alpha: float = 0.5  # EMA weight: higher = more responsive, lower = smoother
+    ema_alpha: float = 1.0  # EMA weight: 1.0 = no smoothing (raw model output)
     joint_dim: int = 5  # Number of joint dimensions (gripper is excluded from EMA)
 
     # advantage weighted regression
