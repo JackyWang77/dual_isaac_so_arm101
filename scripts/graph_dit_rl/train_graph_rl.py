@@ -539,16 +539,30 @@ class GraphDiTRLTrainer:
             done_envs = done.nonzero(as_tuple=False).squeeze(-1)
             if len(done_envs) > 0:
                 self.policy.reset_envs(done_envs)
+                n_terminated = 0
+                n_truncated = 0
+                n_success = 0
                 for i in done_envs.tolist():
                     self.episode_rewards.append(ep_rewards[i].item())
                     self.episode_lengths.append(ep_lengths[i].item())
                     is_truncated = bool(truncated[i].item() if hasattr(truncated[i], "item") else truncated[i])
+                    is_terminated = bool(terminated[i].item() if hasattr(terminated[i], "item") else terminated[i])
                     if is_truncated:
                         is_success = False
+                        n_truncated += 1
                     else:
                         is_success = self._check_success_from_info(env_info, i)
+                        n_terminated += 1
+                    if is_success:
+                        n_success += 1
                     rollout_successes.append(float(is_success))
                     self.episode_successes.append(float(is_success))
+                if not hasattr(self, "_done_diag_count"):
+                    self._done_diag_count = 0
+                if self._done_diag_count < 5:
+                    self._done_diag_count += 1
+                    print(f"  [done batch] {len(done_envs)} envs done: "
+                          f"{n_terminated} terminated, {n_truncated} truncated, {n_success} success")
 
                 # Pre-fill histories with post-reset obs (matches BC training padding)
                 self._prefill_histories_from_obs(next_obs, env_ids=done_envs)

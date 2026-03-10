@@ -30,7 +30,7 @@ USE_ADAPTIVE_ALPHA="${USE_ADAPTIVE_ALPHA:-false}"
 USE_ADAPTIVE_ENTROPY="${USE_ADAPTIVE_ENTROPY:-false}"
 C_ENT_BAD="${C_ENT_BAD:-0.005}"
 C_ENT_GOOD="${C_ENT_GOOD:-0.0001}"
-LOG_DIR="${LOG_DIR:-./logs/baseline_rl}"
+LOG_DIR="${LOG_DIR:-./logs/ablation/baseline}"
 
 if [ -z "$PRETRAINED_CHECKPOINT" ] || [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
     echo "Usage: $0 <pretrained_checkpoint>"
