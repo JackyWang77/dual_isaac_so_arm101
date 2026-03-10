@@ -416,16 +416,6 @@ class GraphDiTRLTrainer:
         # Pre-fill histories with first observation (matches BC training padding)
         self._prefill_histories_from_obs(obs)
 
-        if not hasattr(self, "_subtask_logged"):
-            self._subtask_logged = True
-            if subtask_cond is not None:
-                print(f"[Trainer] subtask_condition enabled: shape={subtask_cond.shape}, env0={subtask_cond[0].cpu().tolist()}")
-            else:
-                _bb = self.policy.backbone
-                _actual_bb = _bb.backbone if hasattr(_bb, "backbone") else _bb
-                _ns = getattr(getattr(_actual_bb, "cfg", None), "num_subtasks", 0)
-                print(f"[Trainer] subtask_condition: None (backbone num_subtasks={_ns})")
-
         ep_rewards = torch.zeros(self.num_envs, device=self.device)
         ep_lengths = torch.zeros(self.num_envs, device=self.device)
         rollout_successes = []
@@ -517,17 +507,8 @@ class GraphDiTRLTrainer:
                         torch.tensor(-1.0, device=action.device, dtype=action.dtype),
                     )
 
-            if step < 3:
-                sc_str = subtask_cond[0].cpu().tolist() if subtask_cond is not None else "None"
-                print(f"[Rollout step={step}] subtask_cond env0={sc_str}")
-                print(f"[Rollout step={step}] action_for_sim env0 = {action_for_sim[0].cpu().tolist()}")
-                print(f"[Rollout step={step}] reward env0 = ...(pending)")
-
             raw_next_obs, reward, terminated, truncated, env_info = self.env.step(action_for_sim)
             done = terminated | truncated
-
-            if step < 3:
-                print(f"[Rollout step={step}] reward env0 = {reward[0].item():.4f}")
 
             next_obs = self._process_obs(raw_next_obs)
             next_subtask_cond = self._extract_subtask_condition(raw_next_obs, next_obs)

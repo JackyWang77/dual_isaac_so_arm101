@@ -17,7 +17,7 @@ ALPHA_INIT="${10:-0.10}"
 EXPECTILE_TAU="${11:-0.5}"
 LR="${12:-5e-4}"
 SEED="${13:-42}"
-HEADLESS="${14:-false}"
+HEADLESS="${14:-true}"
 
 TASK="${TASK:-SO-ARM101-Dual-Cube-Stack-RL-v0}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-10}"

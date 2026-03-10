@@ -1201,18 +1201,6 @@ class GraphUnetResidualRLPolicy(nn.Module):
                 deterministic=deterministic,
                 **extra_kw,
             )
-            if not hasattr(self, "_traj_diag_count"):
-                self._traj_diag_count = 0
-            if self._traj_diag_count < 6:
-                self._traj_diag_count += 1
-                tag = "INIT" if self._traj_diag_count <= 1 else "REPLAN"
-                print(f"\n[TRAJ DIAG #{self._traj_diag_count}] {tag} traj shape={traj.shape}")
-                print(f"  traj[0, 0] = {traj[0, 0].cpu().tolist()}")
-                print(f"  traj[0,-1] = {traj[0,-1].cpu().tolist()}")
-                span = (traj[0, -1] - traj[0, 0]).abs().max().item()
-                print(f"  max |traj[0,-1] - traj[0,0]| = {span:.4f}")
-                if node_histories is not None:
-                    print(f"  node_histories shape={node_histories.shape}")
             return traj
 
         if self._base_action_buffers is None or len(self._base_action_buffers) != B:
@@ -1356,39 +1344,6 @@ class GraphUnetResidualRLPolicy(nn.Module):
         else:
             a_base = a_base_norm_full
 
-        # ── DIAGNOSTIC (first 3 calls only) ──
-        if not hasattr(self, "_diag_count"):
-            self._diag_count = 0
-        if self._diag_count < 3:
-            self._diag_count += 1
-            with torch.no_grad():
-                e0 = 0
-                print(f"\n{'='*70}")
-                print(f"[ACT DIAG #{self._diag_count}] num_nodes={num_nodes}, H={self._node_history_H}")
-                print(f"  obs raw  env0[:8] = {obs[e0, :8].cpu().tolist()}")
-                print(f"  obs norm env0[:8] = {obs_norm[e0, :8].cpu().tolist()}")
-                if num_nodes > 2:
-                    nh_kw_val = _nh_kw.get("node_histories")
-                    if nh_kw_val is not None:
-                        print(f"  node_histories shape = {nh_kw_val.shape} (matches play.py: [B,N,H,7])")
-                        for ni in range(nh_kw_val.shape[1]):
-                            print(f"    node[{ni}] t=-1 (norm) = {[f'{v:.4f}' for v in nh_kw_val[e0, ni, -1, :].cpu().tolist()]}")
-                            print(f"    node[{ni}] t= 0 (norm) = {[f'{v:.4f}' for v in nh_kw_val[e0, ni,  0, :].cpu().tolist()]}")
-                        raw_n, _ = self._extract_all_nodes_from_obs(obs)
-                        for ni in range(raw_n.shape[1]):
-                            print(f"    node[{ni}] (raw)       = {[f'{v:.4f}' for v in raw_n[e0, ni, :].cpu().tolist()]}")
-                print(f"  a_base_norm env0 = {[f'{v:.4f}' for v in a_base_norm_full[e0].cpu().tolist()]}")
-                print(f"  a_base      env0 = {[f'{v:.4f}' for v in a_base[e0].cpu().tolist()]}")
-                if self.action_mean is not None:
-                    print(f"  action_mean = {[f'{v:.4f}' for v in self.action_mean[:act_dim].cpu().tolist()]}")
-                    print(f"  action_std  = {[f'{v:.4f}' for v in self.action_std[:act_dim].cpu().tolist()]}")
-                else:
-                    print(f"  action_mean = None (NO DENORMALIZATION!)")
-                print(f"  exec_horizon={self.exec_horizon}, num_diffusion_steps={self.num_diffusion_steps}")
-                buf_lens = [len(b) for b in self._base_action_buffers] if self._base_action_buffers else "None"
-                print(f"  action_buffer_lens = {buf_lens}")
-                print(f"{'='*70}\n")
-
         # ============================================================
         # 3. z_layers (high-frequency! called every step with temporal history)
         # ============================================================
@@ -1430,25 +1385,6 @@ class GraphUnetResidualRLPolicy(nn.Module):
 
         a = a_base + alpha_vec * delta  # [B, act_dim]
         alpha = alpha_mean  # for info
-
-        if not hasattr(self, "_step_count"):
-            self._step_count = 0
-        self._step_count += 1
-        if self._step_count <= 5 or self._step_count % 8 == 0 and self._step_count <= 50:
-            with torch.no_grad():
-                e0 = 0
-                s = self.cfg.obs_structure
-                if s is not None and "left_joint_pos" in s:
-                    cur_joints = torch.cat([
-                        obs[e0, s["left_joint_pos"][0]:s["left_joint_pos"][1]],
-                        obs[e0, s["right_joint_pos"][0]:s["right_joint_pos"][1]],
-                    ]).cpu().tolist()
-                else:
-                    cur_joints = obs[e0, :10].cpu().tolist()
-                print(f"  [step {self._step_count}] cur_joints env0 = {[f'{v:.3f}' for v in cur_joints]}")
-                print(f"  [step {self._step_count}] a_base    env0 = {[f'{v:.3f}' for v in a_base[e0].cpu().tolist()]}")
-                print(f"  [step {self._step_count}] FINAL act env0 = {[f'{v:.3f}' for v in a[e0].cpu().tolist()]}")
-                print(f"  [step {self._step_count}] alpha={alpha_mean.item():.4f}, a_base_contrib={((a_base[e0].abs().sum()) / (a[e0].abs().sum()+1e-8) * 100).item():.1f}%")
 
         # 7. Update history buffer (AFTER computing action)
         if self.history_buffer is not None:
