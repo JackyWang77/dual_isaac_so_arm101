@@ -1,21 +1,67 @@
-[Instructor] ✅ Initialized subtasks: ['place_fork', 'place_knife']
-[Instructor] 📋 Subtask configs (dual_arm):
-   Step 1: Place fork (signal: place_fork)
-   Step 2: Place knife (signal: place_knife)
+Creating window for environment.
+[INFO]: Completed setting up the environment...
+[DEBUG] Environment class: DualTableSettingJointStatesMimicEnv
+[DEBUG] Environment module: SO_101.tasks.table_setting.dual_table_setting_joint_states_mimic_env
+[DEBUG] Has action_to_target_eef_pose: True
+[DEBUG] action_to_target_eef_pose is from parent: False
 
-[Instructor] 🤖 Current task: Step 1/2: Place fork                     🔄 Recording instance reset requested
-Resetting environment...
-[JointStatesROS2] ⚠️  No update for 1.414s > 0.200s, reusing cached joint values
-[Instructor] 🤖 Current task: Step 2/2: Place knife                     2026-03-08T22:38:19Z [189,955ms] [Error] [omni.ui.python] TypeError: 'bool' object is not iterable
+Annotating episode #0 (demo_0)
+2026-03-10T12:29:44Z [20,026ms] [Warning] [carb] Client gpu.foundation.plugin has acquired [gpu::unstable::IMemoryBudgetManagerFactory v0.1] 100 times. Consider accessing this interface with carb::getCachedInterface() (Performance warning)
+	The final task was not completed.
+	Skipped exporting the episode due to incomplete subtask annotations.
 
-At:
-  /mnt/ssd/IsaacLab/source/isaaclab/isaaclab/ui/widgets/manager_live_visualizer.py(226): _set_debug_vis_impl
-  /mnt/ssd/IsaacLab/source/isaaclab/isaaclab/ui/widgets/manager_live_visualizer.py(139): set_debug_vis
-  /mnt/ssd/IsaacLab/source/isaaclab/isaaclab/envs/ui/base_env_window.py(431): <lambda>
-  /mnt/ssd/isaac-sim/extscache/omni.kit.window.extensions-1.4.27+69cbf6ad/omni/kit/window/extensions/ext_components.py(153): <lambda>
-  /mnt/ssd/IsaacLab/source/isaaclab/isaaclab/sim/simulation_context.py(608): render
-  /mnt/ssd/dual_isaac_so_arm101/scripts/record_demos.py(214): sleep
-  /mnt/ssd/dual_isaac_so_arm101/scripts/record_demos.py(895): run_simulation_loop
-  /mnt/ssd/dual_isaac_so_arm101/scripts/record_demos.py(934): main
-  /mnt/ssd/dual_isaac_so_arm101/scripts/record_demos.py(944): <module>
+Annotating episode #1 (demo_1)
+	The final task was not completed.
+	Skipped exporting the episode due to incomplete subtask annotations.
 
+Annotating episode #2 (demo_10)
+	The final task was not completed.
+	Skipped exporting the episode due to incomplete subtask annotations.
+
+Annotating episode #3 (demo_100)
+	The final task was not completed.
+	Skipped exporting the episode due to incomplete subtask annotations.
+
+Annotating episode #4 (demo_101)
+	The final task was not completed.
+	Skipped exporting the episode due to incomplete subtask annotations.
+
+Annotating episode #5 (demo_102)
+	The final task was not completed.
+	Skipped exporting the episode due to incomplete subtask annotations.
+
+Annotating episode #6 (demo_103)
+^C
+Annotation complete!
+========================================
+Output: ./datasets/table_setting_annotated_dataset.hdf5
+(env_isaaclab) jacky_wang@jacky-wang-Legion-R9000P:/mnt/ssd/dual_isaac_so_arm101$ ./scripts/run_table_setting_mimic_pipeline.sh 
+========================================
+IsaacLab Mimic Pipeline - Dual Table Setting
+========================================
+Annotation Task: SO-ARM101-Dual-Table-Setting-Joint-States-Mimic-v0
+Input: ./datasets/table_setting_dataset.hdf5 (merge of datasets 1-10)
+Output: ./datasets/table_setting_annotated_dataset.hdf5
+========================================
+
+Merging datasets 1-10...
+========================================
+Traceback (most recent call last):
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/merge_hdf5_datasets.py", line 116, in <module>
+    main()
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/merge_hdf5_datasets.py", line 112, in main
+    merge_hdf5_datasets(args.input_files, args.output)
+  File "/mnt/ssd/dual_isaac_so_arm101/scripts/merge_hdf5_datasets.py", line 54, in merge_hdf5_datasets
+    with h5py.File(output_file, "w") as out_f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jacky_wang/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/h5py/_hl/files.py", line 566, in __init__
+    fid = make_fid(name, mode, userblock_size, fapl, fcpl, swmr=swmr)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jacky_wang/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/h5py/_hl/files.py", line 247, in make_fid
+    fid = h5f.create(name, h5f.ACC_TRUNC, fapl=fapl, fcpl=fcpl)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "h5py/_objects.pyx", line 54, in h5py._objects.with_phil.wrapper
+  File "h5py/_objects.pyx", line 55, in h5py._objects.with_phil.wrapper
+  File "h5py/h5f.pyx", line 124, in h5py.h5f.create
+BlockingIOError: [Errno 11] Unable to synchronously create file (unable to lock file, errno = 11, error message = 'Resource temporarily unavailable')
+Error: Merge failed!

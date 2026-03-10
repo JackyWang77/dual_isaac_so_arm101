@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """
 DualArmDisentangledPolicyGated: 门控融合版 Disentangled，不 concat，用可学习 gate 注入 graph。
-z_base = raw_feat + gate * graph_z_comp，gate = sigmoid(graph_gate_logit)，初始 -1.7 -> ~0.15 试更快收敛。
+z_base = raw_feat + gate * graph_z_comp，gate = sigmoid(graph_gate_logit)，初始 -2 -> ~0.12。
 loss() 返回 metrics/graph_gate_weight 供 TensorBoard 监控。
 """
 
@@ -16,7 +16,7 @@ class DualArmDisentangledPolicyGated(DualArmDisentangledPolicy):
     """Dual-arm disentangled graph + dual U-Net, with learnable gated fusion.
 
     Replaces raw/graph concat with: z_base = raw_feat + gate * graph_z_comp,
-    gate = sigmoid(graph_gate_logit). Initial logit -1.7 (gate ~0.15) for faster convergence.
+    gate = sigmoid(graph_gate_logit). Initial logit -2 (gate ~0.12) for conservative graph injection.
     Exposes metrics/graph_gate_weight in loss() for TensorBoard.
     """
 
@@ -32,11 +32,11 @@ class DualArmDisentangledPolicyGated(DualArmDisentangledPolicy):
         # Full-dim projections (no half concat)
         self.raw_proj = torch.nn.Linear(raw_node_dim, z_dim)
         self.graph_z_proj = torch.nn.Linear(graph_z_in, z_dim)
-        # Gate init -1.7 -> sigmoid ~0.15; scalar (1) or per-dim (z_dim) when per_gate=True
+        # Gate init -2 -> sigmoid ~0.12; scalar (1) or per-dim (z_dim) when per_gate=True
         if per_gate:
-            self.graph_gate_logit = torch.nn.Parameter(torch.full((z_dim,), -1.7))
+            self.graph_gate_logit = torch.nn.Parameter(torch.full((z_dim,), -2.0))
         else:
-            self.graph_gate_logit = torch.nn.Parameter(torch.tensor([-1.7]))
+            self.graph_gate_logit = torch.nn.Parameter(torch.tensor([-2.0]))
 
     def forward(
         self,

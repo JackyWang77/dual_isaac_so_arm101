@@ -14,6 +14,7 @@ Usage:
 import argparse
 import os
 import sys
+import tempfile
 
 import h5py
 
@@ -46,48 +47,61 @@ def merge_hdf5_datasets(input_files: list[str], output_file: str):
             print(f"Error: Input file not found: {f}")
             sys.exit(1)
 
-    os.makedirs(os.path.dirname(output_file) or ".", exist_ok=True)
+    out_dir = os.path.dirname(output_file) or "."
+    os.makedirs(out_dir, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(suffix=".hdf5", prefix="merge_", dir=out_dir)
+    os.close(fd)
 
     total_episodes = 0
     total_steps = 0
 
-    with h5py.File(output_file, "w") as out_f:
-        data_group = out_f.create_group("data")
-        data_group.attrs["total"] = 0
-        env_args = None
+    try:
+        with h5py.File(tmp_path, "w") as out_f:
+            data_group = out_f.create_group("data")
+            data_group.attrs["total"] = 0
+            env_args = None
 
-        for inp in input_files:
-            with h5py.File(inp, "r") as in_f:
-                if "data" not in in_f:
-                    print(f"Warning: No 'data' group in {inp}, skipping.")
-                    continue
+            for inp in input_files:
+                with h5py.File(inp, "r") as in_f:
+                    if "data" not in in_f:
+                        print(f"Warning: No 'data' group in {inp}, skipping.")
+                        continue
 
-                in_data = in_f["data"]
-                if env_args is None and "env_args" in in_data.attrs:
-                    env_args = in_data.attrs["env_args"]
-                    data_group.attrs["env_args"] = env_args
+                    in_data = in_f["data"]
+                    if env_args is None and "env_args" in in_data.attrs:
+                        env_args = in_data.attrs["env_args"]
+                        data_group.attrs["env_args"] = env_args
 
-                demo_keys = sorted(
-                    [k for k in in_data.keys() if k.startswith("demo_")],
-                    key=lambda x: int(x.split("_")[1]) if "_" in x and x.split("_")[1].isdigit() else 0,
-                )
+                    demo_keys = sorted(
+                        [k for k in in_data.keys() if k.startswith("demo_")],
+                        key=lambda x: int(x.split("_")[1]) if "_" in x and x.split("_")[1].isdigit() else 0,
+                    )
 
-                for demo_key in demo_keys:
-                    new_key = f"demo_{total_episodes}"
-                    src_demo = in_data[demo_key]
-                    dst_demo = data_group.create_group(new_key)
+                    for demo_key in demo_keys:
+                        new_key = f"demo_{total_episodes}"
+                        src_demo = in_data[demo_key]
+                        dst_demo = data_group.create_group(new_key)
 
-                    if "num_samples" in src_demo.attrs:
-                        dst_demo.attrs["num_samples"] = src_demo.attrs["num_samples"]
-                        total_steps += src_demo.attrs["num_samples"]
-                    for attr in ("seed", "success"):
-                        if attr in src_demo.attrs:
-                            dst_demo.attrs[attr] = src_demo.attrs[attr]
+                        if "num_samples" in src_demo.attrs:
+                            dst_demo.attrs["num_samples"] = src_demo.attrs["num_samples"]
+                            total_steps += src_demo.attrs["num_samples"]
+                        for attr in ("seed", "success"):
+                            if attr in src_demo.attrs:
+                                dst_demo.attrs[attr] = src_demo.attrs[attr]
 
-                    copy_group(src_demo, dst_demo)
-                    total_episodes += 1
+                        copy_group(src_demo, dst_demo)
+                        total_episodes += 1
 
-        data_group.attrs["total"] = total_steps
+            data_group.attrs["total"] = total_steps
+
+        os.replace(tmp_path, output_file)
+    except Exception:
+        if os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        raise
 
     print(f"Merged {total_episodes} episodes ({total_steps} steps) from {len(input_files)} files -> {output_file}")
 

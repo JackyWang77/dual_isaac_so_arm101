@@ -173,6 +173,13 @@ class DualTableSettingJointStatesMimicEnv(ManagerBasedRLMimicEnv):
             return {"dual_arm": torch.cat([actions[5:6], actions[11:12]], dim=0)}
         return {"dual_arm": torch.cat([actions[:, 5:6], actions[:, 11:12]], dim=1)}
 
+    def _reset_idx(self, env_ids: Sequence[int]):
+        super()._reset_idx(env_ids)
+        buf_name = "_table_setting_placed_stable_steps"
+        if hasattr(self, buf_name):
+            buf = getattr(self, buf_name)
+            buf[env_ids] = 0
+
     def get_subtask_term_signals(
         self, env_ids: Sequence[int] | None = None
     ) -> dict[str, torch.Tensor]:

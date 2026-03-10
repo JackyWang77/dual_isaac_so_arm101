@@ -60,6 +60,12 @@ parser.add_argument(
     help="EMA alpha for joint smoothing (1.0=no smoothing, 0.5=smoothing). Default 1.0.",
 )
 parser.add_argument(
+    "--gripper_threshold",
+    type=float,
+    default=-0.12,
+    help="Joint value threshold for binary gripper mapping (default: -0.12). Must match train.py.",
+)
+parser.add_argument(
     "--record_attention",
     action="store_true",
     help="Record graph attention at 4 phases (left_pick, release, right_pick, right_stack) for successful episodes.",
@@ -528,7 +534,7 @@ def play_graph_unet_policy(
         ("Stack" in task_name or "Cube-Stack" in task_name) and not use_action_direct
     )
     gripper_a, gripper_b = (1.7150, 0.8579) if use_gripper_joint_to_action else (None, None)
-    gripper_threshold = -0.25 if not use_gripper_joint_to_action and not use_action_direct else None
+    gripper_threshold = args_cli.gripper_threshold if not use_gripper_joint_to_action and not use_action_direct else None
     if use_action_direct:
         print(f"[Play] Action: 直接用 model 输出 (与数据收集 env 一致)")
     elif gripper_a is not None:

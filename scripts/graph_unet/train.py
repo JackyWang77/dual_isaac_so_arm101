@@ -77,6 +77,7 @@ class HDF5DemoDataset(Dataset):
         use_action_target: bool = False,
         action_offset: int = 1,
         apply_gripper_mapping: bool = True,
+        gripper_threshold: float = -0.12,
     ):
         """Initialize dataset.
 
@@ -91,7 +92,8 @@ class HDF5DemoDataset(Dataset):
                              Human-collected demos often have noisy initial actions.
             use_action_target: If True, use original actions; if False, replace with joint_pos[t+offset].
             action_offset: When not use_action_target, use joint_pos[t+offset] (default 1).
-            apply_gripper_mapping: If True, map gripper (indices 5,11) >-0.25→1, <=-0.25→-1.
+            apply_gripper_mapping: If True, map gripper to binary 1/-1 using gripper_threshold.
+            gripper_threshold: Joint value threshold for binary gripper mapping (default -0.12).
         """
         self.hdf5_path = hdf5_path
         self.obs_keys = obs_keys
@@ -106,6 +108,7 @@ class HDF5DemoDataset(Dataset):
         self.use_action_target = use_action_target
         self.action_offset = action_offset
         self.apply_gripper_mapping = apply_gripper_mapping
+        self.gripper_threshold = gripper_threshold
 
         # Observation key dimensions and offsets
         self.obs_key_dims = {}
@@ -261,17 +264,18 @@ class HDF5DemoDataset(Dataset):
                     if demo_key == demo_keys[0]:
                         print(f"[HDF5DemoDataset] ✅ Using original actions (use_action_target=True)")
 
-                # Gripper mapping: >-0.25→1 (open), <=-0.25→-1 (closed). Must match play.py.
+                # Gripper binary mapping. Threshold must match play.py.
                 if self.apply_gripper_mapping and actions.shape[1] >= 6:
                     gripper_indices = [5]
                     if actions.shape[1] >= 12:
                         gripper_indices = [5, 11]
+                    thr = self.gripper_threshold
                     for gidx in gripper_indices:
                         actions[:, gidx] = np.where(
-                            actions[:, gidx] > -0.25, 1.0, -1.0
+                            actions[:, gidx] > thr, 1.0, -1.0
                         ).astype(np.float32)
                     if demo_key == demo_keys[0]:
-                        print(f"[HDF5DemoDataset] ✅ Gripper mapping: joint >-0.25→1, <=-0.25→-1 (indices {gripper_indices})")
+                        print(f"[HDF5DemoDataset] ✅ Gripper mapping: joint >{thr}→1, <={thr}→-1 (indices {gripper_indices})")
 
                 # Build action trajectory for each timestep: [T, pred_horizon, action_dim]
                 # ACTION CHUNKING: Each timestep predicts next pred_horizon actions
@@ -855,6 +859,7 @@ def train_graph_unet_policy(
     use_action_target: bool = False,
     action_offset: int = 1,
     apply_gripper_mapping: bool = True,
+    gripper_threshold: float = -0.12,
     use_cross_arm_attn: bool = False,
     per_gate: bool = False,
     node_configs: list[dict] | None = None,
@@ -944,6 +949,7 @@ def train_graph_unet_policy(
         use_action_target=use_action_target,
         action_offset=action_offset,
         apply_gripper_mapping=apply_gripper_mapping,
+        gripper_threshold=gripper_threshold,
     )
 
     # Get normalization stats for saving
@@ -1614,7 +1620,13 @@ def main():
     parser.add_argument(
         "--no_gripper_mapping",
         action="store_true",
-        help="Disable gripper mapping (default: >-0.25→1, <=-0.25→-1 for indices 5,11).",
+        help="Disable gripper binary mapping entirely.",
+    )
+    parser.add_argument(
+        "--gripper_threshold",
+        type=float,
+        default=-0.12,
+        help="Joint value threshold for binary gripper mapping (default: -0.12).",
     )
     parser.add_argument(
         "--per_gate",
@@ -1727,6 +1739,7 @@ def main():
         use_action_target=args.use_action_target,
         action_offset=args.action_offset,
         apply_gripper_mapping=not args.no_gripper_mapping,
+        gripper_threshold=args.gripper_threshold,
         use_cross_arm_attn=(getattr(args, "cross_attention", "false") == "true"),
         per_gate=(getattr(args, "per_gate", "false") == "true"),
         node_configs=getattr(args, "node_configs", None),

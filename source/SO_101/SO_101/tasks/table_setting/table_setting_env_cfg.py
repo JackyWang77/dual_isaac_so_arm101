@@ -333,7 +333,7 @@ class TerminationsCfg:
         params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("knife")},
     )
     success = DoneTerm(
-        func=mdp.both_placed_stable,
+        func=mdp.both_objects_placed,
         params={
             "fork_target_xy": FORK_TARGET_XY,
             "knife_target_xy": KNIFE_TARGET_XY,
@@ -341,7 +341,6 @@ class TerminationsCfg:
             "knife_target_z": KNIFE_TARGET_Z,
             "eps_xy": PLACE_EPS_XY,
             "eps_z": PLACE_EPS_Z,
-            "stable_steps_required": 10,
             "fork_cfg": SceneEntityCfg("fork"),
             "knife_cfg": SceneEntityCfg("knife"),
         },
