@@ -24,13 +24,13 @@ from isaaclab.app import AppLauncher
 
 # CLI args
 parser = argparse.ArgumentParser(description="Train GraphDiT + Residual RL Policy")
-parser.add_argument("--task", type=str, default="SO-ARM101-Lift-Cube-RL-v0",
-                    help="SO-ARM101-Lift-Cube-RL-v0: Position+Rotation (training), SO-ARM101-Lift-Cube-v0: Position only")
+parser.add_argument("--task", type=str, default="SO-ARM101-Dual-Cube-Stack-RL-v0",
+                    help="SO-ARM101-Dual-Cube-Stack-RL-v0 (dual arm RL), SO-ARM101-Dual-Cube-Stack-v0 (original rewards)")
 parser.add_argument("--pretrained_checkpoint", type=str, required=True,
                     help="Pretrained Graph-Unet checkpoint (residual RL is Unet-only)")
-parser.add_argument("--policy_type", type=str, default="unet",
-                    choices=["unet", "graph_unet"],
-                    help="Backbone policy: 'unet' (MLP + U-Net) or 'graph_unet' (Graph Attention + U-Net)")
+parser.add_argument("--policy_type", type=str, default="dual_arm_gated",
+                    choices=["unet", "graph_unet", "dual_arm", "dual_arm_gated"],
+                    help="Backbone policy (auto-detected from checkpoint if dual arm)")
 parser.add_argument("--num_envs", type=int, default=128)
 parser.add_argument("--max_iterations", type=int, default=500)
 parser.add_argument("--seed", type=int, default=42)
@@ -43,7 +43,7 @@ parser.add_argument("--best_sr_require_consistent", action="store_true",
                     help="Only save best when current SR >= sr_window - 15%% (avoid lucky flukes)")
 
 # Rollout config
-parser.add_argument("--steps_per_env", type=int, default=160, help="Steps per env per iteration (>150 留缓冲，episode 3s=150步; 超时=判负)")
+parser.add_argument("--steps_per_env", type=int, default=400, help="Steps per env per iteration (must >= env max_episode_steps=400 to avoid premature rollout truncation)")
 parser.add_argument("--num_epochs", type=int, default=5, help="Epochs per iteration")
 parser.add_argument("--mini_batch_size", type=int, default=64)
 parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
@@ -84,6 +84,8 @@ from torch.utils.tensorboard import SummaryWriter
 import SO_101.tasks  # noqa: F401 Register envs
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
 from SO_101.policies.graph_unet_policy import GraphUnetPolicy, UnetPolicy
+from SO_101.policies.dual_arm_unet_policy import DualArmDisentangledPolicy
+from SO_101.policies.dual_arm_unet_policy_gated import DualArmDisentangledPolicyGated
 from SO_101.policies.graph_unet_residual_rl_policy import (
     GraphUnetBackboneAdapter,
     GraphUnetResidualRLCfg,
@@ -274,6 +276,9 @@ class GraphDiTRLTrainer:
 
         # EMA smoothing for joints
         self._ema_smoothed_joints = None
+        # Dual arm detection
+        self._is_dual_arm = (cfg.action_dim == 12)
+        self._robot_state_dim = cfg.robot_state_dim
 
         # Buffer
         self.buffer = RolloutBuffer(self.num_envs, steps_per_env, device)
@@ -309,9 +314,8 @@ class GraphDiTRLTrainer:
         policy.init_env_buffers(self.num_envs)
         
         # History buffers for Graph-DiT (optimized: single tensor per history type)
-        # NOTE: GraphDiT expects 6 dimensions for joint states (was trained with 6)
-        # The residual RL config's joint_dim=5 is only for EMA smoothing, not for joint state extraction
-        graph_dit_joint_dim = 6  # Always 6 for GraphDiT compatibility
+        # Joint state dim: 6 for single arm, 12 for dual arm
+        graph_dit_joint_dim = cfg.robot_state_dim
         
         # Use provided action_history_length (from Graph-DiT config)
         # CRITICAL: action_history must use action_dim_env (6), not cfg.action_dim (5)
@@ -335,25 +339,50 @@ class GraphDiTRLTrainer:
         self.action_std = None
 
         print(f"[Trainer] num_envs: {self.num_envs}, steps_per_env: {steps_per_env}")
-        if steps_per_env <= 150:
+        if steps_per_env < 400:
             print(
-                f"[Trainer] ⚠️ WARNING: steps_per_env={steps_per_env} <= 150 (episode_length). "
-                "超时 episode 可能采不完→SR 虚高！建议 steps_per_env > 150 留缓冲"
+                f"[Trainer] ⚠️ WARNING: steps_per_env={steps_per_env} < 400 (env max_episode_steps). "
+                "Episodes may be truncated by rollout before env termination! "
+                "Dataset mean=251, P95=339, env_max=400. Recommend steps_per_env >= 400."
             )
         print(f"[Trainer] trainable params: {sum(p.numel() for p in trainable_params):,}")
 
-        # 成功率：与 play / play_rl 一致，仅用 truncated + 高度（不用 env_info log，标量不可用）
-        obs_structure = getattr(cfg, "obs_structure", None)
-        if obs_structure is not None and "object_position" in obs_structure:
-            obj_pos_start, _ = obs_structure["object_position"]
-            self.OBJ_HEIGHT_IDX = obj_pos_start + 2  # Z
-            print(f"[Trainer] OBJ_HEIGHT_IDX = {self.OBJ_HEIGHT_IDX} (from obs_structure)")
-        else:
-            self.OBJ_HEIGHT_IDX = 14
-            print(f"[Trainer] OBJ_HEIGHT_IDX = {self.OBJ_HEIGHT_IDX} (default)")
-        self.SUCCESS_HEIGHT = 0.10  # 与 play / play_rl 一致
-        print(f"[Trainer] Success: timeout=失败, 否则 height>={self.SUCCESS_HEIGHT}m=成功 (与 play 一致)")
+        # Success detection: use env termination signals from info dict
+        # Isaac Lab returns Episode_Termination/success, Episode_Termination/stack_success etc.
+        print(f"[Trainer] Success: using env termination signals (Episode_Termination/success)")
+        print(f"[Trainer] truncated=timeout=failure, terminated+success_signal=success")
         print(f"[Trainer] Best-model: SR_{self.best_sr_window}ep window, consistent_check={self.best_sr_require_consistent}")
+
+    def _check_success_from_info(self, env_info, env_idx: int) -> bool:
+        """Check success from env termination signals (same logic as play.py _get_success_flags)."""
+        if not isinstance(env_info, dict):
+            return False
+        log = env_info.get("log") or env_info.get("extra_info")
+        if not isinstance(log, dict):
+            return False
+        for key in (
+            "Episode_Termination/success",
+            "Episode_Termination/stack_success",
+            "success",
+            "episode_success",
+            "termination_success",
+        ):
+            if key in log:
+                val = log[key]
+                if isinstance(val, torch.Tensor):
+                    if val.dim() == 0:
+                        return bool(val.item())
+                    if val.dim() >= 1 and val.shape[0] > env_idx:
+                        return bool(val[env_idx].item() > 0.5)
+                elif isinstance(val, np.ndarray):
+                    if val.ndim == 0:
+                        return bool(val.item())
+                    if val.ndim >= 1 and val.shape[0] > env_idx:
+                        return bool(val[env_idx] > 0.5)
+                elif isinstance(val, (bool, int, float)):
+                    return bool(val)
+        # No success signal found but terminated (not truncated) - could be cube dropping
+        return False
 
     def set_normalization_stats(
         self,
@@ -396,7 +425,14 @@ class GraphDiTRLTrainer:
                 obs_norm = obs
 
             ee_node_current, object_node_current = self.policy._extract_nodes_from_obs(obs)
-            joint_states_current = obs[:, :6]
+            obs_struct = getattr(self.cfg, "obs_structure", None)
+            if obs_struct is not None and "left_joint_pos" in obs_struct:
+                joint_states_current = torch.cat([
+                    obs[:, obs_struct["left_joint_pos"][0]:obs_struct["left_joint_pos"][1]],
+                    obs[:, obs_struct["right_joint_pos"][0]:obs_struct["right_joint_pos"][1]],
+                ], dim=-1)
+            else:
+                joint_states_current = obs[:, :self._robot_state_dim]
 
             action_history = self.action_history
             ee_node_history = self.ee_node_history.clone()
@@ -431,22 +467,32 @@ class GraphDiTRLTrainer:
 
                 delta = info.get("delta", None)
                 if delta is not None:
-                    delta_norms_all.append(torch.norm(delta[:, :5], dim=-1).mean().item())
+                    # Log joint delta norms (exclude grippers)
+                    joint_delta = torch.cat([delta[:, :5], delta[:, 6:11]], dim=-1) if self._is_dual_arm else delta[:, :5]
+                    delta_norms_all.append(torch.norm(joint_delta, dim=-1).mean().item())
 
                 action_dim = action.shape[-1]
                 action_for_sim = action.clone()
-                if action_dim >= 6:
-                    joints = action_for_sim[:, :5]
+                # Process each arm block: [5 joints, 1 gripper] × num_arms
+                arm_block = 6  # 5 joints + 1 gripper
+                for arm_i in range(action_dim // arm_block):
+                    base = arm_i * arm_block
+                    # EMA smoothing on joints (currently no-op with ema_alpha=1.0)
+                    joints_slice = slice(base, base + 5)
                     if self._ema_smoothed_joints is None:
-                        self._ema_smoothed_joints = joints.clone()
-                    else:
-                        ema_alpha = 1.0  # 1.0=no smoothing (graph_unet prefers raw)
-                        self._ema_smoothed_joints = ema_alpha * joints + (1 - ema_alpha) * self._ema_smoothed_joints
-                    action_for_sim[:, :5] = self._ema_smoothed_joints
-                    action_for_sim[:, 5] = torch.where(
-                        action_for_sim[:, 5] > -0.2,
+                        self._ema_smoothed_joints = action_for_sim[:, :action_dim].clone()
+                    ema_alpha = 1.0  # 1.0=no smoothing (raw model output)
+                    self._ema_smoothed_joints[:, joints_slice] = (
+                        ema_alpha * action_for_sim[:, joints_slice]
+                        + (1 - ema_alpha) * self._ema_smoothed_joints[:, joints_slice]
+                    )
+                    action_for_sim[:, joints_slice] = self._ema_smoothed_joints[:, joints_slice]
+                    # Threshold gripper to binary +1/-1
+                    gripper_idx = base + 5
+                    action_for_sim[:, gripper_idx] = torch.where(
+                        action_for_sim[:, gripper_idx] > -0.2,
                         torch.tensor(1.0, device=action.device, dtype=action.dtype),
-                        torch.tensor(-1.0, device=action.device, dtype=action.dtype)
+                        torch.tensor(-1.0, device=action.device, dtype=action.dtype),
                     )
 
             next_obs, reward, terminated, truncated, env_info = self.env.step(action_for_sim)
@@ -483,15 +529,11 @@ class GraphDiTRLTrainer:
                 for i in done_envs.tolist():
                     self.episode_rewards.append(ep_rewards[i].item())
                     self.episode_lengths.append(ep_lengths[i].item())
-                    # 超时判负：truncated(timeout)=0，否则 height>=0.1=成功
-                    # Isaac Lab 在 reset 之后才计算 obs，next_obs 对 done env 是 reset 后的新 episode 初始 obs
-                    # 必须用 obs（step 前 = 终止前最后一帧）判断 success
-                    obj_height = obs[i, self.OBJ_HEIGHT_IDX].item()
                     is_truncated = bool(truncated[i].item() if hasattr(truncated[i], "item") else truncated[i])
                     if is_truncated:
-                        is_success = False  # 超时=判负，计入分母
+                        is_success = False
                     else:
-                        is_success = obj_height >= self.SUCCESS_HEIGHT
+                        is_success = self._check_success_from_info(env_info, i)
                     rollout_successes.append(float(is_success))
                     self.episode_successes.append(float(is_success))
 
@@ -775,8 +817,26 @@ def main():
     # Get device from AppLauncher (or use default)
     device = getattr(args, "device", "cuda")
 
-    # Load pretrained backbone (UnetPolicy or GraphUnetPolicy)
-    BackboneClass = GraphUnetPolicy if args.policy_type == "graph_unet" else UnetPolicy
+    # Load pretrained backbone (auto-detect from checkpoint or CLI flag)
+    _backbone_classes = {
+        "graph_unet": GraphUnetPolicy,
+        "unet": UnetPolicy,
+        "dual_arm_gated": DualArmDisentangledPolicyGated,
+        "dual_arm": DualArmDisentangledPolicy,
+    }
+    # Auto-detect: if checkpoint cfg has arm_action_dim → dual arm
+    _ckpt_preview = torch.load(args.pretrained_checkpoint, map_location="cpu", weights_only=False)
+    _ckpt_cfg = _ckpt_preview.get("cfg", None)
+    if _ckpt_cfg is not None and getattr(_ckpt_cfg, "arm_action_dim", None) is not None:
+        # Dual arm checkpoint - detect gated vs non-gated
+        if "graph_gate_logit" in _ckpt_preview.get("model_state_dict", {}):
+            args.policy_type = "dual_arm_gated"
+        else:
+            args.policy_type = "dual_arm"
+        print(f"[Main] Auto-detected dual arm checkpoint: policy_type={args.policy_type}")
+    del _ckpt_preview
+
+    BackboneClass = _backbone_classes.get(args.policy_type, GraphUnetPolicy)
     print(f"\n[Main] Loading pretrained {BackboneClass.__name__}: {args.pretrained_checkpoint}")
     backbone_policy = BackboneClass.load(args.pretrained_checkpoint, device=device)
     backbone_policy.eval()
@@ -792,8 +852,8 @@ def main():
         print(f"[Main] ⚠️  WARNING: node_to_z not found in backbone!")
     print(f"[Main] Graph-Unet loaded and frozen (except node_to_z)")
 
-    # Gripper comes from backbone (6th dim); no separate gripper model
-    print(f"[Main] Using backbone for all 6 action dimensions (including gripper)")
+    _backbone_action_dim = getattr(backbone_policy.cfg, "action_dim", 6)
+    print(f"[Main] Using backbone for all {_backbone_action_dim} action dimensions (including gripper)")
 
     # Create backbone adapter
     backbone = GraphUnetBackboneAdapter(backbone_policy)
@@ -864,11 +924,12 @@ def main():
             pass
         return 1
 
-    action_dim_env = get_action_dim(action_space)  # Environment action dim (usually 6)
-    action_dim_rl = 6  # RL outputs 6D (arm + gripper); per-channel alpha: arm low, gripper full
+    action_dim_env = get_action_dim(action_space)  # Environment action dim (6 single, 12 dual)
+    action_dim_rl = action_dim_env  # RL outputs same dim as env (6 single, 12 dual)
 
     print(f"[Main] obs_dim: {obs_dim}, action_dim_env: {action_dim_env}, action_dim_rl: {action_dim_rl}")
-    print(f"[Main] RL outputs 6D; arm uses alpha_learned, gripper uses 1.0 (full override)")
+    num_arms = max(1, action_dim_rl // 6)
+    print(f"[Main] RL outputs {action_dim_rl}D ({num_arms} arm(s)); arm uses alpha_learned, gripper uses 1.0")
 
     # Create policy config
     obs_structure = getattr(backbone_policy.cfg, "obs_structure", None)
@@ -877,6 +938,10 @@ def main():
     # No mask: RL controls all 6 dims; per-channel alpha in policy (arm low, gripper full)
     residual_action_mask = torch.ones(action_dim_env, device=device)
 
+    is_dual_arm = (action_dim_rl == 12)
+    _robot_state_dim = 12 if is_dual_arm else 6
+    _joint_dim = 10 if is_dual_arm else 5
+
     policy_cfg = GraphUnetResidualRLCfg(
         obs_dim=obs_dim,
         action_dim=action_dim_rl,
@@ -884,7 +949,8 @@ def main():
         num_layers=backbone_policy.cfg.num_layers,
         device=device,
         obs_structure=obs_structure,
-        robot_state_dim=6,
+        robot_state_dim=_robot_state_dim,
+        joint_dim=_joint_dim,
         residual_action_mask=residual_action_mask,
         c_delta_reg=args.c_delta_reg,
         cEnt=args.c_ent,
@@ -1026,7 +1092,7 @@ def main():
         lr=args.lr,
         max_grad_norm=args.max_grad_norm,
         action_history_length=action_history_length,
-        action_dim_env=action_dim_env,  # Pass environment action dim (6) for history buffer
+        action_dim_env=action_dim_env,  # Pass environment action dim (6 or 12) for history buffer
         best_sr_window=getattr(args, "best_sr_window", 200),
         best_sr_require_consistent=getattr(args, "best_sr_require_consistent", False),
     )

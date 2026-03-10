@@ -15,7 +15,7 @@ from isaaclab.sim.spawners.from_files.from_files_cfg import UsdFileCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from SO_101.robots.so_arm101_roscon import SO_ARM101_ROSCON_HIGH_PD_CFG
-from SO_101.tasks.cube_stack.cube_stack_env_cfg import CubeStackEnvCfg, CubeStackSubtaskCfg
+from SO_101.tasks.cube_stack.cube_stack_env_cfg import CubeStackEnvCfg, CubeStackRLRewardsCfg, CubeStackSubtaskCfg
 
 from . import mdp
 from isaaclab.markers.config import FRAME_MARKER_CFG  # noqa: E402
@@ -185,4 +185,31 @@ class DualSoArm101CubeStackJointPosEnvCfg_PLAY(DualSoArm101CubeStackJointPosEnvC
             joint_names=["jaw_joint"],
             scale=1.0,
             use_default_offset=False,
+        )
+
+
+@configclass
+class CubeStackRLEnvCfg(DualSoArm101CubeStackJointPosEnvCfg):
+    """Dual-arm cube stack for RL fine-tuning. Joint position arms + binary grippers.
+
+    Uses CubeStackRLRewardsCfg: lower weight for BC-learned skills (lift),
+    higher weight for stack alignment precision + gripper release + success bonus.
+    """
+
+    rewards: CubeStackRLRewardsCfg = CubeStackRLRewardsCfg()
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Override grippers to binary: RL outputs +1/-1 → BinaryJointPosition maps to open/close
+        self.actions.right_gripper_action = mdp.BinaryJointPositionActionCfg(
+            asset_name="right_arm",
+            joint_names=["jaw_joint"],
+            open_command_expr={"jaw_joint": 0.4},
+            close_command_expr={"jaw_joint": 0.0},
+        )
+        self.actions.left_gripper_action = mdp.BinaryJointPositionActionCfg(
+            asset_name="left_arm",
+            joint_names=["jaw_joint"],
+            open_command_expr={"jaw_joint": 0.4},
+            close_command_expr={"jaw_joint": 0.0},
         )

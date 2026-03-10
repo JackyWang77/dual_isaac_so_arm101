@@ -404,3 +404,109 @@ class CubeStackEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physx.gpu_temp_buffer_capacity = 16777216 * 2
         self.sim.physx.friction_correlation_distance = 0.00625
         self.sim.physx.use_gpu = True
+
+
+# =========================================================
+# RL fine-tuning rewards (on top of BC pretrained policy)
+# BC already achieves ~94% pick, ~68% stack.
+# RL rewards focus on what BC is weak at: alignment + release.
+# =========================================================
+@configclass
+class CubeStackRLRewardsCfg:
+    """Rewards for RL fine-tuning on top of a pretrained BC policy.
+
+    Design principles:
+    - Low weight for already-learned skills (reach, grasp, lift) to prevent regression
+    - High weight for stack alignment precision (BC's main weakness)
+    - Explicit gripper release reward (BC sometimes "doesn't dare to let go")
+    - Large success bonus to create high-advantage samples for AWR
+    """
+
+    # Phase 1: Already learned by BC (low weight, prevent regression)
+    manipulation_baseline = RewTerm(
+        func=mdp.object_is_lifted,
+        params={"minimal_height": 0.04, "object_cfg": SceneEntityCfg("cube_1")},
+        weight=2.0,
+    )
+
+    # Phase 2: Needs RL improvement
+    cube_1_near_target = RewTerm(
+        func=mdp.cube_near_target_xy,
+        params={"target_xy": TARGET_XY, "xy_std": 0.05, "object_cfg": SceneEntityCfg("cube_1")},
+        weight=5.0,
+    )
+    cube_2_near_target = RewTerm(
+        func=mdp.cube_near_target_xy,
+        params={"target_xy": TARGET_XY, "xy_std": 0.05, "object_cfg": SceneEntityCfg("cube_2")},
+        weight=5.0,
+    )
+
+    # Tight stack alignment (tighter std=0.015 vs original 0.03)
+    stack_1_on_2 = RewTerm(
+        func=mdp.cube_stack_alignment,
+        params={
+            "xy_std": 0.015,
+            "z_tolerance": 0.015,
+            "cube_top_cfg": SceneEntityCfg("cube_1"),
+            "cube_base_cfg": SceneEntityCfg("cube_2"),
+        },
+        weight=30.0,
+    )
+    stack_2_on_1 = RewTerm(
+        func=mdp.cube_stack_alignment,
+        params={
+            "xy_std": 0.015,
+            "z_tolerance": 0.015,
+            "cube_top_cfg": SceneEntityCfg("cube_2"),
+            "cube_base_cfg": SceneEntityCfg("cube_1"),
+        },
+        weight=30.0,
+    )
+
+    # Gripper release when stacked
+    gripper_release = RewTerm(
+        func=mdp.gripper_release_when_stacked,
+        params={
+            "xy_threshold": 0.015,
+            "z_tolerance": 0.01,
+            "cube_1_cfg": SceneEntityCfg("cube_1"),
+            "cube_2_cfg": SceneEntityCfg("cube_2"),
+            "right_arm_cfg": SceneEntityCfg("right_arm"),
+            "left_arm_cfg": SceneEntityCfg("left_arm"),
+        },
+        weight=10.0,
+    )
+
+    # Large success bonus
+    success_bonus = RewTerm(
+        func=mdp.stack_success_bonus,
+        params={
+            "expected_height": 0.018,
+            "eps_z": 0.005,
+            "eps_xy": 0.012,
+            "gripper_open_threshold": 0.1,
+            "cube_1_cfg": SceneEntityCfg("cube_1"),
+            "cube_2_cfg": SceneEntityCfg("cube_2"),
+            "right_arm_cfg": SceneEntityCfg("right_arm"),
+            "left_arm_cfg": SceneEntityCfg("left_arm"),
+        },
+        weight=50.0,
+    )
+
+    # Smooth control penalties
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-4)
+    joint_vel_right = RewTerm(
+        func=mdp.joint_vel_l2, weight=-1e-4,
+        params={"asset_cfg": SceneEntityCfg("right_arm")},
+    )
+    joint_vel_left = RewTerm(
+        func=mdp.joint_vel_l2, weight=-1e-4,
+        params={"asset_cfg": SceneEntityCfg("left_arm")},
+    )
+
+
+@configclass
+class CubeStackRLEnvCfg(CubeStackEnvCfg):
+    """Dual-arm cube stack env config for RL fine-tuning (different rewards)."""
+
+    rewards: CubeStackRLRewardsCfg = CubeStackRLRewardsCfg()
