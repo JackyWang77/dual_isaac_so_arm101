@@ -11,6 +11,15 @@ import torch
 from SO_101.policies.graph_dit_policy import GraphDiTPolicyCfg
 from SO_101.policies.dual_arm_unet_policy import DualArmDisentangledPolicy
 
+_NODE_KEY_PAIRS = [
+    ("left_ee_position", "left_ee_orientation"),
+    ("right_ee_position", "right_ee_orientation"),
+    ("cube_1_pos", "cube_1_ori"),
+    ("cube_2_pos", "cube_2_ori"),
+    ("fork_pos", "fork_ori"),
+    ("knife_pos", "knife_ori"),
+]
+
 
 class DualArmDisentangledPolicyGated(DualArmDisentangledPolicy):
     """Dual-arm disentangled graph + dual U-Net, with learnable gated fusion.
@@ -29,14 +38,104 @@ class DualArmDisentangledPolicyGated(DualArmDisentangledPolicy):
         self._z_dim = z_dim
         per_gate = getattr(cfg, "per_gate", False)
 
-        # Full-dim projections (no half concat)
         self.raw_proj = torch.nn.Linear(raw_node_dim, z_dim)
         self.graph_z_proj = torch.nn.Linear(graph_z_in, z_dim)
-        # Gate init -2 -> sigmoid ~0.12; scalar (1) or per-dim (z_dim) when per_gate=True
         if per_gate:
             self.graph_gate_logit = torch.nn.Parameter(torch.full((z_dim,), -2.0))
         else:
             self.graph_gate_logit = torch.nn.Parameter(torch.tensor([-2.0]))
+
+    def _get_num_nodes(self) -> int:
+        """Infer expected number of nodes from raw_proj weight shape."""
+        return self.raw_proj.in_features // 7
+
+    def _extract_nodes_from_obs_direct(self, obs: torch.Tensor) -> torch.Tensor:
+        """Extract [B, N, 1, 7] from obs using obs_structure, no node_configs needed."""
+        obs_struct = getattr(self.cfg, "obs_structure", None)
+        if obs_struct is None:
+            raise ValueError("obs_structure is required for node extraction")
+
+        nodes = []
+        for pos_key, ori_key in _NODE_KEY_PAIRS:
+            if pos_key in obs_struct and ori_key in obs_struct:
+                pos = obs[:, obs_struct[pos_key][0] : obs_struct[pos_key][1]]
+                ori = obs[:, obs_struct[ori_key][0] : obs_struct[ori_key][1]]
+                nodes.append(torch.cat([pos, ori], dim=-1))
+        num_expected = self._get_num_nodes()
+        if len(nodes) < num_expected:
+            raise ValueError(
+                f"Found {len(nodes)} nodes in obs_structure but raw_proj expects {num_expected}"
+            )
+        nodes = nodes[:num_expected]
+        return torch.stack(nodes, dim=1).unsqueeze(2)  # [B, N, 1, 7]
+
+    def _build_node_histories(
+        self,
+        obs: torch.Tensor,
+        ee_node_history: torch.Tensor | None = None,
+        object_node_history: torch.Tensor | None = None,
+        node_histories: torch.Tensor | None = None,
+        node_types: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Build node histories. Prefers explicit node_histories, else extracts from obs."""
+        if node_histories is not None:
+            N = node_histories.shape[1]
+            if node_types is None:
+                node_types = torch.zeros(N, dtype=torch.long, device=node_histories.device)
+            return node_histories, node_types
+
+        num_expected = self._get_num_nodes()
+        if num_expected > 2:
+            nh = self._extract_nodes_from_obs_direct(obs)
+            N = nh.shape[1]
+            nt = torch.zeros(N, dtype=torch.long, device=nh.device)
+            return nh, nt
+
+        if ee_node_history is not None and object_node_history is not None:
+            nh = torch.stack([ee_node_history, object_node_history], dim=1)
+            nt = torch.tensor([0, 1], dtype=torch.long, device=nh.device)
+            return nh, nt
+
+        nh = self._extract_nodes_from_obs_direct(obs)
+        N = nh.shape[1]
+        nt = torch.zeros(N, dtype=torch.long, device=nh.device)
+        return nh, nt
+
+    def _compute_z_base(self, nh: torch.Tensor) -> torch.Tensor:
+        """Graph encoder → gated fusion → z_base [B, z_dim].
+
+        Args:
+            nh: [B, N, T, 7] — already-normalized node histories.
+        """
+        B = nh.shape[0]
+        dist_embed, sim_embed = self._compute_disentangled_edges(nh)
+        _, graph_z = self._encode_disentangled_graph(nh, dist_embed, sim_embed)
+
+        raw_latest = nh[:, :, -1, :].reshape(B, -1)
+        raw_feat = self.raw_proj(raw_latest)
+        graph_z_comp = self.graph_z_proj(graph_z)
+        gate = torch.sigmoid(self.graph_gate_logit).to(nh.device)
+        return raw_feat + gate * graph_z_comp
+
+    def extract_z(
+        self,
+        ee_node_history: torch.Tensor | None = None,
+        obj_node_history: torch.Tensor | None = None,
+        *,
+        obs: torch.Tensor | None = None,
+        node_histories: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Extract gated z. Returns [B, 1, z_dim].
+
+        Prefers pre-normalized node_histories [B, N, T, 7] when available.
+        Falls back to extracting from obs (requires obs_structure on cfg).
+        """
+        if node_histories is not None:
+            return self._compute_z_base(node_histories).unsqueeze(1)
+        if obs is None:
+            raise ValueError("extract_z requires node_histories= or obs=")
+        nh = self._extract_nodes_from_obs_direct(obs)
+        return self._compute_z_base(nh).unsqueeze(1)
 
     def forward(
         self,
@@ -65,12 +164,11 @@ class DualArmDisentangledPolicyGated(DualArmDisentangledPolicy):
         dist_embed, sim_embed = self._compute_disentangled_edges(nh)
         _, graph_z = self._encode_disentangled_graph(nh, dist_embed, sim_embed)
 
-        # Gated fusion: z_base = raw_feat + gate * graph_z_comp (no concat)
         raw_latest = nh[:, :, -1, :].reshape(B, -1)
-        raw_feat = self.raw_proj(raw_latest)                    # [B, z_dim]
-        graph_z_comp = self.graph_z_proj(graph_z)                # [B, z_dim]
-        gate = torch.sigmoid(self.graph_gate_logit).to(device)  # [1] or [z_dim]
-        z_base = raw_feat + gate * graph_z_comp                 # [B, z_dim]
+        raw_feat = self.raw_proj(raw_latest)
+        graph_z_comp = self.graph_z_proj(graph_z)
+        gate = torch.sigmoid(self.graph_gate_logit).to(device)
+        z_base = raw_feat + gate * graph_z_comp
 
         if subtask_condition is not None and hasattr(self, "subtask_to_z"):
             subtask_embed = self.subtask_encoder(subtask_condition)

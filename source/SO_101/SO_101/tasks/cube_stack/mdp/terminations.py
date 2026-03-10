@@ -53,9 +53,9 @@ def object_placed_at_target(
     target_eps_z: float = 0.005,
     object_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
 ) -> torch.Tensor:
-    """True when object is placed at target: xy in range, z ≈ target_z (e.g. on table)."""
+    """True when object is placed at target: xy in range, z ≈ target_z. Uses env-local coords."""
     obj: RigidObject = env.scene[object_cfg.name]
-    pos = obj.data.root_pos_w[:, :3]
+    pos = obj.data.root_pos_w[:, :3] - env.scene.env_origins[:, :3]
     target_xy_t = torch.tensor(
         [target_xy[0], target_xy[1]],
         device=env.device,
@@ -143,8 +143,9 @@ def two_cubes_stacked_at_target(
     """True when cube_1 and cube_2 are stacked (any order) at the fixed target position (center)."""
     cube_1: RigidObject = env.scene[cube_1_cfg.name]
     cube_2: RigidObject = env.scene[cube_2_cfg.name]
-    cube_1_pos = cube_1.data.root_pos_w[:, :3]
-    cube_2_pos = cube_2.data.root_pos_w[:, :3]
+    origins = env.scene.env_origins[:, :3]
+    cube_1_pos = cube_1.data.root_pos_w[:, :3] - origins
+    cube_2_pos = cube_2.data.root_pos_w[:, :3] - origins
     target = torch.tensor(
         [target_xy[0], target_xy[1], 0.0],
         device=env.device,
@@ -197,8 +198,9 @@ def two_cubes_stacked_at_target_released(
     ee_right = env.scene[ee_right_cfg.name]
     ee_left = env.scene[ee_left_cfg.name]
 
-    cube_1_pos = cube_1.data.root_pos_w[:, :3]
-    cube_2_pos = cube_2.data.root_pos_w[:, :3]
+    origins = env.scene.env_origins[:, :3]
+    cube_1_pos = cube_1.data.root_pos_w[:, :3] - origins
+    cube_2_pos = cube_2.data.root_pos_w[:, :3] - origins
     cube_1_vel = cube_1.data.root_lin_vel_w[:, :3]
     cube_2_vel = cube_2.data.root_lin_vel_w[:, :3]
     jaw_right = right_arm.data.joint_pos[:, -1]

@@ -23,9 +23,9 @@ def object_placed_at_target(
     target_eps_z: float = 0.01,
     object_cfg: SceneEntityCfg = SceneEntityCfg("fork"),
 ) -> torch.Tensor:
-    """True when object is placed near target (xy + z)."""
+    """True when object is placed near target (xy + z). Uses env-local coords."""
     obj: RigidObject = env.scene[object_cfg.name]
-    pos = obj.data.root_pos_w[:, :3]
+    pos = obj.data.root_pos_w[:, :3] - env.scene.env_origins[:, :3]
     target_xy_t = torch.tensor(
         [target_xy[0], target_xy[1]],
         device=env.device,

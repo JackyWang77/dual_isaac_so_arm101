@@ -97,17 +97,23 @@ import numpy as np
 import SO_101.tasks  # noqa: F401  # Register environments
 import torch
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
-from SO_101.tasks.cube_stack.cube_stack_env_cfg import (
-    JAW_OPEN,
-    JAW_CLOSED,
-    PICK_TARGET_XY,
-    PICK_TARGET_Z,
-    PICK_EPS_XY,
-    PICK_EPS_Z,
-    STACK_EXPECTED_HEIGHT,
-    STACK_EPS_Z,
-    STACK_EPS_XY,
-)
+try:
+    from SO_101.tasks.cube_stack.cube_stack_env_cfg import (
+        JAW_OPEN,
+        JAW_CLOSED,
+        PICK_TARGET_XY,
+        PICK_TARGET_Z,
+        PICK_EPS_XY,
+        PICK_EPS_Z,
+        STACK_EXPECTED_HEIGHT,
+        STACK_EPS_Z,
+        STACK_EPS_XY,
+    )
+except ImportError:
+    JAW_OPEN = JAW_CLOSED = 0.0
+    PICK_TARGET_XY = (0.0, 0.0)
+    PICK_TARGET_Z = PICK_EPS_XY = PICK_EPS_Z = 0.0
+    STACK_EXPECTED_HEIGHT = STACK_EPS_Z = STACK_EPS_XY = 0.0
 from SO_101.policies.graph_unet_policy import UnetPolicy, GraphUnetPolicy, DisentangledGraphUnetPolicy
 from SO_101.policies.dual_arm_unet_policy import DualArmUnetPolicy, DualArmUnetPolicyMLP, DualArmUnetPolicyRawOnly, DualArmDisentangledPolicy
 from SO_101.policies.dual_arm_unet_policy_gated import DualArmDisentangledPolicyGated
@@ -469,6 +475,7 @@ def play_graph_unet_policy(
         "left_ee_position": 24, "left_ee_orientation": 27,
         "right_ee_position": 31, "right_ee_orientation": 34,
         "cube_1_pos": 38, "cube_1_ori": 41, "cube_2_pos": 45, "cube_2_ori": 48,
+        "fork_pos": 38, "fork_ori": 41, "knife_pos": 45, "knife_ori": 48,
         "last_action_all": 52,
         "object_position": 12, "object_orientation": 15,
         "ee_position": 19, "ee_orientation": 22,
@@ -477,6 +484,7 @@ def play_graph_unet_policy(
     _obs_dims = obs_key_dims if obs_key_dims else {
         "left_ee_position": 3, "left_ee_orientation": 4, "right_ee_position": 3, "right_ee_orientation": 4,
         "cube_1_pos": 3, "cube_1_ori": 4, "cube_2_pos": 3, "cube_2_ori": 4,
+        "fork_pos": 3, "fork_ori": 4, "knife_pos": 3, "knife_ori": 4,
         "object_position": 3, "object_orientation": 4, "ee_position": 3, "ee_orientation": 4,
         "left_joint_pos": 6, "right_joint_pos": 6, "joint_pos": 6,
     }
@@ -489,6 +497,8 @@ def play_graph_unet_policy(
         )
         if "cube_1_pos" in _obs_offsets and "cube_2_pos" in _obs_offsets:
             print(f"[Play] Obs layout: cube_1_pos @ {_obs_offsets['cube_1_pos']}, cube_2_pos @ {_obs_offsets['cube_2_pos']}, expected_obs_dim={_expected_obs_dim}")
+        elif "fork_pos" in _obs_offsets and "knife_pos" in _obs_offsets:
+            print(f"[Play] Obs layout: fork_pos @ {_obs_offsets['fork_pos']}, knife_pos @ {_obs_offsets['knife_pos']}, expected_obs_dim={_expected_obs_dim}")
 
     action_history_length = (
         policy.cfg.action_history_length
@@ -550,60 +560,44 @@ def play_graph_unet_policy(
     episode_stack_success = []  # Stack task: stack success (two cubes stacked)
     current_episode_rewards = torch.zeros(num_envs, device=device)
     is_stack_task = "Stack" in task_name or "Cube-Stack" in task_name
+    is_table_task = "Table-Setting" in task_name
     
-    # Success rate: 与 train 一致，仅当 Episode_Termination/success 且 非 object_dropping 时计为成功
+    # Success rate: directly read per-env termination signals from the termination manager.
+    # Isaac Lab's extras["log"]["Episode_Termination/X"] are scalar averages (useless per-env).
+    # Instead, access termination_manager._last_episode_dones [num_envs, num_terms] directly.
+    _term_mgr = _base_env.termination_manager
+    _term_names = list(_term_mgr._term_names)
+    _success_term_idx = None
+    for _sname in ("success", "stack_success"):
+        if _sname in _term_names:
+            _success_term_idx = _term_names.index(_sname)
+            break
+    _drop_term_indices = []
+    for _dname in ("object_dropping", "cube_1_dropping", "cube_2_dropping",
+                    "fork_dropping", "knife_dropping"):
+        if _dname in _term_names:
+            _drop_term_indices.append(_term_names.index(_dname))
+    print(f"[Play] Termination terms: {_term_names}")
+    print(f"[Play] Success term idx: {_success_term_idx} ({_term_names[_success_term_idx] if _success_term_idx is not None else 'NONE'})")
+    print(f"[Play] Drop term indices: {[(i, _term_names[i]) for i in _drop_term_indices]}")
+
     def _get_success_flags(info):
-        """从 step 返回的 info 取 success [num_envs]。success=True 且 非 object_dropping 才算成功。"""
-        if not isinstance(info, dict):
+        """Per-env success flags from termination manager's _last_episode_dones."""
+        if _success_term_idx is None:
             return None
-
-        def _to_mask(arr):
-            if arr is None:
-                return None
-            if isinstance(arr, torch.Tensor):
-                t = arr.to(device).float()
-            elif isinstance(arr, np.ndarray):
-                t = torch.from_numpy(arr).float().to(device)
-            else:
-                return None
-            if t.dim() == 2 and t.shape[1] == 1:
-                t = t.squeeze(-1)
-            if t.dim() != 1 or t.shape[0] != num_envs:
-                return None
-            return (t > 0.5) if t.dtype != torch.bool else t
-
-        log = info.get("log") or info.get("extra_info")
-        if not isinstance(log, dict):
-            return None
-        success_mask = None
-        for key in (
-            "Episode_Termination/success",
-            "Episode_Termination/stack_success",
-            "success",
-            "episode_success",
-            "termination_success",
-        ):
-            if key in log:
-                success_mask = _to_mask(log[key])
-                if success_mask is not None:
-                    break
-        if success_mask is None:
-            return None
-        drop_key = "Episode_Termination/object_dropping"
-        if drop_key in log:
-            drop_mask = _to_mask(log[drop_key])
-            if drop_mask is not None:
+        try:
+            led = _term_mgr._last_episode_dones  # [num_envs, num_terms]
+            success_mask = led[:, _success_term_idx].bool().to(device)
+            for di in _drop_term_indices:
+                drop_mask = led[:, di].bool().to(device)
                 success_mask = success_mask & (~drop_mask)
-        # Stack: 排除 cube 掉落
-        for dk in ("Episode_Termination/cube_1_dropping", "Episode_Termination/cube_2_dropping"):
-            if dk in log:
-                drop_mask = _to_mask(log[dk])
-                if drop_mask is not None:
-                    success_mask = success_mask & (~drop_mask)
-        return success_mask
+            return success_mask
+        except Exception as e:
+            print(f"[Play] WARNING: _get_success_flags error: {e}")
+            return None
 
     # 成功率：Stack 用信号（pick_cube/stack_cube），非 Stack 用 info 或 height 回退
-    _obj_pos_key = "cube_1_pos" if "cube_1_pos" in _obs_offsets else "object_position"
+    _obj_pos_key = "cube_1_pos" if "cube_1_pos" in _obs_offsets else ("fork_pos" if "fork_pos" in _obs_offsets else "object_position")
     OBJ_HEIGHT_IDX = _obs_offsets.get(_obj_pos_key, 12) + 2  # z index
     SUCCESS_HEIGHT = 0.10  # 非 Stack 任务回退阈值 (m)
     if is_stack_task:
@@ -761,7 +755,9 @@ def play_graph_unet_policy(
                     _dual_arm_policy_order = [
                         "left_joint_pos", "left_joint_vel", "right_joint_pos", "right_joint_vel",
                         "left_ee_position", "left_ee_orientation", "right_ee_position", "right_ee_orientation",
-                        "cube_1_pos", "cube_1_ori", "cube_2_pos", "cube_2_ori", "last_action_all",
+                        "cube_1_pos", "cube_1_ori", "cube_2_pos", "cube_2_ori",
+                        "fork_pos", "fork_ori", "knife_pos", "knife_ori",
+                        "last_action_all",
                     ]
                     keys_order = [k for k in _dual_arm_policy_order if k in obs_val]
                     parts = []
@@ -815,12 +811,14 @@ def play_graph_unet_policy(
             t = t.view(t.shape[0], -1)
         if t.shape[1] == 39:
             t = torch.cat([t[:, :26], t[:, 33:]], dim=1)
-        # Convert world-frame positions to local frame (same as main loop; always, including single-env)
         _origins = _env_origins.to(t.device)
-        for _pk in ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos"]:
+        _done_off = set()
+        for _pk in ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos", "fork_pos", "knife_pos"]:
             if _pk in _obs_offsets:
                 _po = _obs_offsets[_pk]
-                t[:, _po : _po + 3] -= _origins
+                if _po not in _done_off:
+                    t[:, _po : _po + 3] -= _origins
+                    _done_off.add(_po)
         return t
 
     def _prefill_node_history_buffers(obs_raw, env_ids=None):
@@ -954,7 +952,9 @@ def play_graph_unet_policy(
                         _dual_arm_policy_order = [
                             "left_joint_pos", "left_joint_vel", "right_joint_pos", "right_joint_vel",
                             "left_ee_position", "left_ee_orientation", "right_ee_position", "right_ee_orientation",
-                            "cube_1_pos", "cube_1_ori", "cube_2_pos", "cube_2_ori", "last_action_all",
+                            "cube_1_pos", "cube_1_ori", "cube_2_pos", "cube_2_ori",
+                            "fork_pos", "fork_ori", "knife_pos", "knife_ori",
+                            "last_action_all",
                         ]
                         keys_order = [k for k in _dual_arm_policy_order if k in obs_val]
                         parts = []
@@ -1102,20 +1102,29 @@ def play_graph_unet_policy(
             # obs terms ee_position_w / object_position_w return world coords.
             # Training data was collected at the origin → subtract env_origins (always, including single-env).
             # Must match num_envs so each env gets its own origin (no broadcast bugs).
-            _pos_keys = ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos"]
+            _pos_keys = ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos", "fork_pos", "knife_pos"]
             _origins = _env_origins.to(obs_tensor.device)
+            _done_offsets = set()
             for _pk in _pos_keys:
                 if _pk in _obs_offsets:
                     _po = _obs_offsets[_pk]
-                    obs_tensor[:, _po : _po + 3] -= _origins
+                    if _po not in _done_offsets:
+                        obs_tensor[:, _po : _po + 3] -= _origins
+                        _done_offsets.add(_po)
 
-            # Sanity: first step print cube positions (raw-only uses latest node = EE + cube_1 + cube_2)
-            if step_count == 0 and "cube_1_pos" in _obs_offsets and "cube_2_pos" in _obs_offsets:
-                o1, o2 = _obs_offsets["cube_1_pos"], _obs_offsets["cube_2_pos"]
-                for eid in range(min(2, num_envs)):
-                    c1 = obs_tensor[eid, o1 : o1 + 3].tolist()
-                    c2 = obs_tensor[eid, o2 : o2 + 3].tolist()
-                    print(f"[Play] env{eid} cube_1_pos (local)={c1} cube_2_pos (local)={c2}")
+            # Sanity: first step print object positions
+            if step_count == 0:
+                _obj_pairs = []
+                if "cube_1_pos" in _obs_offsets and "cube_2_pos" in _obs_offsets:
+                    _obj_pairs = [("cube_1_pos", "cube_2_pos")]
+                elif "fork_pos" in _obs_offsets and "knife_pos" in _obs_offsets:
+                    _obj_pairs = [("fork_pos", "knife_pos")]
+                for k1, k2 in _obj_pairs:
+                    o1, o2 = _obs_offsets[k1], _obs_offsets[k2]
+                    for eid in range(min(2, num_envs)):
+                        c1 = obs_tensor[eid, o1 : o1 + 3].tolist()
+                        c2 = obs_tensor[eid, o2 : o2 + 3].tolist()
+                        print(f"[Play] env{eid} {k1} (local)={c1} {k2} (local)={c2}")
 
             # Normalize observations (if stats available)
             # Ensure dimensions match (obs_tensor should be 32 dims after removing target_object_position)
@@ -1287,13 +1296,12 @@ def play_graph_unet_policy(
                     base_env = env.unwrapped if hasattr(env, "unwrapped") else env
                     if hasattr(base_env, "get_subtask_term_signals"):
                         signals = base_env.get_subtask_term_signals()
-                        pick = signals.get("pick_cube")
-                        stack = signals.get("stack_cube")
+                        pick = signals.get("pick_cube") or signals.get("place_fork")
+                        stack = signals.get("stack_cube") or signals.get("place_knife")
                         if pick is not None and stack is not None:
                             if isinstance(pick, np.ndarray):
                                 pick = torch.from_numpy(pick).float().to(device)
                                 stack = torch.from_numpy(stack).float().to(device)
-                            # 与 train 一致: active_idx = 第一个 signal=False 的 subtask; 全 True 用 last
                             pick_done = pick.bool()
                             stack_done = stack.bool()
                             active_is_pick = ~pick_done
@@ -1302,16 +1310,23 @@ def play_graph_unet_policy(
                             cond = torch.zeros(num_envs, 2, device=device)
                             cond[active_is_pick, 0] = 1.0
                             cond[active_is_stack, 1] = 1.0
-                            cond[active_is_last, 1] = 1.0  # 全完成用 last (stack)
+                            cond[active_is_last, 1] = 1.0
                             subtask_condition = cond
                             phase_source = "env"
                 except Exception as e:
                     phase_source = f"env_err:{e}"
-                # 2) Play env 有 subtask_terms obs 时，直接读取 (与 Mimic 完全一致)
+                # 2) Play env 有 subtask_terms obs 时，直接读取
                 if subtask_condition is None and isinstance(obs, dict) and "subtask_terms" in obs:
                     st = obs["subtask_terms"]
-                    pick = st.get("pick_cube") if isinstance(st, dict) else None
-                    stack = st.get("stack_cube") if isinstance(st, dict) else None
+                    if isinstance(st, dict):
+                        pick = st.get("pick_cube", None)
+                        if pick is None:
+                            pick = st.get("place_fork", None)
+                        stack = st.get("stack_cube", None)
+                        if stack is None:
+                            stack = st.get("place_knife", None)
+                    else:
+                        pick, stack = None, None
                     if pick is not None and stack is not None:
                         if isinstance(pick, np.ndarray):
                             pick = torch.from_numpy(pick).float().to(device)
@@ -1389,7 +1404,7 @@ def play_graph_unet_policy(
             if needs_replan:
                 # Record obs snapshot (attention extracted offline)
                 if record_obs:
-                    obs_keys = ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos"]
+                    obs_keys = ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos", "fork_pos", "knife_pos"]
                     for env_id in range(num_envs):
                         obs_snap = {}
                         for k in obs_keys:
@@ -1672,8 +1687,8 @@ def play_graph_unet_policy(
                             truncated[i].item() if hasattr(truncated[i], "item") else truncated[i]
                         )
                         pick_ok, stack_ok = None, None
+                        fork_ok, knife_ok = None, None
                         if is_stack_task and "cube_1_pos" in _obs_offsets:
-                            # 与 lift 一致：obs_tensor = step 前最后一帧（Isaac Lab done 后 obs 为 reset 态）
                             c1 = obs_tensor[i, _obs_offsets["cube_1_pos"] : _obs_offsets["cube_1_pos"] + 3]
                             c2 = obs_tensor[i, _obs_offsets["cube_2_pos"] : _obs_offsets["cube_2_pos"] + 3]
                             target_xy = torch.tensor(
@@ -1692,27 +1707,30 @@ def play_graph_unet_policy(
                             stack_ok = (z_ok_a and xy_ok_a) or (z_ok_b and xy_ok_b)
                             episode_pick_success.append(pick_ok)
                             episode_stack_success.append(stack_ok)
-                            # 与 lift 一致：成功会立刻结束 → terminated=True, truncated=False
-                            # 超时必失败；非超时：优先 info，否则 terminated=成功（obs 慢一帧时 stack_ok 可能漏判）
-                            if is_truncated:
-                                is_success = False
-                            else:
-                                success_flags = _get_success_flags(info)
-                                if success_flags is not None:
-                                    is_success = bool(success_flags[i].item() if hasattr(success_flags[i], "item") else success_flags[i])
-                                else:
-                                    # info 无 success 键时：terminated=成功结束（信 env，不依赖 obs 慢一帧）
-                                    is_success = stack_ok if stack_ok else True
+
+                        if is_table_task and "fork_pos" in _obs_offsets and "knife_pos" in _obs_offsets:
+                            fp = obs_tensor[i, _obs_offsets["fork_pos"] : _obs_offsets["fork_pos"] + 3]
+                            kp = obs_tensor[i, _obs_offsets["knife_pos"] : _obs_offsets["knife_pos"] + 3]
+                            _ft_xy = torch.tensor([0.255, 0.18], device=device, dtype=fp.dtype)
+                            _kt_xy = torch.tensor([0.2366, -0.1288], device=device, dtype=kp.dtype)
+                            fork_ok = bool(torch.norm(fp[:2] - _ft_xy) < 0.05 and torch.abs(fp[2] - 0.0076) < 0.01)
+                            knife_ok = bool(torch.norm(kp[:2] - _kt_xy) < 0.05 and torch.abs(kp[2] - 0.0068) < 0.01)
+                            episode_pick_success.append(fork_ok)
+                            episode_stack_success.append(knife_ok)
+
+                        # Determine success: truncated=failure, else use termination manager signal
+                        success_flags = _get_success_flags(info)
+                        if is_truncated:
+                            is_success = False
+                        elif success_flags is not None:
+                            is_success = bool(success_flags[i].item() if hasattr(success_flags[i], "item") else success_flags[i])
+                        elif is_stack_task:
+                            is_success = bool(stack_ok) if stack_ok is not None else False
+                        elif is_table_task:
+                            is_success = bool(fork_ok and knife_ok) if fork_ok is not None else False
                         else:
-                            # 非 Stack (Lift)：与 Stack 一致，超时必失败，否则优先 info 再 height
-                            success_flags = _get_success_flags(info)
-                            if is_truncated:
-                                is_success = False
-                            elif success_flags is not None:
-                                is_success = bool(success_flags[i].item() if hasattr(success_flags[i], "item") else success_flags[i])
-                            else:
-                                obj_h = obs_tensor[i, OBJ_HEIGHT_IDX].item()
-                                is_success = obj_h >= SUCCESS_HEIGHT
+                            obj_h = obs_tensor[i, OBJ_HEIGHT_IDX].item()
+                            is_success = obj_h >= SUCCESS_HEIGHT
 
                         episode_success.append(is_success)
                         episode_count += 1
@@ -1721,6 +1739,8 @@ def play_graph_unet_policy(
                         extra = ""
                         if pick_ok is not None and stack_ok is not None:
                             extra = f" | Pick={'✓' if pick_ok else '✗'} Stack={'✓' if stack_ok else '✗'}"
+                        if fork_ok is not None and knife_ok is not None:
+                            extra = f" | Fork={'✓' if fork_ok else '✗'} Knife={'✓' if knife_ok else '✗'}"
                         obj_h_str = f"h={obs_tensor[i, OBJ_HEIGHT_IDX].item():.3f}m " if is_stack_task else ""
                         print(f"[Play] Ep {episode_count:3d} {obj_h_str}{status} | SR={sr:.1f}%{extra}")
 
@@ -1804,6 +1824,11 @@ def play_graph_unet_policy(
             stack_sr = sum(episode_stack_success) / len(episode_stack_success) * 100.0
             print(f"[Play] Pick SR={pick_sr:.1f}% ({sum(episode_pick_success)}/{len(episode_pick_success)})")
             print(f"[Play] Stack SR={stack_sr:.1f}% ({sum(episode_stack_success)}/{len(episode_stack_success)})")
+        if is_table_task and episode_pick_success and episode_stack_success:
+            fork_sr = sum(episode_pick_success) / len(episode_pick_success) * 100.0
+            knife_sr = sum(episode_stack_success) / len(episode_stack_success) * 100.0
+            print(f"[Play] Fork SR={fork_sr:.1f}% ({sum(episode_pick_success)}/{len(episode_pick_success)})")
+            print(f"[Play] Knife SR={knife_sr:.1f}% ({sum(episode_stack_success)}/{len(episode_stack_success)})")
     
     # Close environment
     env.close()

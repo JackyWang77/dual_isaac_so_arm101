@@ -593,7 +593,11 @@ class DualArmUnetPolicyRawOnly(nn.Module):
                 node_types = torch.zeros(N, dtype=torch.long, device=node_histories.device)
             return node_histories, node_types
 
-        if ee_node_history is not None and object_node_history is not None:
+        raw_in = getattr(getattr(self, "raw_proj", None), "in_features", None)
+        num_expected = raw_in // 7 if raw_in and raw_in % 7 == 0 else (
+            len(self.cfg.node_configs) if getattr(self.cfg, "node_configs", None) else 2
+        )
+        if ee_node_history is not None and object_node_history is not None and num_expected <= 2:
             nh = torch.stack([ee_node_history, object_node_history], dim=1)
             nt = torch.tensor([0, 1], dtype=torch.long, device=nh.device)
             return nh, nt
@@ -603,16 +607,59 @@ class DualArmUnetPolicyRawOnly(nn.Module):
         nt = torch.zeros(N, dtype=torch.long, device=nh.device)
         return nh, nt
 
+    _DUAL_ARM_NODE_KEYS = [
+        ("left_ee_position", "left_ee_orientation"),
+        ("right_ee_position", "right_ee_orientation"),
+        ("cube_1_pos", "cube_1_ori"),
+        ("cube_2_pos", "cube_2_ori"),
+        ("fork_pos", "fork_ori"),
+        ("knife_pos", "knife_ori"),
+    ]
+
     def _extract_node_histories_from_obs(self, obs: torch.Tensor) -> torch.Tensor:
-        """Extract [B, N, 1, 7] from obs using node_configs + obs_structure."""
+        """Extract [B, N, 1, 7] from obs using node_configs + obs_structure.
+
+        Falls back to auto-detecting dual-arm nodes from obs_structure when
+        node_configs is None (e.g. checkpoint didn't serialize it).
+        """
         node_configs = getattr(self.cfg, "node_configs", None)
         obs_struct = getattr(self.cfg, "obs_structure", None)
+
+        if node_configs is None and obs_struct is not None:
+            raw_in = getattr(getattr(self, "raw_proj", None), "in_features", None)
+            num_expected = raw_in // 7 if raw_in and raw_in % 7 == 0 else 0
+            if num_expected > 2:
+                auto_nodes = []
+                for pos_key, ori_key in self._DUAL_ARM_NODE_KEYS:
+                    if pos_key in obs_struct and ori_key in obs_struct:
+                        pos = obs[:, obs_struct[pos_key][0] : obs_struct[pos_key][1]]
+                        ori = obs[:, obs_struct[ori_key][0] : obs_struct[ori_key][1]]
+                        auto_nodes.append(torch.cat([pos, ori], dim=-1))
+                if len(auto_nodes) == num_expected:
+                    return torch.stack(auto_nodes, dim=1).unsqueeze(2)
+
         if node_configs is None or obs_struct is None:
             if obs_struct:
-                ee_pos = obs[:, obs_struct["ee_position"][0] : obs_struct["ee_position"][1]]
-                ee_ori = obs[:, obs_struct["ee_orientation"][0] : obs_struct["ee_orientation"][1]]
-                obj_pos = obs[:, obs_struct["object_position"][0] : obs_struct["object_position"][1]]
-                obj_ori = obs[:, obs_struct["object_orientation"][0] : obs_struct["object_orientation"][1]]
+                if "ee_position" in obs_struct:
+                    ee_pos = obs[:, obs_struct["ee_position"][0] : obs_struct["ee_position"][1]]
+                    ee_ori = obs[:, obs_struct["ee_orientation"][0] : obs_struct["ee_orientation"][1]]
+                    obj_pos = obs[:, obs_struct["object_position"][0] : obs_struct["object_position"][1]]
+                    obj_ori = obs[:, obs_struct["object_orientation"][0] : obs_struct["object_orientation"][1]]
+                else:
+                    lee_pos = obs[:, obs_struct["left_ee_position"][0] : obs_struct["left_ee_position"][1]]
+                    lee_ori = obs[:, obs_struct["left_ee_orientation"][0] : obs_struct["left_ee_orientation"][1]]
+                    ree_pos = obs[:, obs_struct["right_ee_position"][0] : obs_struct["right_ee_position"][1]]
+                    ree_ori = obs[:, obs_struct["right_ee_orientation"][0] : obs_struct["right_ee_orientation"][1]]
+                    ee_pos = (lee_pos + ree_pos) * 0.5
+                    ee_ori = (lee_ori + ree_ori) * 0.5
+                    for k in ["cube_1_pos", "fork_pos"]:
+                        if k in obs_struct:
+                            obj_pos_key, obj_ori_key = k, k.replace("_pos", "_ori")
+                            break
+                    else:
+                        obj_pos_key, obj_ori_key = "object_position", "object_orientation"
+                    obj_pos = obs[:, obs_struct[obj_pos_key][0] : obs_struct[obj_pos_key][1]]
+                    obj_ori = obs[:, obs_struct[obj_ori_key][0] : obs_struct[obj_ori_key][1]]
             else:
                 ee_pos, ee_ori = obs[:, 19:22], obs[:, 22:26]
                 obj_pos, obj_ori = obs[:, 12:15], obs[:, 15:19]
@@ -811,6 +858,35 @@ class DualArmDisentangledPolicy(DisentangledGraphUnetPolicy):
         del self.unet
         if hasattr(self, "joint_encoder"):
             del self.joint_encoder
+
+    def extract_z(
+        self,
+        ee_node_history: torch.Tensor | None = None,
+        obj_node_history: torch.Tensor | None = None,
+        *,
+        obs: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Extract graph z from obs (builds all N nodes internally).
+
+        Returns [B, 1, z_dim] for compatibility with RL z_adapter.
+        Accepts obs as keyword arg; legacy ee/obj args are ignored when
+        node_configs has >2 nodes.
+        """
+        if obs is None:
+            raise ValueError("DualArmDisentangledPolicy.extract_z requires obs=")
+        B = obs.shape[0]
+        nh = self._extract_node_histories_from_obs(obs)  # [B, N, 1, 7]
+        N = nh.shape[1]
+        nt = torch.zeros(N, dtype=torch.long, device=obs.device)
+
+        dist_embed, sim_embed = self._compute_disentangled_edges(nh)
+        _, graph_z = self._encode_disentangled_graph(nh, dist_embed, sim_embed)
+
+        raw_latest = nh[:, :, -1, :].reshape(B, -1)
+        raw_feat = self.raw_proj(raw_latest)
+        graph_z_comp = self.graph_z_proj(graph_z)
+        z_base = torch.cat([graph_z_comp, raw_feat], dim=-1)
+        return z_base.unsqueeze(1)  # [B, 1, z_dim]
 
     def forward(
         self,

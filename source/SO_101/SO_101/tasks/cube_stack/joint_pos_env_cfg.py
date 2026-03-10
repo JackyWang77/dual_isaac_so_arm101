@@ -200,6 +200,7 @@ class CubeStackRLEnvCfg(DualSoArm101CubeStackJointPosEnvCfg):
 
     def __post_init__(self):
         super().__post_init__()
+        self.observations.subtask_terms = CubeStackSubtaskCfg()
         # Override grippers to binary: RL outputs +1/-1 → BinaryJointPosition maps to open/close
         self.actions.right_gripper_action = mdp.BinaryJointPositionActionCfg(
             asset_name="right_arm",

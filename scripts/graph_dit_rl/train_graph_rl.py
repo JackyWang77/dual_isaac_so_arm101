@@ -73,7 +73,7 @@ simulation_app = app_launcher.app
 # ============================================================
 import os
 import json
-from typing import Dict  # List, Optional removed (unused)
+from typing import Dict, Optional
 
 import gymnasium as gym
 import numpy as np
@@ -280,6 +280,19 @@ class GraphDiTRLTrainer:
         self._is_dual_arm = (cfg.action_dim == 12)
         self._robot_state_dim = cfg.robot_state_dim
 
+        # Multi-env fix: cache env_origins for world→local conversion.
+        # Isaac Lab observation terms (ee_position_w, object_position_w) return
+        # world-frame positions. BC normalization stats are in local frame.
+        _base = env.unwrapped if hasattr(env, "unwrapped") else env
+        self._env_origins = _base.scene.env_origins.clone().to(device=device, dtype=torch.float32)
+        self._pos_keys = [
+            "left_ee_position", "right_ee_position",
+            "cube_1_pos", "cube_2_pos",
+            "fork_pos", "knife_pos",
+        ]
+        _n_fixed = sum(1 for k in self._pos_keys if k in (cfg.obs_structure or {}))
+        print(f"[Trainer] env_origins shape: {self._env_origins.shape}, fixing {_n_fixed} pos keys to local frame")
+
         # Buffer
         self.buffer = RolloutBuffer(self.num_envs, steps_per_env, device)
 
@@ -354,34 +367,21 @@ class GraphDiTRLTrainer:
         print(f"[Trainer] Best-model: SR_{self.best_sr_window}ep window, consistent_check={self.best_sr_require_consistent}")
 
     def _check_success_from_info(self, env_info, env_idx: int) -> bool:
-        """Check success from env termination signals (same logic as play.py _get_success_flags)."""
-        if not isinstance(env_info, dict):
-            return False
-        log = env_info.get("log") or env_info.get("extra_info")
-        if not isinstance(log, dict):
-            return False
-        for key in (
-            "Episode_Termination/success",
-            "Episode_Termination/stack_success",
-            "success",
-            "episode_success",
-            "termination_success",
-        ):
-            if key in log:
-                val = log[key]
-                if isinstance(val, torch.Tensor):
-                    if val.dim() == 0:
-                        return bool(val.item())
-                    if val.dim() >= 1 and val.shape[0] > env_idx:
-                        return bool(val[env_idx].item() > 0.5)
-                elif isinstance(val, np.ndarray):
-                    if val.ndim == 0:
-                        return bool(val.item())
-                    if val.ndim >= 1 and val.shape[0] > env_idx:
-                        return bool(val[env_idx] > 0.5)
-                elif isinstance(val, (bool, int, float)):
-                    return bool(val)
-        # No success signal found but terminated (not truncated) - could be cube dropping
+        """Check success from termination manager's per-env signals.
+        
+        Isaac Lab extras['log']['Episode_Termination/X'] are scalar averages,
+        NOT per-env flags. We access termination_manager._last_episode_dones directly.
+        """
+        try:
+            base = self.env.unwrapped if hasattr(self.env, "unwrapped") else self.env
+            tm = base.termination_manager
+            names = list(tm._term_names)
+            for sname in ("success", "stack_success"):
+                if sname in names:
+                    idx = names.index(sname)
+                    return bool(tm._last_episode_dones[env_idx, idx].item())
+        except Exception:
+            pass
         return False
 
     def set_normalization_stats(
@@ -409,8 +409,22 @@ class GraphDiTRLTrainer:
         self.policy.eval()
         self.buffer.reset()
 
-        obs, _ = self.env.reset()
-        obs = self._process_obs(obs)
+        raw_obs, _ = self.env.reset()
+        obs = self._process_obs(raw_obs)
+        subtask_cond = self._extract_subtask_condition(raw_obs, obs)
+
+        # Pre-fill histories with first observation (matches BC training padding)
+        self._prefill_histories_from_obs(obs)
+
+        if not hasattr(self, "_subtask_logged"):
+            self._subtask_logged = True
+            if subtask_cond is not None:
+                print(f"[Trainer] subtask_condition enabled: shape={subtask_cond.shape}, env0={subtask_cond[0].cpu().tolist()}")
+            else:
+                _bb = self.policy.backbone
+                _actual_bb = _bb.backbone if hasattr(_bb, "backbone") else _bb
+                _ns = getattr(getattr(_actual_bb, "cfg", None), "num_subtasks", 0)
+                print(f"[Trainer] subtask_condition: None (backbone num_subtasks={_ns})")
 
         ep_rewards = torch.zeros(self.num_envs, device=self.device)
         ep_lengths = torch.zeros(self.num_envs, device=self.device)
@@ -454,6 +468,7 @@ class GraphDiTRLTrainer:
                     ee_node_history=ee_node_history,
                     object_node_history=object_node_history,
                     joint_states_history=joint_states_history,
+                    subtask_condition=subtask_cond,
                     deterministic=False
                 )
 
@@ -473,32 +488,49 @@ class GraphDiTRLTrainer:
 
                 action_dim = action.shape[-1]
                 action_for_sim = action.clone()
-                # Process each arm block: [5 joints, 1 gripper] × num_arms
+
+                # CRITICAL: Backbone outputs [left_6, right_6], env expects [right_6, left_6]
+                # Must swap before env.step (matching play.py line 1581)
+                if action_dim == 12:
+                    action_for_sim = torch.cat([action_for_sim[:, 6:12], action_for_sim[:, 0:6]], dim=1)
+
+                # Process each arm block: [5 joints, 1 gripper] × num_arms (now in env order)
                 arm_block = 6  # 5 joints + 1 gripper
                 for arm_i in range(action_dim // arm_block):
                     base = arm_i * arm_block
-                    # EMA smoothing on joints (currently no-op with ema_alpha=1.0)
                     joints_slice = slice(base, base + 5)
                     if self._ema_smoothed_joints is None:
                         self._ema_smoothed_joints = action_for_sim[:, :action_dim].clone()
-                    ema_alpha = 1.0  # 1.0=no smoothing (raw model output)
+                    ema_alpha = 1.0
                     self._ema_smoothed_joints[:, joints_slice] = (
                         ema_alpha * action_for_sim[:, joints_slice]
                         + (1 - ema_alpha) * self._ema_smoothed_joints[:, joints_slice]
                     )
                     action_for_sim[:, joints_slice] = self._ema_smoothed_joints[:, joints_slice]
-                    # Threshold gripper to binary +1/-1
+                    # Gripper: apply linear mapping (matching play.py gripper_a/b for Stack)
+                    # then threshold for BinaryJointPositionAction (+1=open, -1=close)
                     gripper_idx = base + 5
+                    mapped = 1.7150 * action_for_sim[:, gripper_idx] + 0.8579
                     action_for_sim[:, gripper_idx] = torch.where(
-                        action_for_sim[:, gripper_idx] > -0.2,
+                        mapped > 0.2,
                         torch.tensor(1.0, device=action.device, dtype=action.dtype),
                         torch.tensor(-1.0, device=action.device, dtype=action.dtype),
                     )
 
-            next_obs, reward, terminated, truncated, env_info = self.env.step(action_for_sim)
+            if step < 3:
+                sc_str = subtask_cond[0].cpu().tolist() if subtask_cond is not None else "None"
+                print(f"[Rollout step={step}] subtask_cond env0={sc_str}")
+                print(f"[Rollout step={step}] action_for_sim env0 = {action_for_sim[0].cpu().tolist()}")
+                print(f"[Rollout step={step}] reward env0 = ...(pending)")
+
+            raw_next_obs, reward, terminated, truncated, env_info = self.env.step(action_for_sim)
             done = terminated | truncated
 
-            next_obs = self._process_obs(next_obs)
+            if step < 3:
+                print(f"[Rollout step={step}] reward env0 = {reward[0].item():.4f}")
+
+            next_obs = self._process_obs(raw_next_obs)
+            next_subtask_cond = self._extract_subtask_condition(raw_next_obs, next_obs)
             reward = reward.to(self.device).float()
             done = done.to(self.device).float()
             truncated_tensor = truncated.to(self.device).float()
@@ -537,16 +569,15 @@ class GraphDiTRLTrainer:
                     rollout_successes.append(float(is_success))
                     self.episode_successes.append(float(is_success))
 
-                self.action_history[done_envs] = 0
-                self.ee_node_history[done_envs] = 0
-                self.object_node_history[done_envs] = 0
-                self.joint_state_history[done_envs] = 0
+                # Pre-fill histories with post-reset obs (matches BC training padding)
+                self._prefill_histories_from_obs(next_obs, env_ids=done_envs)
                 ep_rewards[done_envs] = 0
                 ep_lengths[done_envs] = 0
                 if self._ema_smoothed_joints is not None:
                     self._ema_smoothed_joints[done_envs] = 0
 
             obs = next_obs
+            subtask_cond = next_subtask_cond
             self.total_steps += self.num_envs
 
         # Compute last value for GAE
@@ -574,6 +605,7 @@ class GraphDiTRLTrainer:
                 ee_node_history=ee_node_history,
                 object_node_history=object_node_history,
                 joint_states_history=joint_states_history,
+                subtask_condition=subtask_cond,
                 deterministic=True
             )
             last_value = last_info["v_bar"]
@@ -716,6 +748,15 @@ class GraphDiTRLTrainer:
                 self.best_sr = sr_window
                 self._save_best(iteration)
 
+            # Save when current iteration SR hits new high (captures peak performance)
+            if not hasattr(self, "_best_iter_sr"):
+                self._best_iter_sr = -1.0
+            if sr_current > self._best_iter_sr and sr_current > 0:
+                self._best_iter_sr = sr_current
+                path = os.path.join(self.log_dir, f"policy_peak_sr{sr_current*100:.0f}_iter{iteration}.pt")
+                self.policy.save(path)
+                print(f"[Trainer] Peak SR saved (iter {iteration}, SR={sr_current*100:.1f}%): {path}")
+
             # Save interval
             if iteration % save_interval == 0:
                 self._save(iteration)
@@ -727,14 +768,192 @@ class GraphDiTRLTrainer:
         self.writer.close()
         print(f"\n[Trainer] Training complete!")
 
+    def _extract_subtask_condition(self, raw_obs, obs_local: Optional[torch.Tensor] = None) -> Optional[torch.Tensor]:
+        """Extract subtask condition from env obs.
+
+        Priority:
+        1. raw_obs["subtask_terms"] dict (if env provides it)
+        2. env.get_subtask_term_signals() API
+        3. Compute from positions in obs_local (cube-stack or table-setting)
+        4. Default: first subtask active [1,0,...] (matches play.py fallback)
+        """
+        bb = self.policy.backbone
+        actual_bb = bb.backbone if hasattr(bb, "backbone") else bb
+        num_subtasks = getattr(getattr(actual_bb, "cfg", None), "num_subtasks", 0)
+        if num_subtasks <= 0:
+            return None
+
+        obs_struct = getattr(self.cfg, "obs_structure", None)
+
+        # --- Path 1: subtask_terms in obs dict ---
+        if isinstance(raw_obs, dict) and "subtask_terms" in raw_obs:
+            st = raw_obs["subtask_terms"]
+            if isinstance(st, dict):
+                pick = st.get("pick_cube", None)
+                if pick is None:
+                    pick = st.get("place_fork", None)
+                stack = st.get("stack_cube", None)
+                if stack is None:
+                    stack = st.get("place_knife", None)
+                if pick is not None and stack is not None:
+                    return self._build_subtask_cond(pick, stack, num_subtasks)
+
+        # --- Path 2: env signal API ---
+        try:
+            base = self.env.unwrapped if hasattr(self.env, "unwrapped") else self.env
+            if hasattr(base, "get_subtask_term_signals"):
+                signals = base.get_subtask_term_signals()
+                pick = signals.get("pick_cube", None)
+                if pick is None:
+                    pick = signals.get("place_fork", None)
+                stack = signals.get("stack_cube", None)
+                if stack is None:
+                    stack = signals.get("place_knife", None)
+                if pick is not None and stack is not None:
+                    return self._build_subtask_cond(pick, stack, num_subtasks)
+        except Exception:
+            pass
+
+        # --- Path 3: compute from obs positions (matches play.py obs_mimic fallback) ---
+        if obs_local is not None and obs_struct is not None and num_subtasks >= 2:
+            cond = self._subtask_from_positions(obs_local, obs_struct, num_subtasks)
+            if cond is not None:
+                return cond
+
+        # --- Path 4: default first subtask active ---
+        B = obs_local.shape[0] if obs_local is not None else self.num_envs
+        cond = torch.zeros(B, num_subtasks, device=self.device)
+        cond[:, 0] = 1.0
+        return cond
+
+    def _build_subtask_cond(self, pick, stack, num_subtasks: int) -> torch.Tensor:
+        pick = pick.to(self.device).float().bool()
+        stack = stack.to(self.device).float().bool()
+        B = pick.shape[0]
+        cond = torch.zeros(B, num_subtasks, device=self.device)
+        cond[~pick, 0] = 1.0
+        cond[pick & ~stack, 1] = 1.0
+        cond[pick & stack, 1] = 1.0
+        return cond
+
+    def _subtask_from_positions(self, obs: torch.Tensor, obs_struct: dict, num_subtasks: int) -> Optional[torch.Tensor]:
+        """Compute subtask condition from object positions (cube-stack or table-setting)."""
+        B = obs.shape[0]
+        dev = obs.device
+
+        # Cube stack: check pick (cube at target) + stack (cubes stacked)
+        if "cube_1_pos" in obs_struct and "cube_2_pos" in obs_struct:
+            PICK_XY = (0.1623, -0.023)
+            PICK_Z = 0.006
+            PICK_EPS_XY = 0.0603
+            PICK_EPS_Z = 0.002
+            STACK_H = 0.018
+            STACK_EPS_Z = 0.001
+            STACK_EPS_XY = 0.0073
+
+            s1 = obs_struct["cube_1_pos"][0]
+            s2 = obs_struct["cube_2_pos"][0]
+            c1 = obs[:, s1:s1+3]
+            c2 = obs[:, s2:s2+3]
+            tgt_xy = torch.tensor([PICK_XY[0], PICK_XY[1]], device=dev, dtype=obs.dtype).unsqueeze(0)
+
+            at1 = (torch.norm(c1[:,:2] - tgt_xy, dim=1) < PICK_EPS_XY) & (torch.abs(c1[:,2] - PICK_Z) < PICK_EPS_Z)
+            at2 = (torch.norm(c2[:,:2] - tgt_xy, dim=1) < PICK_EPS_XY) & (torch.abs(c2[:,2] - PICK_Z) < PICK_EPS_Z)
+            pick_done = at1 | at2
+
+            za = (torch.abs((c1[:,2] - c2[:,2]) - STACK_H) < STACK_EPS_Z) & (torch.norm(c1[:,:2] - c2[:,:2], dim=1) < STACK_EPS_XY)
+            zb = (torch.abs((c2[:,2] - c1[:,2]) - STACK_H) < STACK_EPS_Z) & (torch.norm(c2[:,:2] - c1[:,:2], dim=1) < STACK_EPS_XY)
+            stack_done = za | zb
+
+            cond = torch.zeros(B, num_subtasks, device=dev)
+            cond[~pick_done, 0] = 1.0
+            cond[pick_done & ~stack_done, 1] = 1.0
+            cond[pick_done & stack_done, 1] = 1.0
+            return cond
+
+        # Table setting: check fork placed + knife placed
+        if "fork_pos" in obs_struct and "knife_pos" in obs_struct:
+            FORK_XY = (0.255, 0.18)
+            FORK_Z = 0.0076
+            KNIFE_XY = (0.2366, -0.1288)
+            KNIFE_Z = 0.0068
+            EPS_XY = 0.05
+            EPS_Z = 0.01
+
+            sf = obs_struct["fork_pos"][0]
+            sk = obs_struct["knife_pos"][0]
+            fp = obs[:, sf:sf+3]
+            kp = obs[:, sk:sk+3]
+            fork_tgt = torch.tensor([FORK_XY[0], FORK_XY[1]], device=dev, dtype=obs.dtype).unsqueeze(0)
+            knife_tgt = torch.tensor([KNIFE_XY[0], KNIFE_XY[1]], device=dev, dtype=obs.dtype).unsqueeze(0)
+
+            fork_done = (torch.norm(fp[:,:2] - fork_tgt, dim=1) < EPS_XY) & (torch.abs(fp[:,2] - FORK_Z) < EPS_Z)
+            knife_done = (torch.norm(kp[:,:2] - knife_tgt, dim=1) < EPS_XY) & (torch.abs(kp[:,2] - KNIFE_Z) < EPS_Z)
+
+            cond = torch.zeros(B, num_subtasks, device=dev)
+            cond[~fork_done, 0] = 1.0
+            cond[fork_done & ~knife_done, 1] = 1.0
+            cond[fork_done & knife_done, 1] = 1.0
+            return cond
+
+        return None
+
     def _process_obs(self, obs) -> torch.Tensor:
-        """处理 observation"""
+        """处理 observation: flatten dict → tensor, then convert world→local frame."""
         if isinstance(obs, dict):
             if "policy" in obs:
                 obs = obs["policy"]
             else:
                 obs = torch.cat([v.flatten(start_dim=1) for v in obs.values()], dim=-1)
-        return obs.to(self.device).float()
+        obs = obs.to(self.device).float()
+        return self._obs_to_local(obs)
+
+    def _obs_to_local(self, obs: torch.Tensor) -> torch.Tensor:
+        """Subtract env_origins from position observation keys (world→local frame)."""
+        obs_struct = getattr(self.cfg, "obs_structure", None)
+        if obs_struct is None:
+            return obs
+        origins = self._env_origins[:obs.shape[0], :3].to(obs.device)
+        for pk in self._pos_keys:
+            if pk in obs_struct:
+                s, e = obs_struct[pk]
+                obs[:, s:e] -= origins
+        return obs
+
+    def _prefill_histories_from_obs(self, obs: torch.Tensor, env_ids=None):
+        """Pre-fill history buffers with first-frame values (matches BC training padding).
+
+        BC training pads early-episode histories with copies of the first real
+        frame, NOT zeros.  Zero-histories give out-of-distribution inputs.
+        """
+        if env_ids is None:
+            env_ids = torch.arange(obs.shape[0], device=obs.device)
+
+        ee_node, obj_node = self.policy._extract_nodes_from_obs(obs)
+        obs_struct = getattr(self.cfg, "obs_structure", None)
+        if obs_struct is not None and "left_joint_pos" in obs_struct:
+            joint_states = torch.cat([
+                obs[:, obs_struct["left_joint_pos"][0]:obs_struct["left_joint_pos"][1]],
+                obs[:, obs_struct["right_joint_pos"][0]:obs_struct["right_joint_pos"][1]],
+            ], dim=-1)
+        else:
+            joint_states = obs[:, :self._robot_state_dim]
+
+        H = self.ee_node_history.shape[1]
+        for i in env_ids.tolist():
+            for t in range(H):
+                self.ee_node_history[i, t] = ee_node[i]
+                self.object_node_history[i, t] = obj_node[i]
+                self.joint_state_history[i, t] = joint_states[i]
+            if self.action_mean is not None and self.action_std is not None:
+                init_action_norm = (joint_states[i] - self.action_mean) / (self.action_std + 1e-8)
+                for t in range(H):
+                    self.action_history[i, t, :init_action_norm.shape[0]] = init_action_norm
+            else:
+                self.action_history[i] = 0
+
+        # Pre-fill multi-node temporal history in policy (matches play.py padding)
+        self.policy.prefill_node_history(obs, env_ids=env_ids)
 
     def _log(self, iteration: int, rollout_stats: Dict, update_stats: Dict):
         """记录日志 (FIXED: 关键指标一目了然，只打印一行)"""
@@ -829,7 +1048,8 @@ def main():
     _ckpt_cfg = _ckpt_preview.get("cfg", None)
     if _ckpt_cfg is not None and getattr(_ckpt_cfg, "arm_action_dim", None) is not None:
         # Dual arm checkpoint - detect gated vs non-gated
-        if "graph_gate_logit" in _ckpt_preview.get("model_state_dict", {}):
+        _sd = _ckpt_preview.get("policy_state_dict", _ckpt_preview.get("model_state_dict", {}))
+        if "graph_gate_logit" in _sd:
             args.policy_type = "dual_arm_gated"
         else:
             args.policy_type = "dual_arm"
@@ -980,7 +1200,7 @@ def main():
         backbone=backbone,
         pred_horizon=getattr(backbone_policy.cfg, "pred_horizon", 16),
         exec_horizon=getattr(backbone_policy.cfg, "exec_horizon", 8),
-        num_diffusion_steps=10,
+        num_diffusion_steps=15,
     )
     policy.to(device)
 
@@ -1178,7 +1398,6 @@ def main():
     try:
         test_obs = torch.randn(2, obs_dim, device=device)
         policy.init_env_buffers(2)
-        # Test z extraction
         z = policy._get_z_layers_fast(test_obs)
         print(f"    z_layers shape: {z.shape} ✅")
         print(f"    Forward pass test: OK")
@@ -1186,6 +1405,8 @@ def main():
         print(f"    ❌ FAILED: {e}")
         import traceback
         traceback.print_exc()
+    # Restore env buffers to actual num_envs (test above used size=2)
+    policy.init_env_buffers(num_envs)
     
     print("=" * 60 + "\n")
 

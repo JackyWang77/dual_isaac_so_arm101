@@ -541,28 +541,33 @@ class GraphUnetBackboneAdapter:
     @torch.no_grad()
     def extract_z(
         self, 
-        ee_node_history: torch.Tensor,   # [B, H, 7] or [B, 7]
-        obj_node_history: torch.Tensor,  # [B, H, 7] or [B, 7]
+        ee_node_history: torch.Tensor | None,
+        obj_node_history: torch.Tensor | None,
+        obs: torch.Tensor | None = None,
+        node_histories: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         High-frequency: extract z with temporal history support.
         
-        Automatically detects temporal mode:
-        - Input [B, H, 7] with H > 1 → temporal mode (uses edge modulation)
-        - Input [B, 7] → single frame mode (simplified computation)
-        
-        Args:
-            ee_node_history: EE node history [B, H, 7] or current [B, 7]
-            obj_node_history: Object node history [B, H, 7] or current [B, 7]
+        For multi-node backbones, passes pre-built node_histories directly.
+        Falls back to legacy 2-node API for GraphDiT-based backbones.
         
         Returns:
             z_layers: [B, K, z_dim]
         """
         if not hasattr(self.backbone, "extract_z"):
             raise NotImplementedError(
-                "Backbone policy must implement extract_z(ee_node_history, obj_node_history) -> [B,z_dim]"
+                "Backbone policy must implement extract_z() -> [B,K,z_dim]"
             )
-        return self.backbone.extract_z(ee_node_history, obj_node_history)
+        try:
+            return self.backbone.extract_z(
+                ee_node_history, obj_node_history,
+                obs=obs, node_histories=node_histories,
+            )
+        except TypeError:
+            if ee_node_history is not None and obj_node_history is not None:
+                return self.backbone.extract_z(ee_node_history, obj_node_history)
+            return self.backbone.extract_z(ee_node_history, obj_node_history, obs=obs)
     
     @property
     def node_stats(self) -> Dict[str, Optional[torch.Tensor]]:
@@ -820,8 +825,81 @@ class GraphUnetResidualRLPolicy(nn.Module):
         """Initialize RHC buffers and EMA state"""
         self._base_action_buffers = [[] for _ in range(num_envs)]
         self._num_envs = num_envs
-        # EMA state will be initialized lazily in get_base_action()
         self._ema_smoothed_joints = None
+        # Multi-node temporal history: lazy-initialized in prefill_node_history
+        # to guarantee correct device (Isaac Sim CUDA device may differ from cfg.device)
+        N = self._get_num_backbone_nodes()
+        backbone_cfg = getattr(self.backbone, "backbone", self.backbone)
+        if hasattr(backbone_cfg, "cfg"):
+            backbone_cfg = backbone_cfg.cfg
+        H = getattr(backbone_cfg, "action_history_length", 4)
+        self._node_history_H = H
+        self._node_history_N = N
+        self._multi_node_history: Optional[torch.Tensor] = None
+        self._multi_node_history_initialized: Optional[torch.Tensor] = None
+
+    def _ensure_node_history_buffer(self, obs: torch.Tensor) -> None:
+        """Lazy-create multi-node history buffer on the same device as obs."""
+        B = obs.shape[0]
+        dev = obs.device
+        N = self._node_history_N
+        H = self._node_history_H
+        if self._multi_node_history is not None and self._multi_node_history.shape[0] == B:
+            return
+        self._multi_node_history = torch.zeros(B, N, H, 7, device=dev)
+        self._multi_node_history_initialized = torch.zeros(B, dtype=torch.bool, device=dev)
+
+    def prefill_node_history(self, obs: torch.Tensor, env_ids=None) -> None:
+        """Pre-fill multi-node history buffer with current obs (matches play.py padding)."""
+        N = self._node_history_N
+        if N <= 2:
+            return
+        self._ensure_node_history_buffer(obs)
+        all_nodes, _ = self._extract_all_nodes_from_obs(obs)  # [B, N, 7] raw
+        if env_ids is None:
+            for t in range(self._node_history_H):
+                self._multi_node_history[:, :, t, :] = all_nodes
+            self._multi_node_history_initialized[:] = True
+        else:
+            for t in range(self._node_history_H):
+                self._multi_node_history[env_ids, :, t, :] = all_nodes[env_ids]
+            self._multi_node_history_initialized[env_ids] = True
+
+    def _update_node_history(self, obs: torch.Tensor) -> None:
+        """Shift + append current frame to multi-node history (like play.py every step)."""
+        if self._node_history_N <= 2:
+            return
+        if self._multi_node_history is None:
+            self.prefill_node_history(obs)
+            return
+        all_nodes, _ = self._extract_all_nodes_from_obs(obs)  # [B, N, 7] raw
+        self._multi_node_history = torch.cat([
+            self._multi_node_history[:, :, 1:, :],
+            all_nodes.unsqueeze(2),
+        ], dim=2)
+
+    def _get_normalized_node_histories(self) -> Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """Get node-normalized multi-node histories for predict() (matches play.py)."""
+        if self._multi_node_history is None or self._node_history_N <= 2:
+            return None, None
+        nh = self._multi_node_history.clone()  # [B, N, H, 7]
+        backbone_cfg = getattr(self.backbone, "backbone", self.backbone)
+        if hasattr(backbone_cfg, "cfg"):
+            backbone_cfg = backbone_cfg.cfg
+        nc = getattr(backbone_cfg, "node_configs", None)
+        ntypes = []
+        if nc is not None:
+            ntypes = [c.get("type", 0) for c in nc]
+        else:
+            ntypes = [0 if i < 2 else 1 for i in range(nh.shape[1])]
+        for n_idx in range(nh.shape[1]):
+            ntype = ntypes[n_idx]
+            if ntype == 0 and self.norm_ee_node_mean is not None:
+                nh[:, n_idx] = (nh[:, n_idx] - self.norm_ee_node_mean) / (self.norm_ee_node_std + 1e-8)
+            elif ntype == 1 and self.norm_object_node_mean is not None:
+                nh[:, n_idx] = (nh[:, n_idx] - self.norm_object_node_mean) / (self.norm_object_node_std + 1e-8)
+        nt = torch.tensor(ntypes, dtype=torch.long, device=nh.device)
+        return nh, nt
 
     def reset_envs(self, env_ids: torch.Tensor) -> None:
         """Reset buffers and EMA state for specified envs"""
@@ -830,46 +908,51 @@ class GraphUnetResidualRLPolicy(nn.Module):
         for i in env_ids.tolist():
             if i < len(self._base_action_buffers):
                 self._base_action_buffers[i].clear()
-        # Reset EMA state for reset environments
         if self._ema_smoothed_joints is not None:
             self._ema_smoothed_joints[env_ids] = 0.0
+        if self._multi_node_history is not None:
+            self._multi_node_history[env_ids] = 0.0
+            self._multi_node_history_initialized[env_ids] = False
 
     # -----------------------------
     # Node extraction from obs
     # -----------------------------
+    _NODE_KEY_PAIRS = [
+        ("left_ee_position", "left_ee_orientation"),
+        ("right_ee_position", "right_ee_orientation"),
+        ("cube_1_pos", "cube_1_ori"),
+        ("cube_2_pos", "cube_2_ori"),
+        ("fork_pos", "fork_ori"),
+        ("knife_pos", "knife_ori"),
+    ]
+
     def _extract_nodes_from_obs(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Extract ee_node and obj_node from obs.
-
-        For dual arm (obs_structure has 'left_ee_position'), concatenates
-        left_ee + right_ee as ee_node and cube_1 + cube_2 as obj_node,
-        then averages to [B, 7] to match the graph encoder's expected input.
-
-        Args:
-            obs: [B, obs_dim]
+        Extract ee_node and obj_node from obs (averaged 2-node legacy API).
 
         Returns:
-            ee_node: [B, 7] - position(3) + orientation(4)
-            obj_node: [B, 7] - position(3) + orientation(4)
+            ee_node: [B, 7], obj_node: [B, 7]
         """
         cfg = self.cfg
         obs_struct = cfg.obs_structure
 
         if obs_struct is not None and "left_ee_position" in obs_struct:
-            # Dual arm obs structure
             lee_pos = obs[:, obs_struct["left_ee_position"][0]:obs_struct["left_ee_position"][1]]
             lee_ori = obs[:, obs_struct["left_ee_orientation"][0]:obs_struct["left_ee_orientation"][1]]
             ree_pos = obs[:, obs_struct["right_ee_position"][0]:obs_struct["right_ee_position"][1]]
             ree_ori = obs[:, obs_struct["right_ee_orientation"][0]:obs_struct["right_ee_orientation"][1]]
-            c1_pos = obs[:, obs_struct["cube_1_pos"][0]:obs_struct["cube_1_pos"][1]]
-            c1_ori = obs[:, obs_struct["cube_1_ori"][0]:obs_struct["cube_1_ori"][1]]
-            c2_pos = obs[:, obs_struct["cube_2_pos"][0]:obs_struct["cube_2_pos"][1]]
-            c2_ori = obs[:, obs_struct["cube_2_ori"][0]:obs_struct["cube_2_ori"][1]]
-            # Average both EEs and both cubes → [B, 7] each
+            obj_keys = []
+            for pk, ok in [("cube_1_pos", "cube_1_ori"), ("cube_2_pos", "cube_2_ori"),
+                           ("fork_pos", "fork_ori"), ("knife_pos", "knife_ori")]:
+                if pk in obs_struct and ok in obs_struct:
+                    obj_keys.append((pk, ok))
+            c1_pos = obs[:, obs_struct[obj_keys[0][0]][0]:obs_struct[obj_keys[0][0]][1]]
+            c1_ori = obs[:, obs_struct[obj_keys[0][1]][0]:obs_struct[obj_keys[0][1]][1]]
+            c2_pos = obs[:, obs_struct[obj_keys[1][0]][0]:obs_struct[obj_keys[1][0]][1]]
+            c2_ori = obs[:, obs_struct[obj_keys[1][1]][0]:obs_struct[obj_keys[1][1]][1]]
             ee_node = (torch.cat([lee_pos, lee_ori], dim=-1) + torch.cat([ree_pos, ree_ori], dim=-1)) * 0.5
             obj_node = (torch.cat([c1_pos, c1_ori], dim=-1) + torch.cat([c2_pos, c2_ori], dim=-1)) * 0.5
         elif obs_struct is not None:
-            # Single arm obs structure
             obj_pos = obs[:, obs_struct["object_position"][0]:obs_struct["object_position"][1]]
             obj_ori = obs[:, obs_struct["object_orientation"][0]:obs_struct["object_orientation"][1]]
             ee_pos = obs[:, obs_struct["ee_position"][0]:obs_struct["ee_position"][1]]
@@ -877,11 +960,6 @@ class GraphUnetResidualRLPolicy(nn.Module):
             ee_node = torch.cat([ee_pos, ee_ori], dim=-1)
             obj_node = torch.cat([obj_pos, obj_ori], dim=-1)
         else:
-            import warnings
-            warnings.warn(
-                "obs_structure is None! Using default indices.",
-                UserWarning
-            )
             object_start_idx = 12
             obj_pos = obs[:, object_start_idx:object_start_idx + 3]
             obj_ori = obs[:, object_start_idx + 3:object_start_idx + 7]
@@ -891,6 +969,62 @@ class GraphUnetResidualRLPolicy(nn.Module):
             obj_node = torch.cat([obj_pos, obj_ori], dim=-1)
 
         return ee_node, obj_node
+
+    def _extract_all_nodes_from_obs(self, obs: torch.Tensor) -> Tuple[torch.Tensor, List[int]]:
+        """Extract all individual graph nodes from obs using obs_structure.
+
+        Returns:
+            nodes: [B, N, 7] — each node is pos(3) + ori(4)
+            node_types: list of int — per-node type (0=EE, 1=object)
+        """
+        obs_struct = self.cfg.obs_structure
+        backbone_cfg = getattr(self.backbone, "backbone", self.backbone)
+        if hasattr(backbone_cfg, "cfg"):
+            backbone_cfg = backbone_cfg.cfg
+        nc = getattr(backbone_cfg, "node_configs", None)
+
+        nodes = []
+        ntypes = []
+        if nc is not None:
+            for cfg_item in nc:
+                pk, ok = cfg_item["pos_key"], cfg_item["ori_key"]
+                pos = obs[:, obs_struct[pk][0]:obs_struct[pk][1]]
+                ori = obs[:, obs_struct[ok][0]:obs_struct[ok][1]]
+                nodes.append(torch.cat([pos, ori], dim=-1))
+                ntypes.append(cfg_item.get("type", 0))
+        else:
+            for pk, ok in self._NODE_KEY_PAIRS:
+                if pk in obs_struct and ok in obs_struct:
+                    pos = obs[:, obs_struct[pk][0]:obs_struct[pk][1]]
+                    ori = obs[:, obs_struct[ok][0]:obs_struct[ok][1]]
+                    nodes.append(torch.cat([pos, ori], dim=-1))
+                    ntypes.append(0 if "ee" in pk else 1)
+
+        return torch.stack(nodes, dim=1), ntypes  # [B, N, 7], [N]
+
+    def _normalize_node_histories(
+        self,
+        node_histories: torch.Tensor,
+        node_types: List[int],
+    ) -> torch.Tensor:
+        """Normalize [B, N, T, 7] node histories per-node using type-based stats.
+
+        type 0 → ee_node stats, type 1 → object_node stats (matches BC training).
+        """
+        out = node_histories.clone()
+        for n_idx, ntype in enumerate(node_types):
+            if ntype == 0 and self.norm_ee_node_mean is not None:
+                out[:, n_idx] = (out[:, n_idx] - self.norm_ee_node_mean) / (self.norm_ee_node_std + 1e-8)
+            elif ntype == 1 and self.norm_object_node_mean is not None:
+                out[:, n_idx] = (out[:, n_idx] - self.norm_object_node_mean) / (self.norm_object_node_std + 1e-8)
+        return out
+
+    def _get_num_backbone_nodes(self) -> int:
+        """Get expected number of graph nodes from backbone."""
+        bb = getattr(self.backbone, "backbone", self.backbone)
+        if hasattr(bb, "raw_proj"):
+            return bb.raw_proj.in_features // 7
+        return 2
 
     def _select_obs_for_rl(self, obs: torch.Tensor, mode: str) -> torch.Tensor:
         """
@@ -970,50 +1104,48 @@ class GraphUnetResidualRLPolicy(nn.Module):
     # -----------------------------
     def _get_z_layers_fast(self, obs: torch.Tensor) -> torch.Tensor:
         """
-        High-frequency z_layers extraction: called every step with temporal history
+        High-frequency z_layers extraction: called every step.
         
-        1. Extract current ee_node, obj_node from obs
-        2. Get history from buffer (BEFORE updating buffer)
-        3. Normalize history
-        4. Call backbone.extract_z() with history (frozen)
-        5. Pass through z_adapter (trainable)
+        For multi-node backbones (N>2), extracts all N nodes from raw obs,
+        normalizes per-type, and passes as node_histories directly to backbone.
         
         Returns:
             z_layers_adapted: [B, K, z_dim]
         """
         B = obs.shape[0]
-        
-        # 1. Extract current nodes
-        ee_node, obj_node = self._extract_nodes_from_obs(obs)
-        
-        # 2. Get history from buffer (BEFORE updating buffer)
-        if self.history_buffer is not None:
-            histories = self.history_buffer.get_history(B)
-            ee_node_history = histories["ee_node_history"]      # [B, H, 7]
-            obj_node_history = histories["object_node_history"]  # [B, H, 7]
+        num_nodes = self._get_num_backbone_nodes()
+
+        if num_nodes > 2:
+            nh_norm, _ = self._get_normalized_node_histories()
+            if nh_norm is not None and nh_norm.shape[0] == B:
+                z_layers_frozen = self.backbone.extract_z(
+                    None, None, obs=obs, node_histories=nh_norm,
+                )
+            else:
+                z_layers_frozen = self.backbone.extract_z(
+                    None, None, obs=obs,
+                )
         else:
-            # Fallback: no history, use current only
-            ee_node_history = ee_node.unsqueeze(1)   # [B, 1, 7]
-            obj_node_history = obj_node.unsqueeze(1)  # [B, 1, 7]
-        
-        # 3. Normalize history
-        if self.norm_ee_node_mean is not None:
-            ee_node_history = (ee_node_history - self.norm_ee_node_mean) / (self.norm_ee_node_std + 1e-8)
-        if self.norm_object_node_mean is not None:
-            obj_node_history = (obj_node_history - self.norm_object_node_mean) / (self.norm_object_node_std + 1e-8)
-        
-        # 4. Frozen z extraction with temporal history
-        z_layers_frozen = self.backbone.extract_z(
-            ee_node_history, 
-            obj_node_history
-        )  # [B, K, z_dim]
-        
-        # 5. Adapter (trainable)
+            ee_node, obj_node = self._extract_nodes_from_obs(obs)
+            if self.history_buffer is not None:
+                histories = self.history_buffer.get_history(B)
+                ee_node_history = histories["ee_node_history"]
+                obj_node_history = histories["object_node_history"]
+            else:
+                ee_node_history = ee_node.unsqueeze(1)
+                obj_node_history = obj_node.unsqueeze(1)
+            if self.norm_ee_node_mean is not None:
+                ee_node_history = (ee_node_history - self.norm_ee_node_mean) / (self.norm_ee_node_std + 1e-8)
+            if self.norm_object_node_mean is not None:
+                obj_node_history = (obj_node_history - self.norm_object_node_mean) / (self.norm_object_node_std + 1e-8)
+            z_layers_frozen = self.backbone.extract_z(
+                ee_node_history, obj_node_history, obs=obs,
+            )
+
         B, K, D = z_layers_frozen.shape
         z_flat = z_layers_frozen.reshape(B * K, D)
         z_adapted_flat = self.z_adapter(z_flat)
         z_layers_adapted = z_adapted_flat.reshape(B, K, D)
-        
         return z_layers_adapted
 
     # -----------------------------
@@ -1040,15 +1172,24 @@ class GraphUnetResidualRLPolicy(nn.Module):
         joint_states_history: Optional[torch.Tensor] = None,
         subtask_condition: Optional[torch.Tensor] = None,
         deterministic: bool = True,
+        node_histories: Optional[torch.Tensor] = None,
+        node_types: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Return base action [B, act_dim] using RHC buffer.
-        Low-frequency: only call DiT when buffer is empty
+        Low-frequency: only call backbone when buffer is empty.
+        Passes multi-node temporal history (H frames, node-normalized)
+        exactly like play.py does.
         """
         B = obs_norm.shape[0]
-        
-        if self._base_action_buffers is None or len(self._base_action_buffers) != B:
-            # Offline mode: direct prediction
+
+        extra_kw = {}
+        if node_histories is not None:
+            extra_kw["node_histories"] = node_histories
+        if node_types is not None:
+            extra_kw["node_types"] = node_types
+
+        def _predict_and_diag():
             traj = self.backbone.predict_base_trajectory(
                 obs=obs_norm,
                 action_history=action_history,
@@ -1058,24 +1199,29 @@ class GraphUnetResidualRLPolicy(nn.Module):
                 subtask_condition=subtask_condition,
                 num_diffusion_steps=self.num_diffusion_steps,
                 deterministic=deterministic,
+                **extra_kw,
             )
+            if not hasattr(self, "_traj_diag_count"):
+                self._traj_diag_count = 0
+            if self._traj_diag_count < 6:
+                self._traj_diag_count += 1
+                tag = "INIT" if self._traj_diag_count <= 1 else "REPLAN"
+                print(f"\n[TRAJ DIAG #{self._traj_diag_count}] {tag} traj shape={traj.shape}")
+                print(f"  traj[0, 0] = {traj[0, 0].cpu().tolist()}")
+                print(f"  traj[0,-1] = {traj[0,-1].cpu().tolist()}")
+                span = (traj[0, -1] - traj[0, 0]).abs().max().item()
+                print(f"  max |traj[0,-1] - traj[0,0]| = {span:.4f}")
+                if node_histories is not None:
+                    print(f"  node_histories shape={node_histories.shape}")
+            return traj
+
+        if self._base_action_buffers is None or len(self._base_action_buffers) != B:
+            traj = _predict_and_diag()
             return traj[:, 0, :]
 
-        # Online mode: use buffer
         need_replan = any(len(self._base_action_buffers[i]) == 0 for i in range(B))
-        
         if need_replan:
-            traj = self.backbone.predict_base_trajectory(
-                obs=obs_norm,
-                action_history=action_history,
-                ee_node_history=ee_node_history,
-                object_node_history=object_node_history,
-                joint_states_history=joint_states_history,
-                subtask_condition=subtask_condition,
-                num_diffusion_steps=self.num_diffusion_steps,
-                deterministic=deterministic,
-            )
-
+            traj = _predict_and_diag()
             for i in range(B):
                 if len(self._base_action_buffers[i]) == 0:
                     for t in range(min(self.exec_horizon, traj.shape[1])):
@@ -1169,7 +1315,25 @@ class GraphUnetResidualRLPolicy(nn.Module):
         # ============================================================
         # 2. Base action (low-frequency, from buffer)
         # ============================================================
-        # get_base_action returns NORMALIZED actions (from Graph-DiT predict)
+        num_nodes = self._get_num_backbone_nodes()
+
+        # Update multi-node temporal history (shift + append current frame)
+        # Exactly like play.py: update BEFORE building batch
+        if num_nodes > 2 and self._multi_node_history is not None:
+            if not self._multi_node_history_initialized.all():
+                self.prefill_node_history(obs)
+            else:
+                self._update_node_history(obs)
+
+        # Build predict kwargs matching play.py:
+        # 4-node case: node_histories [B, N, H, 7] node-normalized + node_types
+        _nh_kw: Dict[str, Any] = {}
+        if num_nodes > 2:
+            nh_norm, nt = self._get_normalized_node_histories()
+            if nh_norm is not None:
+                _nh_kw["node_histories"] = nh_norm
+                _nh_kw["node_types"] = nt
+
         a_base_norm = self.get_base_action(
             obs_norm=obs_norm,
             action_history=action_history,
@@ -1178,19 +1342,52 @@ class GraphUnetResidualRLPolicy(nn.Module):
             joint_states_history=joint_states_history,
             subtask_condition=subtask_condition,
             deterministic=True,
+            **_nh_kw,
         )
         
         # Denormalize base_action for execution (full action_dim: joints + grippers for all arms)
         act_dim = self.cfg.action_dim
-        a_base_norm_full = a_base_norm[:, :act_dim]  # [B, action_dim] - truncate to action_dim if backbone outputs more
+        a_base_norm_full = a_base_norm[:, :act_dim]
         if a_base_norm_full.shape[-1] < act_dim:
-            # Pad if backbone outputs fewer dims than action_dim
             pad = torch.zeros(B, act_dim - a_base_norm_full.shape[-1], device=a_base_norm_full.device, dtype=a_base_norm_full.dtype)
             a_base_norm_full = torch.cat([a_base_norm_full, pad], dim=-1)
         if self.action_mean is not None and self.action_std is not None:
-            a_base = a_base_norm_full * self.action_std[:act_dim] + self.action_mean[:act_dim]  # [B, action_dim]
+            a_base = a_base_norm_full * self.action_std[:act_dim] + self.action_mean[:act_dim]
         else:
-            a_base = a_base_norm_full  # [B, action_dim]
+            a_base = a_base_norm_full
+
+        # ── DIAGNOSTIC (first 3 calls only) ──
+        if not hasattr(self, "_diag_count"):
+            self._diag_count = 0
+        if self._diag_count < 3:
+            self._diag_count += 1
+            with torch.no_grad():
+                e0 = 0
+                print(f"\n{'='*70}")
+                print(f"[ACT DIAG #{self._diag_count}] num_nodes={num_nodes}, H={self._node_history_H}")
+                print(f"  obs raw  env0[:8] = {obs[e0, :8].cpu().tolist()}")
+                print(f"  obs norm env0[:8] = {obs_norm[e0, :8].cpu().tolist()}")
+                if num_nodes > 2:
+                    nh_kw_val = _nh_kw.get("node_histories")
+                    if nh_kw_val is not None:
+                        print(f"  node_histories shape = {nh_kw_val.shape} (matches play.py: [B,N,H,7])")
+                        for ni in range(nh_kw_val.shape[1]):
+                            print(f"    node[{ni}] t=-1 (norm) = {[f'{v:.4f}' for v in nh_kw_val[e0, ni, -1, :].cpu().tolist()]}")
+                            print(f"    node[{ni}] t= 0 (norm) = {[f'{v:.4f}' for v in nh_kw_val[e0, ni,  0, :].cpu().tolist()]}")
+                        raw_n, _ = self._extract_all_nodes_from_obs(obs)
+                        for ni in range(raw_n.shape[1]):
+                            print(f"    node[{ni}] (raw)       = {[f'{v:.4f}' for v in raw_n[e0, ni, :].cpu().tolist()]}")
+                print(f"  a_base_norm env0 = {[f'{v:.4f}' for v in a_base_norm_full[e0].cpu().tolist()]}")
+                print(f"  a_base      env0 = {[f'{v:.4f}' for v in a_base[e0].cpu().tolist()]}")
+                if self.action_mean is not None:
+                    print(f"  action_mean = {[f'{v:.4f}' for v in self.action_mean[:act_dim].cpu().tolist()]}")
+                    print(f"  action_std  = {[f'{v:.4f}' for v in self.action_std[:act_dim].cpu().tolist()]}")
+                else:
+                    print(f"  action_mean = None (NO DENORMALIZATION!)")
+                print(f"  exec_horizon={self.exec_horizon}, num_diffusion_steps={self.num_diffusion_steps}")
+                buf_lens = [len(b) for b in self._base_action_buffers] if self._base_action_buffers else "None"
+                print(f"  action_buffer_lens = {buf_lens}")
+                print(f"{'='*70}\n")
 
         # ============================================================
         # 3. z_layers (high-frequency! called every step with temporal history)
@@ -1234,15 +1431,24 @@ class GraphUnetResidualRLPolicy(nn.Module):
         a = a_base + alpha_vec * delta  # [B, act_dim]
         alpha = alpha_mean  # for info
 
-        # Debug: diagnose 0% SR (print first 3 acts only)
-        if getattr(self.cfg, "debug_alpha", False) and self._act_debug_count < 3:
-            self._act_debug_count += 1
+        if not hasattr(self, "_step_count"):
+            self._step_count = 0
+        self._step_count += 1
+        if self._step_count <= 5 or self._step_count % 8 == 0 and self._step_count <= 50:
             with torch.no_grad():
-                print(f"[act debug #{self._act_debug_count}] z_bar: {z_bar.float().mean():.3f}, {z_bar.float().std():.3f} | "
-                      f"alpha_vec: {alpha_vec.float().mean():.3f}, {alpha_vec.float().max():.3f} | "
-                      f"delta: {delta.float().mean():.3f}, {delta.float().std():.3f} | "
-                      f"a_base: {a_base.float().mean():.3f} | "
-                      f"action: {a.float().mean():.3f}, {a.float().std():.3f}")
+                e0 = 0
+                s = self.cfg.obs_structure
+                if s is not None and "left_joint_pos" in s:
+                    cur_joints = torch.cat([
+                        obs[e0, s["left_joint_pos"][0]:s["left_joint_pos"][1]],
+                        obs[e0, s["right_joint_pos"][0]:s["right_joint_pos"][1]],
+                    ]).cpu().tolist()
+                else:
+                    cur_joints = obs[e0, :10].cpu().tolist()
+                print(f"  [step {self._step_count}] cur_joints env0 = {[f'{v:.3f}' for v in cur_joints]}")
+                print(f"  [step {self._step_count}] a_base    env0 = {[f'{v:.3f}' for v in a_base[e0].cpu().tolist()]}")
+                print(f"  [step {self._step_count}] FINAL act env0 = {[f'{v:.3f}' for v in a[e0].cpu().tolist()]}")
+                print(f"  [step {self._step_count}] alpha={alpha_mean.item():.4f}, a_base_contrib={((a_base[e0].abs().sum()) / (a[e0].abs().sum()+1e-8) * 100).item():.1f}%")
 
         # 7. Update history buffer (AFTER computing action)
         if self.history_buffer is not None:

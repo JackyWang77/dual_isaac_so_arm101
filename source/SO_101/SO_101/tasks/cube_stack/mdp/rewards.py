@@ -129,9 +129,9 @@ def cube_near_target_xy(
     xy_std: float = 0.05,
     object_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
 ) -> torch.Tensor:
-    """Reward object xy position near fixed target (center)."""
+    """Reward object xy position near fixed target (center). Uses env-local coords."""
     obj: RigidObject = env.scene[object_cfg.name]
-    pos = obj.data.root_pos_w[:, :2]
+    pos = (obj.data.root_pos_w[:, :3] - env.scene.env_origins[:, :3])[:, :2]
     target = torch.tensor(
         target_xy, dtype=pos.dtype, device=env.device
     ).unsqueeze(0).expand(pos.shape[0], -1)

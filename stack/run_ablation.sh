@@ -21,7 +21,7 @@ if [ -z "$CKPT" ] || [ ! -f "$CKPT" ]; then
 fi
 
 # Baseline config
-BASE_STEPS=160
+BASE_STEPS=400
 BASE_BATCH=64
 BASE_EPOCHS=2
 BASE_REG=2.0
@@ -43,7 +43,7 @@ run_experiment() {
 }
 
 # ================================================================
-# 1. BASELINE (c_delta_reg=2.0, beta=1.0, adaptive_entropy, batch=64, epochs=2)
+# 1. BASELINE (fixed entropy c_ent=0.0, c_delta_reg=2.0, beta=1.0, batch=64, epochs=2)
 # ================================================================
 run_experiment "baseline" \
     "$BASE_STEPS" "$BASE_BATCH" "$BASE_EPOCHS" \
@@ -77,17 +77,17 @@ run_experiment "beta_2.0" \
     "$BASE_ALPHA" "$BASE_TAU" "$BASE_LR"
 
 # ================================================================
-# 4. ENTROPY SWEEP
-#    - fixed_low: USE_ADAPTIVE_ENTROPY=false, C_ENT=0.001
+# 4. ENTROPY SWEEP (baseline=fixed c_ent=0.0, ablations=adaptive)
+#    - adaptive_mild: c_ent_bad=0.02, c_ent_good=0.005
 #    - adaptive_strong: c_ent_bad=0.05, c_ent_good=0.001
 # ================================================================
-USE_ADAPTIVE_ENTROPY=false C_ENT=0.001 \
-run_experiment "entropy_fixed_low" \
+USE_ADAPTIVE_ENTROPY=true C_ENT_BAD=0.02 C_ENT_GOOD=0.005 \
+run_experiment "entropy_adaptive_mild" \
     "$BASE_STEPS" "$BASE_BATCH" "$BASE_EPOCHS" \
-    "$BASE_REG" 0.001 "$BASE_BETA" \
+    "$BASE_REG" "$BASE_ENT" "$BASE_BETA" \
     "$BASE_ALPHA" "$BASE_TAU" "$BASE_LR"
 
-C_ENT_BAD=0.05 C_ENT_GOOD=0.001 \
+USE_ADAPTIVE_ENTROPY=true C_ENT_BAD=0.05 C_ENT_GOOD=0.001 \
 run_experiment "entropy_adaptive_strong" \
     "$BASE_STEPS" "$BASE_BATCH" "$BASE_EPOCHS" \
     "$BASE_REG" "$BASE_ENT" "$BASE_BETA" \

@@ -1,67 +1,86 @@
-Creating window for environment.
-[INFO]: Completed setting up the environment...
-[DEBUG] Environment class: DualTableSettingJointStatesMimicEnv
-[DEBUG] Environment module: SO_101.tasks.table_setting.dual_table_setting_joint_states_mimic_env
-[DEBUG] Has action_to_target_eef_pose: True
-[DEBUG] action_to_target_eef_pose is from parent: False
+x |traj[0,-1] - traj[0,0]| = 1.2547
+  node_histories shape=torch.Size([10, 4, 4, 7])
+  [step 16] cur_joints env0 = ['0.408', '-0.348', '0.462', '1.191', '-0.805', '0.000', '-0.597', '0.292', '-0.387', '1.582', '0.454', '0.000']
+  [step 16] a_base    env0 = ['0.414', '-0.339', '0.541', '1.202', '-0.960', '0.998', '-0.484', '0.130', '-0.243', '1.658', '0.556', '0.997']
+  [step 16] FINAL act env0 = ['0.413', '-0.337', '0.534', '1.203', '-0.955', '0.838', '-0.484', '0.131', '-0.240', '1.658', '0.555', '1.122']
+  [step 16] alpha=0.1000, a_base_contrib=100.6%
 
-Annotating episode #0 (demo_0)
-2026-03-10T12:29:44Z [20,026ms] [Warning] [carb] Client gpu.foundation.plugin has acquired [gpu::unstable::IMemoryBudgetManagerFactory v0.1] 100 times. Consider accessing this interface with carb::getCachedInterface() (Performance warning)
-	The final task was not completed.
-	Skipped exporting the episode due to incomplete subtask annotations.
+[TRAJ DIAG #3] REPLAN traj shape=torch.Size([10, 20, 12])
+  traj[0, 0] = [-0.6249164342880249, -0.5753542184829712, 0.8795459270477295, -0.8728115558624268, -1.5577571392059326, 0.45998406410217285, 0.6698486804962158, -0.22630789875984192, -0.17924067378044128, 0.9005738496780396, -0.07122333347797394, 0.7914769053459167]
+  traj[0,-1] = [-0.4613853693008423, 0.178287535905838, 0.6562379002571106, -1.2407554388046265, -1.7943627834320068, 0.45186683535575867, 0.8925484418869019, -0.6304091215133667, 0.28665822744369507, 0.8551737666130066, 0.11795715987682343, 0.80641770362854]
+  max |traj[0,-1] - traj[0,0]| = 0.7536
+  node_histories shape=torch.Size([10, 4, 4, 7])
+  [step 24] cur_joints env0 = ['0.436', '-0.291', '0.565', '1.158', '-0.996', '0.000', '-0.428', '0.008', '-0.093', '1.650', '0.587', '0.000']
+  [step 24] a_base    env0 = ['0.459', '-0.287', '0.599', '1.120', '-1.046', '1.000', '-0.388', '-0.081', '0.015', '1.651', '0.613', '0.998']
+  [step 24] FINAL act env0 = ['0.461', '-0.289', '0.602', '1.116', '-1.044', '1.020', '-0.385', '-0.077', '0.009', '1.654', '0.610', '0.879']
+  [step 24] alpha=0.1000, a_base_contrib=101.3%
 
-Annotating episode #1 (demo_1)
-	The final task was not completed.
-	Skipped exporting the episode due to incomplete subtask annotations.
+[TRAJ DIAG #4] REPLAN traj shape=torch.Size([10, 20, 12])
+  traj[0, 0] = [-0.459172785282135, -0.19217991828918457, 0.8611626625061035, -1.2550380229949951, -1.7905144691467285, 0.46012082695961, 0.8702788949012756, -0.5253861546516418, 0.18860116600990295, 0.9043476581573486, 0.08137718588113785, 0.7958821654319763]
+  traj[0,-1] = [-0.25023984909057617, 0.21596939861774445, 0.7141529321670532, -1.459481954574585, -1.718582034111023, 0.45442771911621094, 0.9236209988594055, -0.6172428131103516, 0.2784316837787628, 0.9076365828514099, 0.10799244046211243, 0.8032820820808411]
+  max |traj[0,-1] - traj[0,0]| = 0.4081
+  node_histories shape=torch.Size([10, 4, 4, 7])
+  [step 32] cur_joints env0 = ['0.470', '-0.134', '0.549', '1.088', '-1.055', '0.000', '-0.371', '-0.112', '0.067', '1.651', '0.623', '0.000']
+  [step 32] a_base    env0 = ['0.481', '-0.120', '0.547', '1.072', '-1.051', '1.001', '-0.362', '-0.120', '0.078', '1.657', '0.627', '1.000']
+  [step 32] FINAL act env0 = ['0.476', '-0.107', '0.544', '1.078', '-1.051', '1.073', '-0.365', '-0.109', '0.071', '1.656', '0.629', '0.815']
+  [step 32] alpha=0.1000, a_base_contrib=101.8%
+  [step 40] cur_joints env0 = ['0.491', '-0.031', '0.518', '1.053', '-1.045', '0.000', '-0.352', '-0.135', '0.094', '1.657', '0.631', '0.000']
+  [step 40] a_base    env0 = ['0.495', '0.012', '0.489', '1.042', '-1.037', '0.997', '-0.352', '-0.147', '0.107', '1.657', '0.632', '1.001']
+  [step 40] FINAL act env0 = ['0.495', '0.006', '0.494', '1.037', '-1.037', '0.929', '-0.346', '-0.145', '0.108', '1.658', '0.628', '1.168']
+  [step 40] alpha=0.1000, a_base_contrib=99.0%
 
-Annotating episode #2 (demo_10)
-	The final task was not completed.
-	Skipped exporting the episode due to incomplete subtask annotations.
+[TRAJ DIAG #5] REPLAN traj shape=torch.Size([10, 20, 12])
+  traj[0, 0] = [-0.37679505348205566, 0.08436031639575958, 0.7807643413543701, -1.375715970993042, -1.7075785398483276, 0.46048587560653687, 0.9471189975738525, -0.5697417855262756, 0.23999914526939392, 0.917725145816803, 0.12039070576429367, 0.7996482849121094]
+  traj[0,-1] = [-0.10875312983989716, 0.13231024146080017, 0.7703955769538879, -1.49853515625, -1.6563224792480469, -2.1931240558624268, 0.9634646773338318, -0.576535165309906, 0.25830405950546265, 0.9223671555519104, 0.12580984830856323, 0.8009347915649414]
+  max |traj[0,-1] - traj[0,0]| = 2.6536
+  node_histories shape=torch.Size([10, 4, 4, 7])
+  [step 48] cur_joints env0 = ['0.515', '0.000', '0.504', '1.042', '-1.031', '0.000', '-0.341', '-0.134', '0.099', '1.658', '0.633', '0.000']
+  [step 48] a_base    env0 = ['0.531', '0.009', '0.497', '1.029', '-1.030', '1.000', '-0.336', '-0.134', '0.098', '1.659', '0.632', '0.998']
+  [step 48] FINAL act env0 = ['0.528', '0.010', '0.502', '1.032', '-1.027', '1.165', '-0.337', '-0.117', '0.111', '1.661', '0.638', '1.072']
+  [step 48] alpha=0.1000, a_base_contrib=97.0%
 
-Annotating episode #3 (demo_100)
-	The final task was not completed.
-	Skipped exporting the episode due to incomplete subtask annotations.
-
-Annotating episode #4 (demo_101)
-	The final task was not completed.
-	Skipped exporting the episode due to incomplete subtask annotations.
-
-Annotating episode #5 (demo_102)
-	The final task was not completed.
-	Skipped exporting the episode due to incomplete subtask annotations.
-
-Annotating episode #6 (demo_103)
-^C
-Annotation complete!
-========================================
-Output: ./datasets/table_setting_annotated_dataset.hdf5
-(env_isaaclab) jacky_wang@jacky-wang-Legion-R9000P:/mnt/ssd/dual_isaac_so_arm101$ ./scripts/run_table_setting_mimic_pipeline.sh 
-========================================
-IsaacLab Mimic Pipeline - Dual Table Setting
-========================================
-Annotation Task: SO-ARM101-Dual-Table-Setting-Joint-States-Mimic-v0
-Input: ./datasets/table_setting_dataset.hdf5 (merge of datasets 1-10)
-Output: ./datasets/table_setting_annotated_dataset.hdf5
-========================================
-
-Merging datasets 1-10...
-========================================
-Traceback (most recent call last):
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/merge_hdf5_datasets.py", line 116, in <module>
-    main()
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/merge_hdf5_datasets.py", line 112, in main
-    merge_hdf5_datasets(args.input_files, args.output)
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/merge_hdf5_datasets.py", line 54, in merge_hdf5_datasets
-    with h5py.File(output_file, "w") as out_f:
-         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/jacky_wang/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/h5py/_hl/files.py", line 566, in __init__
-    fid = make_fid(name, mode, userblock_size, fapl, fcpl, swmr=swmr)
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/jacky_wang/miniconda3/envs/env_isaaclab/lib/python3.11/site-packages/h5py/_hl/files.py", line 247, in make_fid
-    fid = h5f.create(name, h5f.ACC_TRUNC, fapl=fapl, fcpl=fcpl)
-          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "h5py/_objects.pyx", line 54, in h5py._objects.with_phil.wrapper
-  File "h5py/_objects.pyx", line 55, in h5py._objects.with_phil.wrapper
-  File "h5py/h5f.pyx", line 124, in h5py.h5f.create
-BlockingIOError: [Errno 11] Unable to synchronously create file (unable to lock file, errno = 11, error message = 'Resource temporarily unavailable')
-Error: Merge failed!
+[TRAJ DIAG #6] REPLAN traj shape=torch.Size([10, 20, 12])
+  traj[0, 0] = [-0.2236321121454239, 0.17875418066978455, 0.7331223487854004, -1.4690755605697632, -1.6610227823257446, 0.4531973600387573, 0.9636101722717285, -0.5597729682922363, 0.24244779348373413, 0.9133772850036621, 0.10561633110046387, 0.8005857467651367]
+  traj[0,-1] = [0.4035584032535553, 0.3663072884082794, -0.272431343793869, -0.15146228671073914, -0.8055815100669861, -2.205918312072754, 0.9606674909591675, -0.5690460801124573, 0.2542341351509094, 0.9118911623954773, 0.11472346633672714, 0.8011027574539185]
+  max |traj[0,-1] - traj[0,0]| = 2.6591
+  node_histories shape=torch.Size([10, 4, 4, 7])
+2026-03-10T18:24:53Z [23,807ms] [Warning] [carb] Client gpu.foundation.plugin has acquired [gpu::unstable::IMemoryBudgetManagerFactory v0.1] 100 times. Consider accessing this interface with carb::getCachedInterface() (Performance warning)
+[Iter    1] SR= 50.0% (100:50.0% 200ep:50.0%) [10ep] | Rew=  51.3 | EV= 0.11 | Δ=0.149 | α=0.13 | L=-8.054 | LR=5.0e-04
+[Rollout step=0] subtask_cond env0=[1.0, 0.0]
+[Rollout step=0] action_for_sim env0 = [-0.36859503388404846, -0.012620190158486366, 0.044802941381931305, 1.6663637161254883, 0.723628044128418, 1.0, 0.9096358418464661, 0.683120608329773, -0.8889120817184448, 1.6141784191131592, -0.47499972581863403, 1.0]
+[Rollout step=0] reward env0 = ...(pending)
+[Rollout step=0] reward env0 = -0.0018
+[Rollout step=1] subtask_cond env0=[1.0, 0.0]
+[Rollout step=1] action_for_sim env0 = [-0.3622521758079529, -0.019577523693442345, 0.0251949280500412, 1.661728858947754, 0.7249246835708618, 1.0, 0.8812558054924011, 0.5666554570198059, -0.7416942715644836, 1.6143332719802856, -0.47139772772789, 1.0]
+[Rollout step=1] reward env0 = ...(pending)
+[Rollout step=1] reward env0 = -0.0006
+[Rollout step=2] subtask_cond env0=[1.0, 0.0]
+[Rollout step=2] action_for_sim env0 = [-0.36194488406181335, -0.007897989824414253, 0.034157853573560715, 1.660662055015564, 0.7272781729698181, 1.0, 0.8359102606773376, 0.47511452436447144, -0.6803761124610901, 1.6182498931884766, -0.47095009684562683, 1.0]
+[Rollout step=2] reward env0 = ...(pending)
+[Rollout step=2] reward env0 = -0.0001
+[Iter    2] SR= 20.0% (100:35.0% 200ep:35.0%) [10ep] | Rew=  36.4 | EV= 0.52 | Δ=0.184 | α=0.19 | L=-2.331 | LR=5.0e-04
+[Rollout step=0] subtask_cond env0=[1.0, 0.0]
+[Rollout step=0] action_for_sim env0 = [-0.763813853263855, 0.2746618986129761, -0.13714690506458282, 1.497679591178894, 0.6259709596633911, 1.0, 0.3684796988964081, -0.07591282576322556, 0.41270384192466736, 1.2473899126052856, -0.5250323414802551, 1.0]
+[Rollout step=0] reward env0 = ...(pending)
+[Rollout step=0] reward env0 = -0.0013
+[Rollout step=1] subtask_cond env0=[1.0, 0.0]
+[Rollout step=1] action_for_sim env0 = [-0.6997537612915039, 0.17219465970993042, -0.11189911514520645, 1.5265355110168457, 0.6565337181091309, 1.0, 0.364609032869339, -0.07536356151103973, 0.4005715548992157, 1.251138687133789, -0.5857565402984619, 1.0]
+[Rollout step=1] reward env0 = ...(pending)
+[Rollout step=1] reward env0 = -0.0006
+[Rollout step=2] subtask_cond env0=[1.0, 0.0]
+[Rollout step=2] action_for_sim env0 = [-0.6510457396507263, 0.1458480805158615, -0.06384848058223724, 1.5384424924850464, 0.6840923428535461, 1.0, 0.36186471581459045, -0.06323584169149399, 0.4100935757160187, 1.2461378574371338, -0.6352235674858093, 1.0]
+[Rollout step=2] reward env0 = ...(pending)
+[Rollout step=2] reward env0 = -0.0002
+[Iter    3] SR= 30.0% (100:33.3% 200ep:33.3%) [10ep] | Rew=  28.9 | EV= 0.58 | Δ=0.179 | α=0.24 | L=6.829 | LR=5.0e-04
+[Rollout step=0] subtask_cond env0=[1.0, 0.0]
+[Rollout step=0] action_for_sim env0 = [-0.9123402237892151, 0.7252110838890076, -0.8582404255867004, 1.6549291610717773, 0.48698973655700684, -1.0, 0.3939792811870575, -0.12438897788524628, 0.09869657456874847, 1.5116231441497803, -0.6268917918205261, 1.0]
+[Rollout step=0] reward env0 = ...(pending)
+[Rollout step=0] reward env0 = -0.0016
+[Rollout step=1] subtask_cond env0=[1.0, 0.0]
+[Rollout step=1] action_for_sim env0 = [-0.9325152039527893, 0.7486274242401123, -0.9049162864685059, 1.6603713035583496, 0.4872415363788605, -1.0, 0.40498748421669006, -0.12753461301326752, 0.08110977709293365, 1.5159095525741577, -0.6398469805717468, 1.0]
+[Rollout step=1] reward env0 = ...(pending)
+[Rollout step=1] reward env0 = -0.0006
+[Rollout step=2] subtask_cond env0=[1.0, 0.0]
+[Rollout step=2] action_for_sim env0 = [-0.9639247059822083, 0.7550484538078308, -0.9231362342834473, 1.6625903844833374, 0.4588664472103119, -1.0, 0.4040144085884094, -0.09678371250629425, 0.13812413811683655, 1.516129493713379, -0.6268287301063538, 1.0]
+[Rollout step=2] reward env0 = ...(pending)
+[Rollout step=2] reward env0 = -0.0000
