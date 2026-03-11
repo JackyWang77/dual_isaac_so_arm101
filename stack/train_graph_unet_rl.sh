@@ -25,6 +25,7 @@ USE_ADAPTIVE_ALPHA="${USE_ADAPTIVE_ALPHA:-false}"
 USE_ADAPTIVE_ENTROPY="${USE_ADAPTIVE_ENTROPY:-false}"
 C_ENT_BAD="${C_ENT_BAD:-0.02}"
 C_ENT_GOOD="${C_ENT_GOOD:-0.005}"
+CRITIC_WARMUP_ITERS="${CRITIC_WARMUP_ITERS:-5}"
 LOG_DIR="${LOG_DIR:-./logs/dual_arm_rl}"
 
 if [ -z "$PRETRAINED_CHECKPOINT" ] || [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
@@ -43,6 +44,7 @@ if [ -z "$PRETRAINED_CHECKPOINT" ] || [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
     echo "  TASK=SO-ARM101-Dual-Cube-Stack-v0     (original BC rewards)"
     echo "  LOG_DIR=./logs/ablation_xxx            (custom log directory)"
     echo "  SEED=123                               (random seed)"
+    echo "  CRITIC_WARMUP_ITERS=5                  (first N iters: only train critic, default 5)"
     exit 1
 fi
 
@@ -61,7 +63,7 @@ echo "Pretrained: $PRETRAINED_CHECKPOINT"
 echo "Task: $TASK"
 echo "Envs=$NUM_ENVS Iter=$MAX_ITERATIONS Steps=$STEPS_PER_ENV"
 echo "Batch=$MINI_BATCH_SIZE Epochs=$NUM_EPOCHS"
-echo "c_delta_reg=$C_DELTA_REG beta=$BETA c_ent=$C_ENT"
+echo "c_delta_reg=$C_DELTA_REG beta=$BETA c_ent=$C_ENT critic_warmup=$CRITIC_WARMUP_ITERS"
 echo "Log: $LOG_DIR"
 echo "========================================"
 
@@ -84,6 +86,7 @@ python scripts/graph_dit_rl/train_graph_rl.py \
     $ADAPTIVE_ENTROPY_FLAG \
     --lr "$LR" \
     --seed "$SEED" \
+    --critic_warmup_iters "$CRITIC_WARMUP_ITERS" \
     --log_dir "$LOG_DIR" \
     --save_interval "$SAVE_INTERVAL" \
     $HEADLESS_FLAG

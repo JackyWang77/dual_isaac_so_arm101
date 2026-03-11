@@ -59,6 +59,8 @@ parser.add_argument("--debug_alpha", action="store_true", help="Print alpha/delt
 parser.add_argument("--no_adaptive_entropy", action="store_true", help="Use fixed cEnt instead of Adaptive Entropy")
 parser.add_argument("--c_ent_bad", type=float, default=0.02, help="High entropy weight for adv<0 (failed steps)")
 parser.add_argument("--c_ent_good", type=float, default=0.005, help="Low entropy weight for adv>0 (success steps)")
+parser.add_argument("--critic_warmup_iters", type=int, default=5,
+    help="First N iters: only train critic (freeze actor/z_adapter). 'Don't move before critic learns'.")
 
 # AppLauncher
 AppLauncher.add_app_launcher_args(parser)
@@ -254,6 +256,7 @@ class GraphDiTRLTrainer:
         action_dim_env: int = 6,  # Environment action dim (usually 6, includes gripper)
         best_sr_window: int = 200,  # Rolling window for best-model selection (200: ±7% CI)
         best_sr_require_consistent: bool = False,  # Require current SR >= sr_window - 15%
+        critic_warmup_iters: int = 0,  # First N iters: only train critic; 0 = disabled
     ):
         self.env = env
         self.policy = policy
@@ -320,6 +323,7 @@ class GraphDiTRLTrainer:
         self.best_sr = -1.0  # For best-model-by-SR saving
         self.best_sr_window = best_sr_window
         self.best_sr_require_consistent = best_sr_require_consistent
+        self.critic_warmup_iters = critic_warmup_iters
 
         # Initialize env buffers
         policy.init_env_buffers(self.num_envs)
@@ -708,8 +712,10 @@ class GraphDiTRLTrainer:
 
         return stats
 
-    def update(self) -> Dict[str, float]:
-        """更新 policy (FIXED: 添加 Explained Variance)"""
+    def update(self, iteration: int = 0) -> Dict[str, float]:
+        """更新 policy (FIXED: 添加 Explained Variance)
+        iteration: current iter (1-based); used for critic warmup.
+        """
         self.policy.train()
 
         total_loss = 0
@@ -723,11 +729,22 @@ class GraphDiTRLTrainer:
         all_returns = []
         all_values = []
 
+        critic_warmup = (
+            self.critic_warmup_iters > 0
+            and iteration > 0
+            and iteration <= self.critic_warmup_iters
+        )
+
         for batch in self.buffer.get_batches(self.mini_batch_size, self.num_epochs):
             losses = self.policy.compute_loss(batch)
 
             self.optimizer.zero_grad()
-            losses["loss_total"].backward()
+            if critic_warmup:
+                # Only train critic: don't let actor/z_adapter move before advantage estimates are stable
+                loss_to_backward = self.cfg.cV * 0.5 * losses["loss_critic_bar_raw"]
+                loss_to_backward.backward()
+            else:
+                losses["loss_total"].backward()
             torch.nn.utils.clip_grad_norm_(
                 [p for p in self.policy.parameters() if p.requires_grad],
                 self.max_grad_norm,
@@ -755,6 +772,7 @@ class GraphDiTRLTrainer:
         explained_variance = (1.0 - var_residual / (var_returns + 1e-8)).item()
 
         return {
+            "critic_warmup": critic_warmup,
             "loss_total": total_loss / n,
             "loss_actor": total_actor_loss / n,
             "loss_critic": total_critic_loss / n,
@@ -791,7 +809,7 @@ class GraphDiTRLTrainer:
             rollout_stats = self.collect_rollout()
 
             # Update
-            update_stats = self.update()
+            update_stats = self.update(iteration=iteration)
             update_stats["lr"] = current_lr
 
             # Log
@@ -1061,15 +1079,16 @@ class GraphDiTRLTrainer:
         # Progress / ETA
         elapsed = time.time() - self._train_start if hasattr(self, "_train_start") else 0
         max_iter = self._max_iterations if hasattr(self, "_max_iterations") else iteration
+        warmup_tag = " [critic_warmup]" if update_stats.get("critic_warmup", False) else ""
         if elapsed > 0 and iteration > 0:
             eta_s = elapsed / iteration * (max_iter - iteration)
             eta_m, eta_sec = divmod(int(eta_s), 60)
             eta_h, eta_m = divmod(eta_m, 60)
             elapsed_m = int(elapsed) // 60
             eta_str = f"{eta_h}h{eta_m:02d}m" if eta_h else f"{eta_m}m{eta_sec:02d}s"
-            progress_str = f"[{iteration}/{max_iter} | {elapsed_m}m | ETA {eta_str}]"
+            progress_str = f"[{iteration}/{max_iter} | {elapsed_m}m | ETA {eta_str}]{warmup_tag}"
         else:
-            progress_str = f"[{iteration}/{max_iter}]"
+            progress_str = f"[{iteration}/{max_iter}]{warmup_tag}"
 
         print(
             f"{progress_str} "
@@ -1388,6 +1407,7 @@ def main():
         action_dim_env=action_dim_env,  # Pass environment action dim (6 or 12) for history buffer
         best_sr_window=getattr(args, "best_sr_window", 200),
         best_sr_require_consistent=getattr(args, "best_sr_require_consistent", False),
+        critic_warmup_iters=getattr(args, "critic_warmup_iters", 0),
     )
     
     # Set normalization stats in trainer (same as Graph-DiT play.py)

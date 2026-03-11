@@ -1554,6 +1554,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             "loss_actor": loss_actor.detach(),
             "loss_critic_layers": loss_critic.detach(),
             "loss_critic_bar": loss_v_bar.detach(),
+            "loss_critic_bar_raw": loss_v_bar,  # For critic warmup backward (needs grad)
             "loss_gate": loss_gate.detach(),
             "gate_entropy": gate_entropy.detach(),
             "entropy": entropy.mean().detach(),
