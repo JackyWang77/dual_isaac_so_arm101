@@ -200,6 +200,13 @@ class RolloutBuffer:
         # Normalize advantages
         adv_flat = (adv_flat - adv_flat.mean()) / (adv_flat.std() + 1e-8)
 
+        # Normalize returns AND values with same stats for critic stability
+        # (prevents MSE loss explosion; values must use same scale for EV to be meaningful)
+        returns_mean = returns_flat.mean()
+        returns_std = returns_flat.std() + 1e-8
+        returns_flat = (returns_flat - returns_mean) / returns_std
+        values_flat = (values_flat - returns_mean) / returns_std
+
         for _ in range(num_epochs):
             indices = torch.randperm(total_samples, device=self.device)
 
