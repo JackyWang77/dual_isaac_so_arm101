@@ -301,7 +301,8 @@ class CubeStackRewardsCfg:
         func=mdp.cube_stack_alignment,
         params={
             "xy_std": 0.03,
-            "z_tolerance": 0.015,
+            "z_min": 0.010,
+            "z_max": 0.030,
             "cube_top_cfg": SceneEntityCfg("cube_1"),
             "cube_base_cfg": SceneEntityCfg("cube_2"),
         },
@@ -311,7 +312,8 @@ class CubeStackRewardsCfg:
         func=mdp.cube_stack_alignment,
         params={
             "xy_std": 0.03,
-            "z_tolerance": 0.015,
+            "z_min": 0.010,
+            "z_max": 0.030,
             "cube_top_cfg": SceneEntityCfg("cube_2"),
             "cube_base_cfg": SceneEntityCfg("cube_1"),
         },

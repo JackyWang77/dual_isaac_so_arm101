@@ -52,6 +52,7 @@ parser.add_argument("--c_delta_reg", type=float, default=2.0, help="Delta (resid
 parser.add_argument("--c_ent", type=float, default=0.01, help="Entropy coefficient; encourages exploration")
 parser.add_argument("--beta", type=float, default=1.0, help="AWR beta: w=exp(adv/beta); higher=softer weighting, lower=sharper on high-adv samples")
 parser.add_argument("--alpha_init", type=float, default=0.10, help="Residual alpha init: a=base+alpha*delta; arm uses clamped(0,0.5), gripper=1.0")
+parser.add_argument("--alpha_max", type=float, default=0.08, help="Max alpha for scalar mode; lower = more conservative actor")
 parser.add_argument("--expectile_tau", type=float, default=0.7, help="Expectile τ for value loss (IQL-style); τ=0.7 → optimistic; 0.5=MSE")
 parser.add_argument("--use_adaptive_alpha", action="store_true", default=True, help="Use state-dependent alpha_net (default: True)")
 parser.add_argument("--no_adaptive_alpha", action="store_false", dest="use_adaptive_alpha", help="Use scalar alpha instead")
@@ -780,6 +781,8 @@ class GraphDiTRLTrainer:
         var_residual = torch.var(all_returns - all_values)
         explained_variance = (1.0 - var_residual / (var_returns + 1e-8)).item()
 
+        # During warmup, rollout used zero_residual (alpha=0); report that for clarity
+        alpha_reported = 0.0 if critic_warmup else (total_alpha / num_updates if num_updates else 0.0)
         return {
             "critic_warmup": critic_warmup,
             "loss_total": total_loss / n,
@@ -788,7 +791,7 @@ class GraphDiTRLTrainer:
             "loss_critic_bar": total_loss_critic_bar / n,
             "loss_delta_reg": total_loss_delta_reg / n,
             "entropy": total_entropy / n,
-            "alpha": total_alpha / num_updates if num_updates else 0.0,
+            "alpha": alpha_reported,
             "explained_variance": explained_variance,
         }
 
@@ -824,19 +827,24 @@ class GraphDiTRLTrainer:
             # Log
             self._log(iteration, rollout_stats, update_stats)
 
+            critic_warmup = (
+                self.critic_warmup_iters > 0
+                and iteration <= self.critic_warmup_iters
+            )
+
             # Save best by success rate (use rolling N-ep SR; 200ep: ±7% CI)
+            # Skip during critic warmup: policy unchanged, SR variance is noise
             sr_window = rollout_stats.get("success_rate_window", 0.0)
             sr_current = rollout_stats.get("success_rate", 0.0)
-            # Require enough episodes in buffer for window to be valid
             n_eps = len(self.episode_successes)
             window_valid = n_eps >= self.best_sr_window
-            # Optional: require current SR not far below window (avoid saving lucky fluke)
             consistent = (not self.best_sr_require_consistent) or (sr_current >= sr_window - 0.15)
-            if window_valid and consistent and sr_window > self.best_sr:
+            if not critic_warmup and window_valid and consistent and sr_window > self.best_sr:
                 self.best_sr = sr_window
                 self._save_best(iteration)
 
             # Save when current iteration SR hits new high (captures peak performance)
+            # During warmup: save iter 1 baseline, don't overwrite with variance
             if not hasattr(self, "_best_iter_sr"):
                 self._best_iter_sr = -1.0
             if sr_current > self._best_iter_sr and sr_current > 0:
@@ -1277,6 +1285,7 @@ def main():
         cEnt=args.c_ent,
         beta=args.beta,
         alpha_init=args.alpha_init,
+        alpha_max=getattr(args, "alpha_max", 0.08),
         use_expectile_value=True,
         expectile_tau=args.expectile_tau,
         use_adaptive_alpha=args.use_adaptive_alpha,

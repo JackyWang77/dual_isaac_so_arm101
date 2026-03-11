@@ -297,6 +297,7 @@ class GraphUnetResidualRLCfg:
 
     # residual scaling
     alpha_init: float = 0.10
+    alpha_max: float = 0.08  # max alpha for scalar mode; lower = more conservative actor
     use_adaptive_alpha: bool = True  # True: alpha_net(z_bar,obs)->[B,6]; False: scalar alpha
     alpha_hidden: Tuple[int, ...] = (64,)  # Hidden dims for adaptive alpha net
 
@@ -810,7 +811,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             alpha_vec = self.alpha_net(x)
             alpha_mean = alpha_vec[:, joint_indices].mean()  # Arm dims only for logging
         else:
-            alpha_scalar = torch.clamp(self.alpha, 0.0, 0.15)
+            alpha_scalar = torch.clamp(self.alpha, 0.0, getattr(self.cfg, "alpha_max", 0.08))
             B = z_bar.shape[0]
             alpha_vec = torch.ones(B, act_dim, device=z_bar.device, dtype=z_bar.dtype) * alpha_scalar
             for gi in gripper_indices:
