@@ -109,18 +109,24 @@ def grasp_intent(
 def cube_stack_alignment(
     env: ManagerBasedRLEnv,
     xy_std: float = 0.03,
-    z_tolerance: float = 0.015,
+    z_min: float = 0.010,
+    z_max: float = 0.030,
     cube_top_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_base_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
 ) -> torch.Tensor:
-    """Reward cube_top being above cube_base (xy aligned, z just above base)."""
+    """Reward xy alignment when cube_top is at correct stacking height above cube_base.
+
+    Gate: z_diff in [z_min, z_max] (cube is actually on top, not floating too high).
+    Reward: continuous, xy distance as small as possible (1 - tanh(xy_dist / xy_std)).
+    """
     top: RigidObject = env.scene[cube_top_cfg.name]
     base: RigidObject = env.scene[cube_base_cfg.name]
     top_pos = top.data.root_pos_w[:, :3]
     base_pos = base.data.root_pos_w[:, :3]
+    z_diff = top_pos[:, 2] - base_pos[:, 2]
+    z_gate = ((z_diff >= z_min) & (z_diff <= z_max)).float()
     xy_dist = torch.norm(top_pos[:, :2] - base_pos[:, :2], dim=1)
-    z_above = (top_pos[:, 2] > base_pos[:, 2] + z_tolerance).float()
-    return z_above * (1 - torch.tanh(xy_dist / xy_std))
+    return z_gate * (1 - torch.tanh(xy_dist / xy_std))
 
 
 def cube_near_target_xy(

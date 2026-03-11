@@ -441,22 +441,13 @@ class CubeStackRLRewardsCfg:
         weight=5.0,
     )
 
-    # Tight stack alignment (tighter std=0.015 vs original 0.03)
-    stack_1_on_2 = RewTerm(
-        func=mdp.cube_stack_alignment,
-        params={
-            "xy_std": 0.015,
-            "z_tolerance": 0.015,
-            "cube_top_cfg": SceneEntityCfg("cube_1"),
-            "cube_base_cfg": SceneEntityCfg("cube_2"),
-        },
-        weight=30.0,
-    )
+    # Stack alignment: cube_2 on top of cube_1 (the dominant pattern in demos)
     stack_2_on_1 = RewTerm(
         func=mdp.cube_stack_alignment,
         params={
             "xy_std": 0.015,
-            "z_tolerance": 0.015,
+            "z_min": 0.010,
+            "z_max": 0.030,
             "cube_top_cfg": SceneEntityCfg("cube_2"),
             "cube_base_cfg": SceneEntityCfg("cube_1"),
         },

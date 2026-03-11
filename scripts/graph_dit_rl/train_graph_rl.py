@@ -1438,7 +1438,7 @@ def main():
         n2z_total = len(list(backbone_policy.node_to_z.parameters()))
         print(f"    Trainable params: {n2z_trainable}/{n2z_total}")
         if n2z_trainable == 0:
-            print("    ⚠️  WARNING: node_to_z has NO trainable params!")
+            print("    ✅ node_to_z is FROZEN (backbone fully frozen, z_adapter handles adaptation)")
         else:
             print("    ✅ node_to_z is trainable")
     else:

@@ -810,7 +810,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             alpha_vec = self.alpha_net(x)
             alpha_mean = alpha_vec[:, joint_indices].mean()  # Arm dims only for logging
         else:
-            alpha_scalar = torch.clamp(self.alpha, 0.0, 0.3)
+            alpha_scalar = torch.clamp(self.alpha, 0.0, 0.15)
             B = z_bar.shape[0]
             alpha_vec = torch.ones(B, act_dim, device=z_bar.device, dtype=z_bar.dtype) * alpha_scalar
             for gi in gripper_indices:
