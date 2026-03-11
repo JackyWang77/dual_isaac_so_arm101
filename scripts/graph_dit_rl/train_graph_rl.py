@@ -478,9 +478,16 @@ class GraphDiTRLTrainer:
         self.action_mean = action_mean
         self.action_std = action_std
 
-    def collect_rollout(self) -> Dict[str, float]:
-        """收集 rollout (FIXED: 添加 success rate，除零保护，移除 DEBUG 打印)"""
+    def collect_rollout(self, iteration: int = 0) -> Dict[str, float]:
+        """收集 rollout (FIXED: 添加 success rate，除零保护，移除 DEBUG 打印)
+        iteration: current iter (1-based); when in critic warmup, use zero_residual (pure backbone).
+        """
         self.policy.eval()
+        zero_residual = (
+            self.critic_warmup_iters > 0
+            and iteration > 0
+            and iteration <= self.critic_warmup_iters
+        )
         self.buffer.reset()
 
         raw_obs, _ = self.env.reset()
@@ -533,7 +540,8 @@ class GraphDiTRLTrainer:
                     object_node_history=object_node_history,
                     joint_states_history=joint_states_history,
                     subtask_condition=subtask_cond,
-                    deterministic=False
+                    deterministic=False,
+                    zero_residual=zero_residual,
                 )
 
                 if hasattr(self.env, 'action_space'):
@@ -672,7 +680,8 @@ class GraphDiTRLTrainer:
                 object_node_history=object_node_history,
                 joint_states_history=joint_states_history,
                 subtask_condition=subtask_cond,
-                deterministic=True
+                deterministic=True,
+                zero_residual=zero_residual,
             )
             last_value = last_info["v_bar"]
 
@@ -806,7 +815,7 @@ class GraphDiTRLTrainer:
         for iteration in range(1, max_iterations + 1):
             current_lr = self.optimizer.param_groups[0]["lr"]
             # Collect
-            rollout_stats = self.collect_rollout()
+            rollout_stats = self.collect_rollout(iteration=iteration)
 
             # Update
             update_stats = self.update(iteration=iteration)

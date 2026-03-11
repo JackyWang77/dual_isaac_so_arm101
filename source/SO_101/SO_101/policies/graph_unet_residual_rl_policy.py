@@ -1256,6 +1256,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
         joint_states_history: Optional[torch.Tensor] = None,
         subtask_condition: Optional[torch.Tensor] = None,
         deterministic: bool = False,
+        zero_residual: bool = False,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """
         Returns:
@@ -1343,6 +1344,26 @@ class GraphUnetResidualRLPolicy(nn.Module):
             a_base = a_base_norm_full * self.action_std[:act_dim] + self.action_mean[:act_dim]
         else:
             a_base = a_base_norm_full
+
+        # Early exit: critic warmup - use pure backbone (alpha=0), no residual
+        if zero_residual:
+            z_layers = self._get_z_layers_fast(obs)
+            z_bar, _ = self.aggregate_latent(z_layers)
+            obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
+            v_bar = self.critic.forward_bar(z_bar, obs_critic)
+            delta = torch.zeros(B, act_dim, device=a_base.device, dtype=a_base.dtype)
+            K = self.cfg.num_layers
+            gate_w = torch.ones(B, K, device=z_bar.device, dtype=z_bar.dtype) / K
+            info = {
+                "obs": obs, "obs_norm": obs_norm, "a_base": a_base, "a_base_norm": a_base_norm,
+                "delta": delta, "delta_norm": delta, "log_prob": torch.zeros(B, device=a_base.device),
+                "entropy": torch.zeros(B, device=a_base.device), "z_layers": z_layers, "z_bar": z_bar,
+                "gate_w": gate_w, "v_bar": v_bar, "alpha": torch.tensor(0.0, device=a_base.device),
+            }
+            if self.history_buffer is not None:
+                action_for_history = a_base_norm_full
+                self.history_buffer.update(ee_node=ee_node, obj_node=obj_node, action=action_for_history, joint_states=joint_states)
+            return a_base, info
 
         # ============================================================
         # 3. z_layers (high-frequency! called every step with temporal history)
