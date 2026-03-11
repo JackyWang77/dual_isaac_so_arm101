@@ -24,7 +24,7 @@ NUM_ENVS="${NUM_ENVS:-100}"
 NUM_EPISODES="${NUM_EPISODES:-1000}"
 EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-10}"
 EXEC_HORIZON="${EXEC_HORIZON:-10}"
-EMA="${EMA:-0.8}"
+EMA="${EMA:-1}"
 
 python scripts/graph_unet/play.py \
     --task SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-Play-v0 \

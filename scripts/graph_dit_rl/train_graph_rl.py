@@ -495,6 +495,10 @@ class GraphDiTRLTrainer:
         obs = self._process_obs(raw_obs)
         subtask_cond = self._extract_subtask_condition(raw_obs, obs)
 
+        # CRITICAL: Reset policy buffers for ALL envs (fresh rollout)
+        # Otherwise stale RHC/EMA from prev iter corrupts base_action -> SR drops across iters
+        self.policy.reset_envs(torch.arange(self.num_envs, device=self.device))
+
         # Pre-fill histories with first observation (matches BC training padding)
         self._prefill_histories_from_obs(obs)
 
