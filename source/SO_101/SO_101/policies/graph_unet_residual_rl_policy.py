@@ -1576,8 +1576,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
                 for name, param in backbone_model.node_to_z.named_parameters():
                     node_to_z_state_dict[f"backbone.backbone.node_to_z.{name}"] = param.data.clone()
                 if len(node_to_z_state_dict) > 0:
-                    print(f"[GraphUnetResidualRLPolicy] Saving {len(node_to_z_state_dict)} node_to_z parameters")
-                    print(f"[GraphUnetResidualRLPolicy] node_to_z_state_dict keys: {list(node_to_z_state_dict.keys())[:3]}...")
+                    pass
                 else:
                     print("[GraphUnetResidualRLPolicy] ⚠️  WARNING: node_to_z_state_dict is EMPTY!")
             else:

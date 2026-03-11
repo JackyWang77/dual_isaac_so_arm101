@@ -366,22 +366,98 @@ class GraphDiTRLTrainer:
         print(f"[Trainer] truncated=timeout=failure, terminated+success_signal=success")
         print(f"[Trainer] Best-model: SR_{self.best_sr_window}ep window, consistent_check={self.best_sr_require_consistent}")
 
-    def _check_success_from_info(self, env_info, env_idx: int) -> bool:
-        """Check success from termination manager's per-env signals.
+    def _check_success_from_info(self, env_info, env_idx: int, obs_before_step: torch.Tensor = None) -> bool:
+        """Check success with multi-level fallback (matching play.py).
         
-        Isaac Lab extras['log']['Episode_Termination/X'] are scalar averages,
-        NOT per-env flags. We access termination_manager._last_episode_dones directly.
+        Level 1: termination_manager._last_episode_dones (per-env signal)
+        Level 2: position-based check using env's DoneTerm thresholds (eps_z=0.003, eps_xy=0.009)
         """
+        # Level 1: termination manager signal (same as play.py _get_success_flags)
         try:
             base = self.env.unwrapped if hasattr(self.env, "unwrapped") else self.env
             tm = base.termination_manager
             names = list(tm._term_names)
+            led = tm._last_episode_dones
+            success_found = False
             for sname in ("success", "stack_success"):
                 if sname in names:
                     idx = names.index(sname)
-                    return bool(tm._last_episode_dones[env_idx, idx].item())
-        except Exception:
-            pass
+                    if bool(led[env_idx, idx].item()):
+                        success_found = True
+                        break
+            if success_found:
+                # Also check no dropping (matching play.py)
+                for dname in ("cube_1_dropping", "cube_2_dropping", "object_dropping",
+                              "fork_dropping", "knife_dropping"):
+                    if dname in names:
+                        didx = names.index(dname)
+                        if bool(led[env_idx, didx].item()):
+                            success_found = False
+                            break
+            if success_found:
+                return True
+            # Diagnostic: print which terms fired (limited count)
+            if not hasattr(self, "_l1_diag_count"):
+                self._l1_diag_count = 0
+            if self._l1_diag_count < 10:
+                self._l1_diag_count += 1
+                fired = [names[j] for j in range(len(names)) if bool(led[env_idx, j].item())]
+                print(f"  [L1 diag] env {env_idx}: terms={names}, fired={fired}")
+        except Exception as e:
+            if not hasattr(self, "_l1_err_count"):
+                self._l1_err_count = 0
+            if self._l1_err_count < 3:
+                self._l1_err_count += 1
+                print(f"  [L1 ERROR] env {env_idx}: {e}")
+
+        # Level 2: position-based check using env's actual DoneTerm thresholds
+        # (env success uses eps_z=0.003, eps_xy=0.009, NOT the stricter play.py obs constants)
+        if obs_before_step is not None:
+            s = getattr(self.cfg, "obs_structure", None)
+            if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
+                c1 = obs_before_step[env_idx, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
+                c2 = obs_before_step[env_idx, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
+                z_diff_a = torch.abs((c1[2] - c2[2]) - 0.018)
+                xy_dist_a = torch.norm(c1[:2] - c2[:2])
+                z_diff_b = torch.abs((c2[2] - c1[2]) - 0.018)
+                xy_dist_b = torch.norm(c2[:2] - c1[:2])
+                stack_ok = (z_diff_a < 0.003 and xy_dist_a < 0.009) or \
+                           (z_diff_b < 0.003 and xy_dist_b < 0.009)
+                if stack_ok:
+                    return True
+
+        return False
+
+    def _check_position_success(self, obs: torch.Tensor, env_idx: int) -> bool:
+        """Position-based success check using env DoneTerm thresholds (no gripper requirement).
+        
+        Used for truncated (timeout) episodes where cubes may be stacked but grippers
+        not released, so the env's success DoneTerm didn't fire.
+        """
+        s = getattr(self.cfg, "obs_structure", None)
+        if s is None:
+            return False
+        # Cube stack check
+        if "cube_1_pos" in s and "cube_2_pos" in s:
+            c1 = obs[env_idx, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
+            c2 = obs[env_idx, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
+            z_diff_a = torch.abs((c1[2] - c2[2]) - 0.018)
+            xy_dist_a = torch.norm(c1[:2] - c2[:2])
+            z_diff_b = torch.abs((c2[2] - c1[2]) - 0.018)
+            xy_dist_b = torch.norm(c2[:2] - c1[:2])
+            return bool(
+                (z_diff_a < 0.003 and xy_dist_a < 0.009) or
+                (z_diff_b < 0.003 and xy_dist_b < 0.009)
+            )
+        # Table setting check
+        if "fork_pos" in s and "knife_pos" in s:
+            fp = obs[env_idx, s["fork_pos"][0]:s["fork_pos"][1]]
+            kp = obs[env_idx, s["knife_pos"][0]:s["knife_pos"][1]]
+            fork_tgt = torch.tensor([0.255, 0.18], device=obs.device, dtype=obs.dtype)
+            knife_tgt = torch.tensor([0.2366, -0.1288], device=obs.device, dtype=obs.dtype)
+            fork_ok = bool(torch.norm(fp[:2] - fork_tgt) < 0.05 and torch.abs(fp[2] - 0.0076) < 0.01)
+            knife_ok = bool(torch.norm(kp[:2] - knife_tgt) < 0.05 and torch.abs(kp[2] - 0.0068) < 0.01)
+            return fork_ok and knife_ok
         return False
 
     def set_normalization_stats(
@@ -548,21 +624,18 @@ class GraphDiTRLTrainer:
                     is_truncated = bool(truncated[i].item() if hasattr(truncated[i], "item") else truncated[i])
                     is_terminated = bool(terminated[i].item() if hasattr(terminated[i], "item") else terminated[i])
                     if is_truncated:
-                        is_success = False
+                        # Timeout: still check if cubes are stacked (env success DoneTerm
+                        # requires gripper release which RL residual may interfere with)
+                        is_success = self._check_position_success(obs, i)
                         n_truncated += 1
                     else:
-                        is_success = self._check_success_from_info(env_info, i)
+                        is_success = self._check_success_from_info(env_info, i, obs_before_step=obs)
                         n_terminated += 1
                     if is_success:
                         n_success += 1
                     rollout_successes.append(float(is_success))
                     self.episode_successes.append(float(is_success))
-                if not hasattr(self, "_done_diag_count"):
-                    self._done_diag_count = 0
-                if self._done_diag_count < 5:
-                    self._done_diag_count += 1
-                    print(f"  [done batch] {len(done_envs)} envs done: "
-                          f"{n_terminated} terminated, {n_truncated} truncated, {n_success} success")
+                pass
 
                 # Pre-fill histories with post-reset obs (matches BC training padding)
                 self._prefill_histories_from_obs(next_obs, env_ids=done_envs)

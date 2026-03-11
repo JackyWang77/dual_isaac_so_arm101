@@ -1420,13 +1420,6 @@ def play_graph_unet_policy(
                             "obs": obs_snap,
                         })
 
-                # ── SUBTASK DIAGNOSTIC (first 5 replans of episode 0) ──
-                if subtask_condition is not None and step_count < 300:
-                    sc0 = subtask_condition[0].cpu().tolist()
-                    replan_envs = [e for e in range(num_envs) if len(action_buffers[e]) == 0]
-                    print(f"[SUBTASK DIAG] step={step_count} phase_src={phase_source} "
-                          f"env0_cond={sc0} replan_envs={replan_envs[:5]}")
-
                 predict_kw = dict(
                     obs=obs_tensor_normalized,
                     action_history=action_history_tensor,
@@ -1504,14 +1497,6 @@ def play_graph_unet_policy(
                         print(
                             f"[Play] Warning: No action normalization stats, using normalized actions directly"
                         )
-
-                # ── ACTION DIAGNOSTIC (first 80 steps for env 0) ──
-                if step_count < 300 and len(action_buffers[0]) == 0:
-                    a0 = action_trajectory[0, 0, :]  # first action for env 0
-                    left_norm = a0[:6].norm().item()
-                    right_norm = a0[6:].norm().item()
-                    print(f"[ACTION DIAG] step={step_count} env0 left_norm={left_norm:.4f} right_norm={right_norm:.4f} "
-                          f"left={a0[:6].cpu().tolist()} right={a0[6:].cpu().tolist()}")
 
                 # Fill buffers with raw 6-dim (normalized raw for policy input; buffer = unmapped original)
                 for env_id in range(num_envs):
