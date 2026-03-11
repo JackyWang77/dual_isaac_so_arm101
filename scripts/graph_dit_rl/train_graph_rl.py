@@ -73,6 +73,7 @@ simulation_app = app_launcher.app
 # ============================================================
 import os
 import json
+import time
 from typing import Dict, Optional
 
 import gymnasium as gym
@@ -296,18 +297,8 @@ class GraphDiTRLTrainer:
         # Buffer
         self.buffer = RolloutBuffer(self.num_envs, steps_per_env, device)
 
-        # Optimizer (只优化 trainable 参数)
+        # Optimizer (只优化 trainable 参数: actor, critic, z_adapter, alpha)
         trainable_params = [p for p in policy.parameters() if p.requires_grad]
-        
-        # CRITICAL: Also include node_to_z parameters if it's trainable
-        # node_to_z is in backbone.backbone.node_to_z, not in policy.parameters()
-        node_to_z_params = []
-        if hasattr(policy, 'backbone') and hasattr(policy.backbone, 'backbone'):
-            graph_dit = policy.backbone.backbone
-            if hasattr(graph_dit, 'node_to_z'):
-                node_to_z_params = [p for p in graph_dit.node_to_z.parameters() if p.requires_grad]
-                trainable_params.extend(node_to_z_params)
-        
         self.optimizer = optim.AdamW(trainable_params, lr=lr)
 
         # Logger
@@ -730,13 +721,10 @@ class GraphDiTRLTrainer:
 
             self.optimizer.zero_grad()
             losses["loss_total"].backward()
-            trainable_params = [p for p in self.policy.parameters() if p.requires_grad]
-            if hasattr(self.policy, 'backbone') and hasattr(self.policy.backbone, 'backbone'):
-                graph_dit = self.policy.backbone.backbone
-                if hasattr(graph_dit, 'node_to_z'):
-                    trainable_params.extend([p for p in graph_dit.node_to_z.parameters() if p.requires_grad])
-            # Gradient Clipping: 防小 batch 梯度爆炸，max_norm 通常 0.5~1.0
-            torch.nn.utils.clip_grad_norm_(trainable_params, self.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(
+                [p for p in self.policy.parameters() if p.requires_grad],
+                self.max_grad_norm,
+            )
             self.optimizer.step()
 
             total_loss += losses["loss_total"].item()
@@ -787,6 +775,8 @@ class GraphDiTRLTrainer:
                 return 0.4
 
         scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda)
+        self._train_start = time.time()
+        self._max_iterations = max_iterations
 
         for iteration in range(1, max_iterations + 1):
             current_lr = self.optimizer.param_groups[0]["lr"]
@@ -1060,8 +1050,22 @@ class GraphDiTRLTrainer:
         warning = rollout_stats.get("warning", "")
         if warning:
             print(f"[Iter {iteration:4d}] ⚠️  {warning}")
+
+        # Progress / ETA
+        elapsed = time.time() - self._train_start if hasattr(self, "_train_start") else 0
+        max_iter = self._max_iterations if hasattr(self, "_max_iterations") else iteration
+        if elapsed > 0 and iteration > 0:
+            eta_s = elapsed / iteration * (max_iter - iteration)
+            eta_m, eta_sec = divmod(int(eta_s), 60)
+            eta_h, eta_m = divmod(eta_m, 60)
+            elapsed_m = int(elapsed) // 60
+            eta_str = f"{eta_h}h{eta_m:02d}m" if eta_h else f"{eta_m}m{eta_sec:02d}s"
+            progress_str = f"[{iteration}/{max_iter} | {elapsed_m}m | ETA {eta_str}]"
+        else:
+            progress_str = f"[{iteration}/{max_iter}]"
+
         print(
-            f"[Iter {iteration:4d}] "
+            f"{progress_str} "
             f"SR={sr:5.1f}% (100:{sr_100:4.1f}% {self.best_sr_window}ep:{sr_win:4.1f}%) [{num_eps:2d}ep] | "
             f"Rew={reward:6.1f} | "
             f"EV={ev:5.2f} | "
@@ -1128,13 +1132,11 @@ def main():
         p.requires_grad = False
     if hasattr(backbone_policy, "node_to_z"):
         for p in backbone_policy.node_to_z.parameters():
-            p.requires_grad = True
-        n2z_trainable = sum(1 for p in backbone_policy.node_to_z.parameters() if p.requires_grad)
-        n2z_total = len(list(backbone_policy.node_to_z.parameters()))
-        print(f"[Main] node_to_z made trainable: {n2z_trainable}/{n2z_total} params trainable")
+            p.requires_grad = False
+        print(f"[Main] node_to_z FROZEN (z_adapter provides adaptation capacity)")
     else:
         print(f"[Main] ⚠️  WARNING: node_to_z not found in backbone!")
-    print(f"[Main] Graph-Unet loaded and frozen (except node_to_z)")
+    print(f"[Main] Graph-Unet loaded and fully frozen (z_adapter is the only adaptation layer)")
 
     _backbone_action_dim = getattr(backbone_policy.cfg, "action_dim", 6)
     print(f"[Main] Using backbone for all {_backbone_action_dim} action dimensions (including gripper)")
