@@ -403,12 +403,8 @@ class GraphDiTRLTrainer:
                 self._l1_diag_count += 1
                 fired = [names[j] for j in range(len(names)) if bool(led[env_idx, j].item())]
                 print(f"  [L1 diag] env {env_idx}: terms={names}, fired={fired}")
-        except Exception as e:
-            if not hasattr(self, "_l1_err_count"):
-                self._l1_err_count = 0
-            if self._l1_err_count < 3:
-                self._l1_err_count += 1
-                print(f"  [L1 ERROR] env {env_idx}: {e}")
+        except Exception:
+            pass
 
         # Level 2: position-based check using env's actual DoneTerm thresholds
         # (env success uses eps_z=0.003, eps_xy=0.009, NOT the stricter play.py obs constants)
