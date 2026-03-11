@@ -1512,9 +1512,11 @@ class GraphUnetResidualRLPolicy(nn.Module):
         # Critic: bar head only (no layer heads)
         loss_critic = torch.tensor(0.0, device=obs.device)
 
-        # Baseline head: select obs based on critic_obs_mode
+        # Baseline head: detach z_bar so critic MSE loss doesn't corrupt z_adapter
+        # (actor and critic share z_adapter; critic's large MSE gradients would otherwise
+        #  destroy the representation that actor relies on)
         obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
-        V_bar = self.critic.forward_bar(z_bar_new, obs_critic)
+        V_bar = self.critic.forward_bar(z_bar_new.detach(), obs_critic)
         if getattr(self.cfg, "use_expectile_value", False):
             # Expectile loss (IQL-style): L2^τ(u) = |τ - 1(u<0)| * u²
             # forward_bar already returns [B], no squeeze needed
