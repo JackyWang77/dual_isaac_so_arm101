@@ -355,11 +355,12 @@ class GraphDiTRLTrainer:
         self.action_std = None
 
         print(f"[Trainer] num_envs: {self.num_envs}, steps_per_env: {steps_per_env}")
-        if steps_per_env < 400:
+        env_max_steps = 400  # CubeStackRL: episode_length_s=8.0 @ 50Hz
+        if steps_per_env < env_max_steps:
             print(
-                f"[Trainer] ⚠️ WARNING: steps_per_env={steps_per_env} < 400 (env max_episode_steps). "
-                "Episodes may be truncated by rollout before env termination! "
-                "Dataset mean=251, P95=339, env_max=400. Recommend steps_per_env >= 400."
+                f"[Trainer] ⚠️ WARNING: steps_per_env={steps_per_env} < {env_max_steps} (env max_episode_steps). "
+                "Rollout stops before timeout → timeout failures are NEVER counted. SR will be inflated. "
+                f"Use steps_per_env >= {env_max_steps}."
             )
         print(f"[Trainer] trainable params: {sum(p.numel() for p in trainable_params):,}")
 
