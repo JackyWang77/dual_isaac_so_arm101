@@ -11,7 +11,7 @@
 cd "$(dirname "$0")/.."
 
 CKPT="${1:-}"
-NUM_ENVS="${2:-64}"
+NUM_ENVS="${2:-128}"
 MAX_ITER="${3:-100}"
 HEADLESS="${HEADLESS:-true}"
 
@@ -22,7 +22,7 @@ fi
 
 # Baseline config (aligned with train_graph_unet_rl.sh defaults)
 BASE_STEPS=405
-BASE_BATCH=128
+BASE_BATCH=64
 BASE_EPOCHS=2
 BASE_REG=2.0
 BASE_BETA=1.0
@@ -97,8 +97,8 @@ run_experiment "batch_32" \
     "$BASE_REG" "$BASE_ENT" "$BASE_BETA" \
     "$BASE_ALPHA" "$BASE_TAU" "$BASE_LR" 42 "$HEADLESS"
 
-run_experiment "batch_256" \
-    "$BASE_STEPS" 256 "$BASE_EPOCHS" \
+run_experiment "batch_128" \
+    "$BASE_STEPS" 128 "$BASE_EPOCHS" \
     "$BASE_REG" "$BASE_ENT" "$BASE_BETA" \
     "$BASE_ALPHA" "$BASE_TAU" "$BASE_LR" 42 "$HEADLESS"
 
