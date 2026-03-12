@@ -77,13 +77,13 @@ run_experiment "beta_2.0" \
 # ================================================================
 # 3. ENTROPY SWEEP (baseline=fixed c_ent=0.0, ablations=adaptive)
 # ================================================================
-USE_ADAPTIVE_ENTROPY=true C_ENT_BAD=0.02 C_ENT_GOOD=0.005 \
+USE_ADAPTIVE_ENTROPY=true C_ENT_BAD=0.01 C_ENT_GOOD=0.005 \
 run_experiment "entropy_adaptive_mild" \
     "$BASE_STEPS" "$BASE_BATCH" "$BASE_EPOCHS" \
     "$BASE_REG" "$BASE_ENT" "$BASE_BETA" \
     "$BASE_ALPHA" "$BASE_TAU" "$BASE_LR" 42 "$HEADLESS"
 
-USE_ADAPTIVE_ENTROPY=true C_ENT_BAD=0.005 C_ENT_GOOD=0.0025 \
+USE_ADAPTIVE_ENTROPY=true C_ENT_BAD=0.04 C_ENT_GOOD=0.01 \
 run_experiment "entropy_adaptive_strong" \
     "$BASE_STEPS" "$BASE_BATCH" "$BASE_EPOCHS" \
     "$BASE_REG" "$BASE_ENT" "$BASE_BETA" \
