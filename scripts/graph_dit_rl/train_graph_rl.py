@@ -1068,8 +1068,10 @@ class GraphDiTRLTrainer:
                     pass
 
         step = self.total_steps
+        step_iter = iteration  # By-iteration step for smooth curve (warmup iters 1-5 visible)
 
         _scalar("main/success_rate", rollout_stats.get("success_rate", 0), step)
+        _scalar("main/success_rate_by_iter", rollout_stats.get("success_rate", 0), step_iter)
         _scalar("main/success_rate_100", rollout_stats.get("success_rate_100", 0), step)
         _scalar("main/success_rate_window", rollout_stats.get("success_rate_window", 0), step)
         _scalar("main/num_episodes", rollout_stats.get("num_episodes", 0), step)

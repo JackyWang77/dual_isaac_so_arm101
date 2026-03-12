@@ -11,25 +11,25 @@
 cd "$(dirname "$0")/.."
 
 CKPT="${1:-}"
-NUM_ENVS="${2:-10}"
-MAX_ITER="${3:-200}"
+NUM_ENVS="${2:-64}"
+MAX_ITER="${3:-100}"
 HEADLESS="${HEADLESS:-true}"
 
 if [ -z "$CKPT" ] || [ ! -f "$CKPT" ]; then
-    echo "Usage: $0 <pretrained_checkpoint> [num_envs=10] [max_iterations=200]"
+    echo "Usage: $0 <pretrained_checkpoint> [num_envs=64] [max_iterations=100]"
     exit 1
 fi
 
-# Baseline config (baseline already trained with these values)
-BASE_STEPS=400
-BASE_BATCH=64
+# Baseline config (aligned with train_graph_unet_rl.sh defaults)
+BASE_STEPS=405
+BASE_BATCH=128
 BASE_EPOCHS=2
 BASE_REG=2.0
 BASE_BETA=1.0
-BASE_ENT=0.0
-BASE_ALPHA=0.10
+BASE_ENT=0.01
+BASE_ALPHA=0.05
 BASE_TAU=0.5
-BASE_LR=5e-4
+BASE_LR=1e-4
 
 TOTAL=10
 DONE=0
@@ -83,7 +83,7 @@ run_experiment "entropy_adaptive_mild" \
     "$BASE_REG" "$BASE_ENT" "$BASE_BETA" \
     "$BASE_ALPHA" "$BASE_TAU" "$BASE_LR" 42 "$HEADLESS"
 
-USE_ADAPTIVE_ENTROPY=true C_ENT_BAD=0.05 C_ENT_GOOD=0.001 \
+USE_ADAPTIVE_ENTROPY=true C_ENT_BAD=0.005 C_ENT_GOOD=0.0025 \
 run_experiment "entropy_adaptive_strong" \
     "$BASE_STEPS" "$BASE_BATCH" "$BASE_EPOCHS" \
     "$BASE_REG" "$BASE_ENT" "$BASE_BETA" \

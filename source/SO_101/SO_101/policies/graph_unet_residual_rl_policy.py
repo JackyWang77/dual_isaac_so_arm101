@@ -292,7 +292,7 @@ class GraphUnetResidualRLCfg:
 
     # residual distribution (log_std_init small = less exploration at start)
     log_std_init: float = -2.0
-    log_std_min: float = -10.0
+    log_std_min: float = -3.0
     log_std_max: float = 1.0
 
     # residual scaling
