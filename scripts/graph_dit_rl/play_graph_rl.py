@@ -32,6 +32,8 @@ import SO_101.tasks  # noqa: F401  # Register environments
 import torch
 from isaaclab_tasks.utils.parse_cfg import parse_env_cfg
 from SO_101.policies.graph_unet_policy import UnetPolicy, GraphUnetPolicy
+from SO_101.policies.dual_arm_unet_policy import DualArmDisentangledPolicy
+from SO_101.policies.dual_arm_unet_policy_gated import DualArmDisentangledPolicyGated
 from SO_101.policies.graph_unet_residual_rl_policy import (
     GraphUnetBackboneAdapter,
     GraphUnetResidualRLPolicy,
@@ -134,14 +136,32 @@ def play_graph_rl_policy(
     print(f"[Play] Graph-Unet Checkpoint: {pretrained_checkpoint}")
     print(f"[Play] Num envs: {num_envs}")
 
-    # Load pretrained backbone
-    PolicyClass = GraphUnetPolicy if policy_type == "graph_unet" else UnetPolicy
+    # Load pretrained backbone (matching train_graph_rl.py backbone class mapping + auto-detection)
+    _backbone_classes = {
+        "graph_unet": GraphUnetPolicy,
+        "unet": UnetPolicy,
+        "dual_arm_gated": DualArmDisentangledPolicyGated,
+        "dual_arm": DualArmDisentangledPolicy,
+    }
+    # Auto-detect dual arm from checkpoint (matching train_graph_rl.py)
+    _ckpt_preview = torch.load(pretrained_checkpoint, map_location="cpu", weights_only=False)
+    _ckpt_cfg = _ckpt_preview.get("cfg", None)
+    if _ckpt_cfg is not None and hasattr(_ckpt_cfg, "arm_action_dim"):
+        _sd = _ckpt_preview.get("policy_state_dict", _ckpt_preview.get("model_state_dict", {}))
+        if "graph_gate_logit" in _sd:
+            policy_type = "dual_arm_gated"
+        else:
+            policy_type = "dual_arm"
+        print(f"[Play] Auto-detected dual arm checkpoint: policy_type={policy_type}")
+    del _ckpt_preview
+
+    PolicyClass = _backbone_classes.get(policy_type, GraphUnetPolicy)
     print(f"\n[Play] Loading pretrained backbone ({PolicyClass.__name__}): {pretrained_checkpoint}")
     backbone_policy = PolicyClass.load(pretrained_checkpoint, device=device)
     backbone_policy.eval()
     for p in backbone_policy.parameters():
         p.requires_grad = False
-    print(f"[Play] Graph-Unet loaded and frozen")
+    print(f"[Play] Backbone loaded and frozen")
 
     # Create backbone adapter
     backbone_adapter = GraphUnetBackboneAdapter(backbone_policy)
@@ -601,9 +621,9 @@ def main():
         "--deterministic", action="store_true", help="Use deterministic actions"
     )
     parser.add_argument(
-        "--policy_type", type=str, default="graph_unet",
-        choices=["unet", "graph_unet"],
-        help="Policy class for the pretrained backbone (default: graph_unet)",
+        "--policy_type", type=str, default="dual_arm_gated",
+        choices=["unet", "graph_unet", "dual_arm", "dual_arm_gated"],
+        help="Policy class for the pretrained backbone (auto-detected from checkpoint)",
     )
     parser.add_argument(
         "--episode_length_s", type=float, default=None,

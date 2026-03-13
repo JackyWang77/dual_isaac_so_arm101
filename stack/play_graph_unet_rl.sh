@@ -42,7 +42,6 @@ python scripts/graph_dit_rl/play_graph_rl.py \
     --task "$TASK" \
     --checkpoint "$CHECKPOINT" \
     --pretrained_checkpoint "$PRETRAINED_CHECKPOINT" \
-    --policy_type graph_unet \
     --num_envs "$NUM_ENVS" \
     --num_episodes "$NUM_EPISODES" \
     --episode_length_s "$EPISODE_LENGTH_S"
