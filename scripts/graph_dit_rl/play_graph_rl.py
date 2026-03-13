@@ -151,7 +151,7 @@ def play_graph_rl_policy(
     policy = GraphUnetResidualRLPolicy.load(checkpoint_path, backbone=backbone_adapter, device=device)
     policy.num_diffusion_steps = 15  # must match train
     policy.eval()
-    print(f"[Play] RL policy loaded (diffusion_steps=10)")
+    print(f"[Play] RL policy loaded (diffusion_steps=15)")
 
     # Load normalization stats from Graph-Unet checkpoint (same as train script)
     checkpoint = torch.load(pretrained_checkpoint, map_location=device, weights_only=False)
@@ -263,6 +263,38 @@ def play_graph_rl_policy(
     obs = _process_obs(obs, device)
     obs = _obs_to_local(obs, _env_origins, obs_struct, _pos_keys)
 
+    # CRITICAL: Reset policy buffers for ALL envs (fresh start, matching train_graph_rl.py)
+    policy.reset_envs(torch.arange(num_envs, device=device))
+
+    # CRITICAL: Pre-fill histories with first observation (matches BC training padding).
+    # BC training pads early-episode histories with copies of the first real frame, NOT zeros.
+    # Zero-histories give out-of-distribution inputs → garbage backbone predictions.
+    # (matching train_graph_rl.py: _prefill_histories_from_obs)
+    _init_ee_node, _init_obj_node = policy._extract_nodes_from_obs(obs)
+    if obs_struct is not None and "left_joint_pos" in obs_struct:
+        _init_joint = torch.cat([
+            obs[:, obs_struct["left_joint_pos"][0]:obs_struct["left_joint_pos"][1]],
+            obs[:, obs_struct["right_joint_pos"][0]:obs_struct["right_joint_pos"][1]],
+        ], dim=-1)
+    else:
+        _init_joint = obs[:, :robot_state_dim]
+
+    for i in range(num_envs):
+        for t in range(action_history_length):
+            ee_node_history[i, t] = _init_ee_node[i]
+            object_node_history[i, t] = _init_obj_node[i]
+            joint_state_history[i, t] = _init_joint[i]
+        if action_mean is not None and action_std is not None:
+            _init_action_norm = (_init_joint[i] - action_mean) / (action_std + 1e-8)
+            for t in range(action_history_length):
+                action_history[i, t, :_init_action_norm.shape[0]] = _init_action_norm
+        else:
+            action_history[i] = 0
+
+    # Pre-fill multi-node temporal history in policy (matching train_graph_rl.py)
+    policy.prefill_node_history(obs)
+    print(f"[Play] Pre-filled histories from initial obs (matching BC training padding)")
+
     # Stats (tensor for per-env tracking; lists for final stats like play.py)
     episode_rewards = torch.zeros(num_envs, device=device)
     episode_lengths = torch.zeros(num_envs, device=device)
@@ -282,7 +314,7 @@ def play_graph_rl_policy(
         while simulation_app.is_running() and len(episode_success) < num_episodes:
             # CRITICAL: Normalize observations (same as train_graph_rl.py)
             if obs_mean is not None and obs_std is not None:
-                obs_norm = (obs - obs_mean) / obs_std
+                obs_norm = (obs - obs_mean) / (obs_std + 1e-8)
             else:
                 obs_norm = obs
             
@@ -304,14 +336,14 @@ def play_graph_rl_policy(
             ee_node_history_norm = ee_node_history.clone()  # [B, H, 7]
             object_node_history_norm = object_node_history.clone()  # [B, H, 7]
             if ee_node_mean is not None and ee_node_std is not None:
-                ee_node_history_norm = (ee_node_history_norm - ee_node_mean) / ee_node_std
+                ee_node_history_norm = (ee_node_history_norm - ee_node_mean) / (ee_node_std + 1e-8)
             if object_node_mean is not None and object_node_std is not None:
-                object_node_history_norm = (object_node_history_norm - object_node_mean) / object_node_std
+                object_node_history_norm = (object_node_history_norm - object_node_mean) / (object_node_std + 1e-8)
             
             # Normalize joint history
             joint_state_history_norm = joint_state_history.clone()  # [B, H, 6]
             if joint_mean is not None and joint_std is not None:
-                joint_state_history_norm = (joint_state_history_norm - joint_mean) / joint_std
+                joint_state_history_norm = (joint_state_history_norm - joint_mean) / (joint_std + 1e-8)
             
             # Get subtask condition (matching train_graph_rl.py)
             subtask_cond = _extract_subtask_condition(env, obs, policy, device)
