@@ -78,6 +78,7 @@ simulation_app = app_launcher.app
 # Imports after AppLauncher
 # ============================================================
 import os
+import re
 import json
 import time
 from typing import Dict, Optional
@@ -1136,7 +1137,7 @@ class GraphDiTRLTrainer:
     def _save_best(self, iteration: int):
         """按 success_rate_window（最近 N episode 平均）保存当前最佳模型"""
         path = os.path.join(self.log_dir, "best_model.pt")
-        self.policy.save(path)
+        self.policy.save(path, iteration=iteration)
         print(f"[Trainer] Best model saved (SR_{self.best_sr_window}ep={self.best_sr*100:.1f}%): {path}")
 
     def _save(self, iteration: int, final: bool = False):
@@ -1324,7 +1325,16 @@ def main():
     if getattr(args, "resume", None) and os.path.isfile(args.resume):
         print(f"\n[Main] Resuming from RL checkpoint: {args.resume}")
         _resume_ckpt = torch.load(args.resume, map_location="cpu", weights_only=False)
-        start_iteration = _resume_ckpt.get("iteration", 0) + 1
+        iter_from_ckpt = _resume_ckpt.get("iteration", None)
+        if iter_from_ckpt is not None:
+            start_iteration = int(iter_from_ckpt) + 1
+        else:
+            # Fallback: parse from filename policy_iter_100.pt -> 100
+            basename = os.path.basename(args.resume)
+            m = re.search(r"policy_iter_(\d+)\.pt", basename)
+            if m:
+                start_iteration = int(m.group(1)) + 1
+            # policy_final.pt / best_model.pt: no iter in file, cannot infer; start from 1
         print(f"[Main] Resuming from iteration {start_iteration} (checkpoint had iter={start_iteration-1})")
         policy = GraphUnetResidualRLPolicy.load(args.resume, backbone=backbone, device=device)
         policy.num_diffusion_steps = 15
