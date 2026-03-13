@@ -24,7 +24,7 @@ if [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
 fi
 
 # Same structure as play_disentangled_graph_gated.sh
-NUM_ENVS="${NUM_ENVS:-1}"
+NUM_ENVS="${NUM_ENVS:-250}"
 NUM_EPISODES="${NUM_EPISODES:-1000}"
 EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-10}"
 TASK="${TASK:-SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-Play-v0}"
@@ -45,4 +45,4 @@ python scripts/graph_dit_rl/play_graph_rl.py \
     --num_envs "$NUM_ENVS" \
     --num_episodes "$NUM_EPISODES" \
     --episode_length_s "$EPISODE_LENGTH_S" \
-    --deterministic
+    --headless
