@@ -98,5 +98,6 @@ python scripts/graph_unet/train.py \
     # --use_raw_only \
     --save_every 200 \
     --cross_attention "$CROSS_ATTN_VAL" \
+    --gripper_threshold -0.25 \
     $EXTRA_ARGS \
     ${RESUME_CHECKPOINT:+--resume "$RESUME_CHECKPOINT"} 

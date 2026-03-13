@@ -29,6 +29,7 @@ EMA="${EMA:-1}"
 python scripts/graph_unet/play.py \
     --task SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-Play-v0 \
     --checkpoint "$CHECKPOINT" \
+    --gripper_threshold -0.25 \
     --num_envs "$NUM_ENVS" \
     --num_episodes "$NUM_EPISODES" \
     --episode_length_s "$EPISODE_LENGTH_S" \

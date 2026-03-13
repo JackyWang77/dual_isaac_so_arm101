@@ -1,45 +1,41 @@
 #!/bin/bash
-# Play/Test GraphUnetPolicy + Residual RL - Dual Cube Stack task
+# Play/Test GraphUnetPolicy + Residual RL - Dual Cube Stack (SR experiments)
+# Mimics play_disentangled_graph_gated.sh: same env, same structure for fair comparison
 cd "$(dirname "$0")/.."
 set -e
 
-HEADLESS_FLAG=""
-args=("$@")
-n=${#args[@]}
-if [ $n -gt 0 ] && [ "${args[$((n-1))]}" = "true" ]; then
-    HEADLESS_FLAG="--headless"
-    args=("${args[@]:0:$((n-1))}")
-    set -- "${args[@]}"
+CHECKPOINT="${1:-}"
+PRETRAINED_CHECKPOINT="${2:-logs/graph_unet_full/stack_joint_t1_gripper_flow_matching/gate_graph/best_model.pt}"
+
+if [ -z "$CHECKPOINT" ]; then
+    CHECKPOINT=$(ls -t ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/*/best_model.pt 2>/dev/null | head -1)
 fi
 
-CHECKPOINT="${1:-}"
-PRETRAINED_CHECKPOINT="${2:-}"
-TASK="${3:-SO-ARM101-Dual-Cube-Stack-v0}"
-
 if [ -z "$CHECKPOINT" ] || [ ! -f "$CHECKPOINT" ]; then
-    echo "Usage: $0 <rl_checkpoint> [pretrained_checkpoint] [task] [true]"
-    echo ""
-    echo "Example:"
-    echo "  $0 ./logs/graph_unet_full_rl/.../policy_iter_200.pt"
+    echo "Usage: $0 [rl_checkpoint] [pretrained_checkpoint]"
+    echo "  Auto-detects RL from ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/*/best_model.pt"
+    echo "  Pass RL checkpoint (1st) and Graph-Unet backbone (2nd) for success rate eval."
     exit 1
 fi
 
-if [ -z "$PRETRAINED_CHECKPOINT" ]; then
-    PRETRAINED_CHECKPOINT=$(ls -t ./logs/graph_unet_full/stack_joint*/*/best_model.pt 2>/dev/null | head -1)
-fi
-
-if [ -z "$PRETRAINED_CHECKPOINT" ] || [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
+if [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
     echo "Error: No pretrained GraphUnetPolicy checkpoint found. Specify as 2nd arg."
     exit 1
 fi
 
-NUM_ENVS="${NUM_ENVS:-50}"
+# Same structure as play_disentangled_graph_gated.sh
+NUM_ENVS="${NUM_ENVS:-1}"
 NUM_EPISODES="${NUM_EPISODES:-1000}"
+EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-10}"
+TASK="${TASK:-SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-Play-v0}"
+# Use TASK=SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-Play-Large-v0 for generalization test
+
 
 echo "========================================"
-echo "Playing GraphUnetPolicy + RL - Stack"
+echo "Playing GraphUnetPolicy + RL - Stack (SR eval)"
 echo "RL: $CHECKPOINT"
 echo "Base: $PRETRAINED_CHECKPOINT"
+echo "Task: $TASK"
 echo "========================================"
 
 python scripts/graph_dit_rl/play_graph_rl.py \
@@ -49,4 +45,4 @@ python scripts/graph_dit_rl/play_graph_rl.py \
     --policy_type graph_unet \
     --num_envs "$NUM_ENVS" \
     --num_episodes "$NUM_EPISODES" \
-    $HEADLESS_FLAG
+    --episode_length_s "$EPISODE_LENGTH_S"

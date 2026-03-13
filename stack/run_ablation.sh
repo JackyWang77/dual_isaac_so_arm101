@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 
 CKPT="${1:-}"
 NUM_ENVS="${2:-128}"
-MAX_ITER="${3:-100}"
+MAX_ITER="${3:-50}"
 HEADLESS="${HEADLESS:-true}"
 
 if [ -z "$CKPT" ] || [ ! -f "$CKPT" ]; then
@@ -20,9 +20,9 @@ if [ -z "$CKPT" ] || [ ! -f "$CKPT" ]; then
     exit 1
 fi
 
-# Baseline config (aligned with train_graph_unet_rl.sh defaults)
+# Baseline config (matches train_graph_unet_rl.sh defaults)
 BASE_STEPS=405
-BASE_BATCH=64
+BASE_BATCH=128
 BASE_EPOCHS=2
 BASE_REG=2.0
 BASE_BETA=1.0
@@ -43,7 +43,7 @@ run_experiment() {
     echo "================================================================"
     echo "  EXPERIMENT [$DONE/$TOTAL]: $name"
     echo "================================================================"
-    LOG_DIR="./logs/ablation/${name}" \
+    LOG_DIR="./logs/dual_arm_rl" RUN_NAME="$name" \
     ./stack/train_graph_unet_rl.sh "$CKPT" "$NUM_ENVS" "$MAX_ITER" "$@" \
         || { echo "[FAILED] $name"; FAILED=$((FAILED + 1)); }
 }
@@ -51,10 +51,6 @@ run_experiment() {
 # ================================================================
 # 1. ACTION REGULARIZATION SWEEP (c_delta_reg)
 # ================================================================
-run_experiment "reg_0.5" \
-    "$BASE_STEPS" "$BASE_BATCH" "$BASE_EPOCHS" \
-    0.5 "$BASE_ENT" "$BASE_BETA" \
-    "$BASE_ALPHA" "$BASE_TAU" "$BASE_LR" 42 "$HEADLESS"
 
 run_experiment "reg_4.0" \
     "$BASE_STEPS" "$BASE_BATCH" "$BASE_EPOCHS" \
@@ -89,18 +85,6 @@ run_experiment "entropy_adaptive_strong" \
     "$BASE_REG" "$BASE_ENT" "$BASE_BETA" \
     "$BASE_ALPHA" "$BASE_TAU" "$BASE_LR" 42 "$HEADLESS"
 
-# ================================================================
-# 4. BATCH SIZE SWEEP
-# ================================================================
-run_experiment "batch_32" \
-    "$BASE_STEPS" 32 "$BASE_EPOCHS" \
-    "$BASE_REG" "$BASE_ENT" "$BASE_BETA" \
-    "$BASE_ALPHA" "$BASE_TAU" "$BASE_LR" 42 "$HEADLESS"
-
-run_experiment "batch_128" \
-    "$BASE_STEPS" 128 "$BASE_EPOCHS" \
-    "$BASE_REG" "$BASE_ENT" "$BASE_BETA" \
-    "$BASE_ALPHA" "$BASE_TAU" "$BASE_LR" 42 "$HEADLESS"
 
 # ================================================================
 # 5. GRADIENT UPDATES (NUM_EPOCHS) SWEEP
@@ -118,5 +102,5 @@ run_experiment "epochs_5" \
 echo ""
 echo "================================================================"
 echo "  ALL $TOTAL EXPERIMENTS DONE ($((TOTAL - FAILED)) succeeded, $FAILED failed)"
-echo "  Results in: ./logs/ablation/"
+echo "  Results in: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/"
 echo "================================================================"

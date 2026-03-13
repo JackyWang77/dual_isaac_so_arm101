@@ -49,6 +49,67 @@ def _detect_checkpoint_type(path: str) -> str:
     return "rl"
 
 
+def _check_position_success(obs: torch.Tensor, env_idx: int, cfg) -> bool:
+    """Position-based success check (matching train_graph_rl.py)."""
+    s = getattr(cfg, "obs_structure", None)
+    if s is None:
+        return False
+    if "cube_1_pos" in s and "cube_2_pos" in s:
+        c1 = obs[env_idx, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
+        c2 = obs[env_idx, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
+        z_diff_a = torch.abs((c1[2] - c2[2]) - 0.018)
+        xy_dist_a = torch.norm(c1[:2] - c2[:2])
+        z_diff_b = torch.abs((c2[2] - c1[2]) - 0.018)
+        xy_dist_b = torch.norm(c2[:2] - c1[:2])
+        return bool(
+            (z_diff_a < 0.003 and xy_dist_a < 0.009) or
+            (z_diff_b < 0.003 and xy_dist_b < 0.009)
+        )
+    return False
+
+
+def _check_success_from_info(env, env_info, env_idx: int, obs_before_step: torch.Tensor, cfg) -> bool:
+    """Check success from termination manager (matching train_graph_rl.py)."""
+    try:
+        base = env.unwrapped if hasattr(env, "unwrapped") else env
+        tm = base.termination_manager
+        names = list(tm._term_names)
+        led = tm._last_episode_dones
+        success_found = False
+        for sname in ("success", "stack_success"):
+            if sname in names:
+                idx = names.index(sname)
+                if bool(led[env_idx, idx].item()):
+                    success_found = True
+                    break
+        if success_found:
+            for dname in ("cube_1_dropping", "cube_2_dropping", "object_dropping",
+                          "fork_dropping", "knife_dropping"):
+                if dname in names:
+                    didx = names.index(dname)
+                    if bool(led[env_idx, didx].item()):
+                        success_found = False
+                        break
+        if success_found:
+            return True
+        if obs_before_step is not None:
+            s = getattr(cfg, "obs_structure", None)
+            if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
+                c1 = obs_before_step[env_idx, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
+                c2 = obs_before_step[env_idx, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
+                z_diff_a = torch.abs((c1[2] - c2[2]) - 0.018)
+                xy_dist_a = torch.norm(c1[:2] - c2[:2])
+                z_diff_b = torch.abs((c2[2] - c1[2]) - 0.018)
+                xy_dist_b = torch.norm(c2[:2] - c1[:2])
+                stack_ok = (z_diff_a < 0.003 and xy_dist_a < 0.009) or \
+                           (z_diff_b < 0.003 and xy_dist_b < 0.009)
+                if stack_ok:
+                    return True
+    except Exception:
+        pass
+    return False
+
+
 def play_graph_rl_policy(
     task_name: str,
     checkpoint_path: str,
@@ -58,8 +119,9 @@ def play_graph_rl_policy(
     device: str = "cuda",
     deterministic: bool = True,
     policy_type: str = "unet",
+    episode_length_s: float = None,
 ):
-    """Play trained Graph-Unet + Residual RL policy."""
+    """Play trained Graph-Unet + Residual RL policy (aligned with train_graph_rl.py)."""
     # Auto-detect and swap if user passed (IL, RL) instead of (RL, IL)
     t1, t2 = _detect_checkpoint_type(checkpoint_path), _detect_checkpoint_type(pretrained_checkpoint)
     if t1 == "il" and t2 == "rl":
@@ -71,8 +133,6 @@ def play_graph_rl_policy(
     print(f"[Play] RL Checkpoint: {checkpoint_path}")
     print(f"[Play] Graph-Unet Checkpoint: {pretrained_checkpoint}")
     print(f"[Play] Num envs: {num_envs}")
-    OBJ_HEIGHT_IDX = 14
-    SUCCESS_HEIGHT = 0.10
 
     # Load pretrained backbone
     PolicyClass = GraphUnetPolicy if policy_type == "graph_unet" else UnetPolicy
@@ -89,7 +149,7 @@ def play_graph_rl_policy(
     # Load RL policy
     print(f"\n[Play] Loading RL policy: {checkpoint_path}")
     policy = GraphUnetResidualRLPolicy.load(checkpoint_path, backbone=backbone_adapter, device=device)
-    policy.num_diffusion_steps = 10  # must match train
+    policy.num_diffusion_steps = 15  # must match train
     policy.eval()
     print(f"[Play] RL policy loaded (diffusion_steps=10)")
 
@@ -163,7 +223,18 @@ def play_graph_rl_policy(
     # Create environment
     print(f"\n[Play] Creating environment...")
     env_cfg = parse_env_cfg(task_name, device=device, num_envs=num_envs)
+    if episode_length_s is not None:
+        env_cfg.episode_length_s = episode_length_s
+        print(f"[Play] Override episode_length_s = {episode_length_s}")
     env = gym.make(task_name, cfg=env_cfg)
+
+    # env_origins for world→local conversion (matching train_graph_rl.py)
+    _base = env.unwrapped if hasattr(env, "unwrapped") else env
+    _env_origins = _base.scene.env_origins.clone().to(device=device, dtype=torch.float32)
+    cfg = policy.cfg
+    is_dual_arm = (cfg.action_dim == 12)
+    robot_state_dim = 12 if is_dual_arm else 6
+    obs_struct = getattr(cfg, "obs_structure", None)
 
     # Get observation and action spaces
     obs_space = env.observation_space
@@ -175,13 +246,12 @@ def play_graph_rl_policy(
     # Initialize policy buffers
     policy.init_env_buffers(num_envs)
 
-    # History buffers for Graph-DiT (optimized: single tensor per history type)
+    # History buffers for Graph-DiT (matching train_graph_rl.py)
     action_history_length = getattr(backbone_policy.cfg, "action_history_length", 4)
-    # NOTE: GraphDiT expects 6 dimensions for joint states (was trained with 6)
-    # The residual RL config's joint_dim=5 is only for EMA smoothing, not for joint state extraction
-    graph_dit_joint_dim = 6  # Backbone (Unet) expects 6 for joint states
+    graph_dit_joint_dim = robot_state_dim  # 6 single arm, 12 dual arm
     action_dim = policy.cfg.action_dim if hasattr(policy, 'cfg') and hasattr(policy.cfg, 'action_dim') else 6
-    
+    _pos_keys = ["left_ee_position", "right_ee_position", "cube_1_pos", "cube_2_pos", "fork_pos", "knife_pos"]
+
     # Use single tensor [num_envs, history_len, dim] for efficiency
     action_history = torch.zeros(num_envs, action_history_length, action_dim, device=device)
     ee_node_history = torch.zeros(num_envs, action_history_length, 7, device=device)
@@ -191,6 +261,7 @@ def play_graph_rl_policy(
     # Reset environment
     obs, info = env.reset()
     obs = _process_obs(obs, device)
+    obs = _obs_to_local(obs, _env_origins, obs_struct, _pos_keys)
 
     # Stats (tensor for per-env tracking; lists for final stats like play.py)
     episode_rewards = torch.zeros(num_envs, device=device)
@@ -215,10 +286,15 @@ def play_graph_rl_policy(
             else:
                 obs_norm = obs
             
-            # Extract current node features and joint states from obs
+            # Extract current node features and joint states from obs (matching train_graph_rl.py)
             ee_node_current, object_node_current = policy._extract_nodes_from_obs(obs)
-            # NOTE: GraphDiT expects 6 dimensions (was trained with 6), regardless of residual RL config
-            joint_states_current = obs[:, :6]  # [B, 6] - always 6 for GraphDiT compatibility
+            if obs_struct is not None and "left_joint_pos" in obs_struct:
+                joint_states_current = torch.cat([
+                    obs[:, obs_struct["left_joint_pos"][0]:obs_struct["left_joint_pos"][1]],
+                    obs[:, obs_struct["right_joint_pos"][0]:obs_struct["right_joint_pos"][1]],
+                ], dim=-1)
+            else:
+                joint_states_current = obs[:, :robot_state_dim]
             
             # CRITICAL: Normalize node and joint histories (same as train_graph_rl.py)
             # History tensors are already in batch format [num_envs, history_len, dim]
@@ -237,6 +313,9 @@ def play_graph_rl_policy(
             if joint_mean is not None and joint_std is not None:
                 joint_state_history_norm = (joint_state_history_norm - joint_mean) / joint_std
             
+            # Get subtask condition (matching train_graph_rl.py)
+            subtask_cond = _extract_subtask_condition(env, obs, policy, device)
+
             # Get action from policy
             with torch.no_grad():
                 action, policy_info = policy.act(
@@ -246,7 +325,8 @@ def play_graph_rl_policy(
                     ee_node_history=ee_node_history_norm,  # [num_envs, history_len, 7] - normalized
                     object_node_history=object_node_history_norm,  # [num_envs, history_len, 7] - normalized
                     joint_states_history=joint_state_history_norm,  # [num_envs, history_len, joint_dim] - normalized
-                    deterministic=deterministic
+                    subtask_condition=subtask_cond,
+                    deterministic=deterministic,
                 )
 
             # Clip action to action space bounds
@@ -258,38 +338,48 @@ def play_graph_rl_policy(
                         torch.tensor(env.action_space.high, device=action.device, dtype=action.dtype)
                     )
 
-            # EMA smoothing for joints only (gripper excluded)
-            if action.shape[-1] >= 6:
-                joints = action[:, :5]
-                gripper_continuous = action[:, 5:6]
+            # Process action for env (matching train_graph_rl.py)
+            action_for_sim = action.clone()
+            if action_dim == 12:
+                # CRITICAL: Backbone outputs [left_6, right_6], env expects [right_6, left_6]
+                action_for_sim = torch.cat([action_for_sim[:, 6:12], action_for_sim[:, 0:6]], dim=1)
+            arm_block = 6
+            for arm_i in range(action_dim // arm_block):
+                base = arm_i * arm_block
+                joints_slice = slice(base, base + 5)
                 if ema_smoothed_joints is None:
-                    ema_smoothed_joints = joints.clone()
-                else:
-                    ema_smoothed_joints = ema_alpha * joints + (1 - ema_alpha) * ema_smoothed_joints
-                action = torch.cat([ema_smoothed_joints, gripper_continuous], dim=-1)
-
-            # Binarize gripper action (same as play.py)
-            if action.shape[-1] >= 6:
-                action[:, 5] = torch.where(
-                    action[:, 5] > -0.2,
+                    ema_smoothed_joints = action_for_sim[:, :action_dim].clone()
+                ema_smoothed_joints[:, joints_slice] = (
+                    ema_alpha * action_for_sim[:, joints_slice]
+                    + (1 - ema_alpha) * ema_smoothed_joints[:, joints_slice]
+                )
+                action_for_sim[:, joints_slice] = ema_smoothed_joints[:, joints_slice]
+                # Gripper: direct -1/1 mapping (policy outputs continuous, env expects +1/-1)
+                # Stack: -0.25 (train_disentangled_graph_gated); Table: -0.12
+                gripper_idx = base + 5
+                gripper_threshold = -0.25
+                action_for_sim[:, gripper_idx] = torch.where(
+                    action_for_sim[:, gripper_idx] > gripper_threshold,
                     torch.tensor(1.0, device=action.device, dtype=action.dtype),
-                    torch.tensor(-1.0, device=action.device, dtype=action.dtype)
+                    torch.tensor(-1.0, device=action.device, dtype=action.dtype),
                 )
 
             # Step environment
-            next_obs, reward, terminated, truncated, env_info = env.step(action)
+            next_obs, reward, terminated, truncated, env_info = env.step(action_for_sim)
             done = terminated | truncated
 
-            # Process
+            # Process next_obs (world→local)
             next_obs = _process_obs(next_obs, device)
+            next_obs = _obs_to_local(next_obs, _env_origins, obs_struct, _pos_keys)
             reward = reward.to(device).float()
             done = done.to(device).float()
 
-            # Update history buffers
-            # NOTE: Graph-DiT's action is in normalized space for history
-            # So we can directly use action for history
-            action_for_history = action
-            
+            # Update history buffers (matching train_graph_rl.py: normalized action for history)
+            if action_mean is not None and action_std is not None:
+                action_for_history = (action - action_mean) / (action_std + 1e-8)
+            else:
+                action_for_history = action
+
             # Roll all histories: shift left by 1, new data goes to last position
             action_history = torch.roll(action_history, -1, dims=1)
             action_history[:, -1, :] = action_for_history  # [num_envs, action_dim]
@@ -313,24 +403,39 @@ def play_graph_rl_policy(
             if len(done_envs) > 0:
                 policy.reset_envs(done_envs)
                 for i in done_envs.tolist():
-                    obj_height = obs[i, OBJ_HEIGHT_IDX].item()  # obs = 终止前最后一帧
                     is_truncated = bool(truncated[i].item() if truncated.dim() > 0 else truncated.item())
                     if is_truncated:
-                        is_success = False
+                        is_success = _check_position_success(obs, i, cfg)
                     else:
-                        is_success = obj_height >= SUCCESS_HEIGHT
+                        is_success = _check_success_from_info(env, env_info, i, obs_before_step=obs, cfg=cfg)
                     episode_success.append(is_success)
                     episode_rewards_list.append(episode_rewards[i].item())
                     episode_count = len(episode_success)
                     status = "✅" if is_success else "❌"
                     sr = sum(episode_success) / len(episode_success) * 100.0
-                    print(f"[Play] Ep {episode_count:3d} h={obj_height:.3f}m {status} | SR={sr:.1f}%")
+                    print(f"[Play] Ep {episode_count:3d} {status} | SR={sr:.1f}%")
 
-                # Vectorized reset: zero out all done environments at once
-                action_history[done_envs] = 0
-                ee_node_history[done_envs] = 0
-                object_node_history[done_envs] = 0
-                joint_state_history[done_envs] = 0
+                # Vectorized reset: zero out and prefill histories (matching train_graph_rl.py)
+                ee_node_reset, obj_node_reset = policy._extract_nodes_from_obs(next_obs)
+                if obs_struct is not None and "left_joint_pos" in obs_struct:
+                    joint_reset = torch.cat([
+                        next_obs[:, obs_struct["left_joint_pos"][0]:obs_struct["left_joint_pos"][1]],
+                        next_obs[:, obs_struct["right_joint_pos"][0]:obs_struct["right_joint_pos"][1]],
+                    ], dim=-1)
+                else:
+                    joint_reset = next_obs[:, :robot_state_dim]
+                for idx in done_envs.tolist():
+                    for t in range(action_history_length):
+                        ee_node_history[idx, t] = ee_node_reset[idx]
+                        object_node_history[idx, t] = obj_node_reset[idx]
+                        joint_state_history[idx, t] = joint_reset[idx]
+                    if action_mean is not None and action_std is not None:
+                        init_action_norm = (joint_reset[idx] - action_mean) / (action_std + 1e-8)
+                        for t in range(action_history_length):
+                            action_history[idx, t, :init_action_norm.shape[0]] = init_action_norm
+                    else:
+                        action_history[idx] = 0
+                policy.prefill_node_history(next_obs, env_ids=done_envs)
                 episode_rewards[done_envs] = 0
                 episode_lengths[done_envs] = 0
                 if ema_smoothed_joints is not None:
@@ -369,13 +474,83 @@ def play_graph_rl_policy(
 
 
 def _process_obs(obs, device: str) -> torch.Tensor:
-    """处理 observation"""
+    """Flatten dict obs to tensor (IsaacLab: obs['policy'] can be dict when concatenate_terms=False)."""
     if isinstance(obs, dict):
         if "policy" in obs:
-            obs = obs["policy"]
+            obs_val = obs["policy"]
+            if isinstance(obs_val, torch.Tensor):
+                obs = obs_val
+            elif isinstance(obs_val, np.ndarray):
+                obs = torch.from_numpy(obs_val).to(device)
+            elif isinstance(obs_val, dict):
+                _order = [
+                    "left_joint_pos", "left_joint_vel", "right_joint_pos", "right_joint_vel",
+                    "left_ee_position", "left_ee_orientation", "right_ee_position", "right_ee_orientation",
+                    "cube_1_pos", "cube_1_ori", "cube_2_pos", "cube_2_ori",
+                    "fork_pos", "fork_ori", "knife_pos", "knife_ori",
+                    "last_action_all",
+                ]
+                keys_used = [k for k in _order if k in obs_val]
+                parts = []
+                for k in keys_used:
+                    v = obs_val[k]
+                    if isinstance(v, torch.Tensor):
+                        parts.append(v.flatten(start_dim=1).to(device))
+                    elif isinstance(v, np.ndarray):
+                        parts.append(torch.from_numpy(v).flatten(start_dim=1).to(device))
+                    else:
+                        parts.append(torch.tensor(v).flatten(start_dim=1).to(device))
+                if not parts:
+                    raise RuntimeError("obs['policy'] is dict but no keys matched")
+                obs = torch.cat(parts, dim=1)
+            else:
+                obs = torch.tensor(obs_val, device=device)
         else:
             obs = torch.cat([v.flatten(start_dim=1) for v in obs.values()], dim=-1)
+    if not isinstance(obs, torch.Tensor):
+        obs = torch.tensor(obs, device=device)
     return obs.to(device).float()
+
+
+def _extract_subtask_condition(env, obs_local, policy, device) -> torch.Tensor:
+    """Minimal subtask extraction for play (matching train_graph_rl.py)."""
+    bb = policy.backbone
+    actual_bb = bb.backbone if hasattr(bb, "backbone") else bb
+    num_subtasks = getattr(getattr(actual_bb, "cfg", None), "num_subtasks", 0)
+    if num_subtasks <= 0:
+        return None
+    B = obs_local.shape[0] if obs_local is not None else 1
+    # Default: first subtask active
+    cond = torch.zeros(B, num_subtasks, device=device)
+    cond[:, 0] = 1.0
+    try:
+        base = env.unwrapped if hasattr(env, "unwrapped") else env
+        if hasattr(base, "get_subtask_term_signals"):
+            signals = base.get_subtask_term_signals()
+            pick = signals.get("pick_cube", signals.get("place_fork", None))
+            stack = signals.get("stack_cube", signals.get("place_knife", None))
+            if pick is not None and stack is not None:
+                pick = pick.to(device).float().bool()
+                stack = stack.to(device).float().bool()
+                cond = torch.zeros(B, num_subtasks, device=device)
+                cond[~pick, 0] = 1.0
+                cond[pick & ~stack, 1] = 1.0
+                cond[pick & stack, 1] = 1.0
+    except Exception:
+        pass
+    return cond
+
+
+def _obs_to_local(obs: torch.Tensor, env_origins, obs_struct, pos_keys) -> torch.Tensor:
+    """Subtract env_origins from position keys (matching train_graph_rl.py)."""
+    if obs_struct is None:
+        return obs
+    origins = env_origins[:obs.shape[0], :3].to(obs.device)
+    for pk in pos_keys:
+        if pk in obs_struct:
+            s, e = obs_struct[pk]
+            obs[:, s:e] = obs[:, s:e] - origins
+    return obs
 
 
 def main():
@@ -394,9 +569,13 @@ def main():
         "--deterministic", action="store_true", help="Use deterministic actions"
     )
     parser.add_argument(
-        "--policy_type", type=str, default="unet",
+        "--policy_type", type=str, default="graph_unet",
         choices=["unet", "graph_unet"],
-        help="Policy class for the pretrained backbone (default: unet)",
+        help="Policy class for the pretrained backbone (default: graph_unet)",
+    )
+    parser.add_argument(
+        "--episode_length_s", type=float, default=None,
+        help="Override episode length in seconds (default: use env config)",
     )
 
     args = parser.parse_args()
@@ -410,6 +589,7 @@ def main():
         device=args.device,
         deterministic=args.deterministic,
         policy_type=args.policy_type,
+        episode_length_s=args.episode_length_s,
     )
 
 

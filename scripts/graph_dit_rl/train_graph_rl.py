@@ -36,6 +36,7 @@ parser.add_argument("--max_iterations", type=int, default=500)
 parser.add_argument("--seed", type=int, default=42)
 # Note: --device is added by AppLauncher, don't add it manually
 parser.add_argument("--log_dir", type=str, default="./logs/graph_unet_rl", help="Log directory for residual RL (Unet)")
+parser.add_argument("--run_name", type=str, default=None, help="Override run folder name (e.g. for ablation: reg_0.5)")
 parser.add_argument("--save_interval", type=int, default=50)
 parser.add_argument("--best_sr_window", type=int, default=200,
                     help="Rolling window for best-model SR (100: ±10%% CI, 200: ±7%%)")
@@ -585,12 +586,12 @@ class GraphDiTRLTrainer:
                         + (1 - ema_alpha) * self._ema_smoothed_joints[:, joints_slice]
                     )
                     action_for_sim[:, joints_slice] = self._ema_smoothed_joints[:, joints_slice]
-                    # Gripper: apply linear mapping (matching play.py gripper_a/b for Stack)
-                    # then threshold for BinaryJointPositionAction (+1=open, -1=close)
+                    # Gripper: direct -1/1 mapping (policy outputs continuous, env expects +1/-1)
+                    # Stack: -0.25 (train_disentangled_graph_gated); Table: -0.12
                     gripper_idx = base + 5
-                    mapped = 1.7150 * action_for_sim[:, gripper_idx] + 0.8579
+                    gripper_threshold = -0.25  # stack (table uses -0.12)
                     action_for_sim[:, gripper_idx] = torch.where(
-                        mapped > 0.2,
+                        action_for_sim[:, gripper_idx] > gripper_threshold,
                         torch.tensor(1.0, device=action.device, dtype=action.dtype),
                         torch.tensor(-1.0, device=action.device, dtype=action.dtype),
                     )
@@ -1400,13 +1401,16 @@ def main():
             action_std = action_stats["std"].squeeze().to(device)
         print(f"[Main] Loaded action normalization stats")
 
-    # Run folder name from key hyperparams only (no timestamp)
-    use_adapt_ent = not getattr(args, "no_adaptive_entropy", False)
-    run_name = (
-        f"env{args.num_envs}_epochs{args.num_epochs}_beta{args.beta}_"
-        f"cEnt{args.c_ent}_cDelta{args.c_delta_reg}_adaptEnt{use_adapt_ent}"
-    )
-    run_name = run_name.replace(" ", "").replace("/", "-")
+    # Run folder name: --run_name override (ablation) or auto from hyperparams
+    if getattr(args, "run_name", None):
+        run_name = args.run_name.replace(" ", "").replace("/", "-")
+    else:
+        use_adapt_ent = not getattr(args, "no_adaptive_entropy", False)
+        run_name = (
+            f"env{args.num_envs}_epochs{args.num_epochs}_beta{args.beta}_"
+            f"cEnt{args.c_ent}_cDelta{args.c_delta_reg}_adaptEnt{use_adapt_ent}"
+        )
+        run_name = run_name.replace(" ", "").replace("/", "-")
     log_dir = os.path.join(args.log_dir, args.task, run_name)
 
     # Get num_envs from env_cfg (more reliable)
