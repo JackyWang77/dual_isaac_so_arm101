@@ -1476,6 +1476,8 @@ class GraphUnetResidualRLPolicy(nn.Module):
         action = batch["action"]  # Denormalized (final executed action)
         returns = batch["returns"]
         adv = batch["adv"]
+        # Normalize adv (standardize): stabilizes AWR weights, prevents scale-dependent beta
+        adv = (adv - adv.mean()) / (adv.std() + 1e-8)
 
         # ============================================================
         # FIX 1: Normalize a_base to match act() where Actor sees normalized input
