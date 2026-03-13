@@ -44,4 +44,5 @@ python scripts/graph_dit_rl/play_graph_rl.py \
     --pretrained_checkpoint "$PRETRAINED_CHECKPOINT" \
     --num_envs "$NUM_ENVS" \
     --num_episodes "$NUM_EPISODES" \
-    --episode_length_s "$EPISODE_LENGTH_S"
+    --episode_length_s "$EPISODE_LENGTH_S" \
+    --deterministic
