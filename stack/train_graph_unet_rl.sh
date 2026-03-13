@@ -5,19 +5,20 @@ cd "$(dirname "$0")/.."
 set -e
 
 PRETRAINED_CHECKPOINT="${1:-}"
-NUM_ENVS="${2:-640}"
-MAX_ITERATIONS="${3:-200}"
-STEPS_PER_ENV="${4:-405}"
-MINI_BATCH_SIZE="${5:-640}"
-NUM_EPOCHS="${6:-2}"
-C_DELTA_REG="${7:-0.5}"
-C_ENT="${8:-0.01}"
-BETA="${9:-0.3}"
-ALPHA_INIT="${10:-0.05}"
-EXPECTILE_TAU="${11:-0.5}"
-LR="${12:-1e-4}"
-SEED="${13:-42}"
-HEADLESS="${14:-true}"
+RESUME_CHECKPOINT="${2:-}"
+NUM_ENVS="${3:-512}"
+MAX_ITERATIONS="${4:-200}"
+STEPS_PER_ENV="${5:-405}"
+MINI_BATCH_SIZE="${6:-512}"
+NUM_EPOCHS="${7:-2}"
+C_DELTA_REG="${8:-0.5}"
+C_ENT="${9:-0.01}"
+BETA="${10:-0.3}"
+ALPHA_INIT="${11:-0.05}"
+EXPECTILE_TAU="${12:-0.5}"
+LR="${13:-1e-4}"
+SEED="${14:-42}"
+HEADLESS="${15:-true}"
 
 TASK="${TASK:-SO-ARM101-Dual-Cube-Stack-RL-v0}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-10}"
@@ -30,10 +31,14 @@ LOG_DIR="${LOG_DIR:-./logs/dual_arm_rl}"
 RUN_NAME="${RUN_NAME:-}"
 
 if [ -z "$PRETRAINED_CHECKPOINT" ] || [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
-    echo "Usage: $0 <pretrained_checkpoint> [num_envs] [max_iter] [steps_per_env] [mini_batch_size] [num_epochs] [c_delta_reg] [c_ent] [beta] [alpha_init] [expectile_tau] [lr] [seed] [headless]"
+    echo "Usage: $0 <pretrained_checkpoint> [resume_checkpoint] [num_envs] [max_iter] ..."
+    echo "  resume_checkpoint: optional, RL checkpoint to continue training (policy_iter_X.pt or policy_final.pt)"
     echo ""
     echo "Example (baseline):"
     echo "  $0 ./logs/gated_small/stack_joint/best_model.pt 128 200"
+    echo ""
+    echo "Example (resume from iter 100 to 200):"
+    echo "  $0 ./logs/gated_small/stack_joint/best_model.pt ./logs/dual_arm_rl/xxx/policy_iter_100.pt 128 200"
     echo ""
     echo "Ablation examples:"
     echo "  $0 ./path/to/best_model.pt 128 200 160 64 2 0.5   # c_delta_reg=0.5"
@@ -61,6 +66,7 @@ ADAPTIVE_ENTROPY_FLAG=""
 echo "========================================"
 echo "Training Dual Arm + Residual RL - Stack"
 echo "Pretrained: $PRETRAINED_CHECKPOINT"
+[ -n "$RESUME_CHECKPOINT" ] && echo "Resume from: $RESUME_CHECKPOINT"
 echo "Task: $TASK"
 echo "Envs=$NUM_ENVS Iter=$MAX_ITERATIONS Steps=$STEPS_PER_ENV"
 echo "Batch=$MINI_BATCH_SIZE Epochs=$NUM_EPOCHS"
@@ -71,9 +77,13 @@ echo "========================================"
 RUN_NAME_ARGS=""
 [ -n "$RUN_NAME" ] && RUN_NAME_ARGS="--run_name $RUN_NAME"
 
+RESUME_ARGS=""
+[ -n "$RESUME_CHECKPOINT" ] && [ -f "$RESUME_CHECKPOINT" ] && RESUME_ARGS="--resume $RESUME_CHECKPOINT"
+
 python scripts/graph_dit_rl/train_graph_rl.py \
     --task "$TASK" \
     --pretrained_checkpoint "$PRETRAINED_CHECKPOINT" \
+    $RESUME_ARGS \
     --num_envs "$NUM_ENVS" \
     --max_iterations "$MAX_ITERATIONS" \
     --steps_per_env "$STEPS_PER_ENV" \

@@ -1587,8 +1587,9 @@ class GraphUnetResidualRLPolicy(nn.Module):
     # -----------------------------
     # Save / Load
     # -----------------------------
-    def save(self, path: str):
-        """Save policy including trainable node_to_z from backbone"""
+    def save(self, path: str, iteration: Optional[int] = None):
+        """Save policy including trainable node_to_z from backbone.
+        iteration: optional, for resume (train from iteration+1 to max_iterations)."""
         policy_state_dict = self.state_dict()
         
         # CRITICAL: Also save node_to_z weights from backbone if it's trainable
@@ -1609,11 +1610,14 @@ class GraphUnetResidualRLPolicy(nn.Module):
         else:
             print("[GraphUnetResidualRLPolicy] ⚠️  WARNING: Cannot access backbone.backbone!")
         
-        torch.save({
+        save_dict = {
             "policy_state_dict": policy_state_dict,
             "node_to_z_state_dict": node_to_z_state_dict if len(node_to_z_state_dict) > 0 else None,
             "cfg": self.cfg,
-        }, path)
+        }
+        if iteration is not None:
+            save_dict["iteration"] = iteration
+        torch.save(save_dict, path)
         print(f"[GraphUnetResidualRLPolicy] Saved to: {path}")
     
     @classmethod

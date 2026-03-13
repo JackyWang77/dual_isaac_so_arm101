@@ -63,6 +63,8 @@ parser.add_argument("--c_ent_bad", type=float, default=0.02, help="High entropy 
 parser.add_argument("--c_ent_good", type=float, default=0.005, help="Low entropy weight for adv>0 (success steps)")
 parser.add_argument("--critic_warmup_iters", type=int, default=5,
     help="First N iters: only train critic (freeze actor/z_adapter). 'Don't move before critic learns'.")
+parser.add_argument("--resume", type=str, default=None,
+    help="Resume from RL checkpoint (policy_iter_X.pt or policy_final.pt). Continue training to max_iterations.")
 
 # AppLauncher
 AppLauncher.add_app_launcher_args(parser)
@@ -801,9 +803,13 @@ class GraphDiTRLTrainer:
             "explained_variance": explained_variance,
         }
 
-    def train(self, max_iterations: int, save_interval: int = 50):
-        """主训练循环"""
-        print(f"\n[Trainer] Starting training for {max_iterations} iterations...")
+    def train(self, max_iterations: int, save_interval: int = 50, start_iteration: int = 1):
+        """主训练循环。start_iteration: 从第几 iter 开始（resume 时 >1）"""
+        self._start_iteration = start_iteration
+        if start_iteration > 1:
+            print(f"\n[Trainer] Resuming from iteration {start_iteration} to {max_iterations}...")
+        else:
+            print(f"\n[Trainer] Starting training for {max_iterations} iterations...")
 
         # Step Decay LR Scheduler: 0-25% 1.0, 25-50% 0.8, 50-75% 0.6, 75-100% 0.4 (final lr = 2e-4 when base=5e-4)
         def lr_lambda(epoch):
@@ -821,7 +827,8 @@ class GraphDiTRLTrainer:
         self._train_start = time.time()
         self._max_iterations = max_iterations
 
-        for iteration in range(1, max_iterations + 1):
+        start_iter = getattr(self, "_start_iteration", 1)
+        for iteration in range(start_iter, max_iterations + 1):
             current_lr = self.optimizer.param_groups[0]["lr"]
             # Collect
             rollout_stats = self.collect_rollout(iteration=iteration)
@@ -1133,10 +1140,10 @@ class GraphDiTRLTrainer:
         print(f"[Trainer] Best model saved (SR_{self.best_sr_window}ep={self.best_sr*100:.1f}%): {path}")
 
     def _save(self, iteration: int, final: bool = False):
-        """保存 checkpoint"""
+        """保存 checkpoint (includes iteration for resume)"""
         suffix = "final" if final else f"iter_{iteration}"
         path = os.path.join(self.log_dir, f"policy_{suffix}.pt")
-        self.policy.save(path)
+        self.policy.save(path, iteration=iteration)
         print(f"[Trainer] Saved checkpoint: {path}")
 
 
@@ -1312,15 +1319,25 @@ def main():
     ent_mode = f"Adaptive Entropy (bad={getattr(policy_cfg,'c_ent_bad',0.1)}, good={getattr(policy_cfg,'c_ent_good',0.005)})" if getattr(policy_cfg, "use_adaptive_entropy", False) else f"Fixed cEnt={policy_cfg.cEnt}"
     print(f"[Main] Entropy: {ent_mode}")
 
-    # Create policy (gripper from backbone 6th dim only)
-    policy = GraphUnetResidualRLPolicy(
-        cfg=policy_cfg,
-        backbone=backbone,
-        pred_horizon=getattr(backbone_policy.cfg, "pred_horizon", 16),
-        exec_horizon=getattr(backbone_policy.cfg, "exec_horizon", 8),
-        num_diffusion_steps=15,
-    )
-    policy.to(device)
+    # Create or load policy
+    start_iteration = 1
+    if getattr(args, "resume", None) and os.path.isfile(args.resume):
+        print(f"\n[Main] Resuming from RL checkpoint: {args.resume}")
+        _resume_ckpt = torch.load(args.resume, map_location="cpu", weights_only=False)
+        start_iteration = _resume_ckpt.get("iteration", 0) + 1
+        print(f"[Main] Resuming from iteration {start_iteration} (checkpoint had iter={start_iteration-1})")
+        policy = GraphUnetResidualRLPolicy.load(args.resume, backbone=backbone, device=device)
+        policy.num_diffusion_steps = 15
+        policy_cfg = policy.cfg  # use cfg from checkpoint when resuming
+    else:
+        policy = GraphUnetResidualRLPolicy(
+            cfg=policy_cfg,
+            backbone=backbone,
+            pred_horizon=getattr(backbone_policy.cfg, "pred_horizon", 16),
+            exec_horizon=getattr(backbone_policy.cfg, "exec_horizon", 8),
+            num_diffusion_steps=15,
+        )
+        policy.to(device)
 
     # Load normalization stats from checkpoint (same as Graph-DiT play.py)
     checkpoint = torch.load(args.pretrained_checkpoint, map_location=device, weights_only=False)
@@ -1411,7 +1428,12 @@ def main():
             f"cEnt{args.c_ent}_cDelta{args.c_delta_reg}_adaptEnt{use_adapt_ent}"
         )
         run_name = run_name.replace(" ", "").replace("/", "-")
-    log_dir = os.path.join(args.log_dir, args.task, run_name)
+    # When resuming, save to same folder as checkpoint
+    if getattr(args, "resume", None) and os.path.isfile(args.resume):
+        log_dir = os.path.dirname(os.path.abspath(args.resume))
+        print(f"[Main] Resume mode: saving to same folder as checkpoint: {log_dir}")
+    else:
+        log_dir = os.path.join(args.log_dir, args.task, run_name)
 
     # Get num_envs from env_cfg (more reliable)
     num_envs = env_cfg.scene.num_envs if hasattr(env_cfg, "scene") and hasattr(env_cfg.scene, "num_envs") else args.num_envs
@@ -1536,6 +1558,7 @@ def main():
     trainer.train(
         max_iterations=args.max_iterations,
         save_interval=args.save_interval,
+        start_iteration=start_iteration,
     )
 
     # Cleanup
