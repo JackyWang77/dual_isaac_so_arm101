@@ -65,6 +65,10 @@ parser.add_argument("--critic_warmup_iters", type=int, default=5,
     help="First N iters: only train critic (freeze actor/z_adapter). 'Don't move before critic learns'.")
 parser.add_argument("--resume", type=str, default=None,
     help="Resume from RL checkpoint (policy_iter_X.pt or policy_final.pt). Continue training to max_iterations.")
+parser.add_argument("--use_counterfactual_q", action="store_true", default=False,
+    help="Use Q(s,a) critic with counterfactual advantage A_res = Q(s,a_total) - Q(s,a_base)")
+parser.add_argument("--counterfactual_log_tau", type=float, default=0.5,
+    help="Log compression temperature for counterfactual advantage: sign(A)*log(1+|A|/tau)*tau")
 
 # AppLauncher
 AppLauncher.add_app_launcher_args(parser)
@@ -144,6 +148,8 @@ class RolloutBuffer:
         self.z_layers = torch.zeros(T, N, num_layers, z_dim, device=device)
         self.z_bar = torch.zeros(T, N, z_dim, device=device)
         self.gate_w = torch.zeros(T, N, num_layers, device=device)
+        # Q(s, a_base) for counterfactual advantage (only used when use_counterfactual_q=True)
+        self.q_base = torch.zeros(T, N, device=device)
 
         self._initialized = True
 
@@ -179,6 +185,8 @@ class RolloutBuffer:
         self.z_layers[t] = info["z_layers"]
         self.z_bar[t] = info["z_bar"]
         self.gate_w[t] = info["gate_w"]
+        if info.get("q_base") is not None:
+            self.q_base[t] = info["q_base"].detach()
 
         self.ptr += 1
 
@@ -203,6 +211,7 @@ class RolloutBuffer:
         z_layers_flat = self.z_layers.reshape(total_samples, self.num_layers, -1)
         z_bar_flat = self.z_bar.reshape(total_samples, -1)
         values_flat = self.values.reshape(total_samples)
+        q_base_flat = self.q_base.reshape(total_samples)  # Q(s, a_base) for counterfactual
 
         # Normalize advantages
         adv_flat = (adv_flat - adv_flat.mean()) / (adv_flat.std() + 1e-8)
@@ -213,6 +222,7 @@ class RolloutBuffer:
         returns_std = returns_flat.std() + 1e-8
         returns_flat = (returns_flat - returns_mean) / returns_std
         values_flat = (values_flat - returns_mean) / returns_std
+        q_base_flat = (q_base_flat - returns_mean) / returns_std  # Same scale as q_total for counterfactual
 
         for _ in range(num_epochs):
             indices = torch.randperm(total_samples, device=self.device)
@@ -231,6 +241,8 @@ class RolloutBuffer:
                     "z_layers": z_layers_flat[idx],
                     "z_bar": z_bar_flat[idx],
                     "values": values_flat[idx],
+                    "q_total": values_flat[idx],  # values = Q(s, a_total) in Q mode
+                    "q_base": q_base_flat[idx],   # Q(s, a_base) for counterfactual
                 }
 
     def reset(self):
@@ -1309,6 +1321,8 @@ def main():
         use_adaptive_entropy=not getattr(args, "no_adaptive_entropy", False),
         c_ent_bad=args.c_ent_bad,
         c_ent_good=args.c_ent_good,
+        use_counterfactual_q=getattr(args, "use_counterfactual_q", False),
+        counterfactual_log_tau=getattr(args, "counterfactual_log_tau", 0.5),
     )
     print(f"[Main] residual_action_mask: {residual_action_mask.tolist()} (all 1s, no mask)")
     print(f"[Main] Residual RL obs_structure: {policy_cfg.obs_structure}")
@@ -1319,6 +1333,10 @@ def main():
         print("[Main] ✅ obs_structure consistent")
     ent_mode = f"Adaptive Entropy (bad={getattr(policy_cfg,'c_ent_bad',0.1)}, good={getattr(policy_cfg,'c_ent_good',0.005)})" if getattr(policy_cfg, "use_adaptive_entropy", False) else f"Fixed cEnt={policy_cfg.cEnt}"
     print(f"[Main] Entropy: {ent_mode}")
+    if policy_cfg.use_counterfactual_q:
+        print(f"[Main] Q(s,a) counterfactual baseline ENABLED (log_tau={policy_cfg.counterfactual_log_tau})")
+    else:
+        print(f"[Main] V(s) baseline (standard)")
 
     # Create or load policy
     start_iteration = 1

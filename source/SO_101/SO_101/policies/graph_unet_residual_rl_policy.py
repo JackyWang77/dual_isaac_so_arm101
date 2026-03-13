@@ -341,6 +341,12 @@ class GraphUnetResidualRLCfg:
     # residual mask
     residual_action_mask: Optional[torch.Tensor] = None
 
+    # Q(s,a) counterfactual baseline: A_res = Q(s, a_total) - Q(s, a_base)
+    # When True: critic becomes Q(s,a) and actor uses counterfactual advantage
+    use_counterfactual_q: bool = False
+    # Log compression temperature for counterfactual advantage (prevents "big score eats small score")
+    counterfactual_log_tau: float = 0.5
+
 
 # =========================================================
 # Modules: Gate / Actor / Critic (unchanged)
@@ -436,11 +442,13 @@ class DeepValueCritic(nn.Module):
         hidden: Tuple[int, ...],
         act: str,
         use_layer_heads: bool = True,
+        action_dim: int = 0,  # >0: Q(s,a) mode; 0: V(s) mode
     ):
         super().__init__()
         self.K = K
         self.z_dim = z_dim
         self.use_layer_heads = use_layer_heads
+        self.action_dim = action_dim
 
         if use_layer_heads:
             self.trunk = mlp(z_dim, hidden, hidden[-1], act=act)
@@ -449,7 +457,8 @@ class DeepValueCritic(nn.Module):
             self.trunk = None
             self.layer_heads = None
 
-        self.bar_trunk = mlp(z_dim + obs_dim, hidden, hidden[-1], act=act)
+        bar_in_dim = z_dim + obs_dim + action_dim
+        self.bar_trunk = mlp(bar_in_dim, hidden, hidden[-1], act=act)
         self.bar_head = nn.Linear(hidden[-1], 1)
 
     def forward_layers(self, z_layers: torch.Tensor) -> torch.Tensor:
@@ -467,8 +476,12 @@ class DeepValueCritic(nn.Module):
         V_layers = torch.cat(Vs, dim=1)
         return V_layers
 
-    def forward_bar(self, z_bar: torch.Tensor, obs: torch.Tensor) -> torch.Tensor:
-        x = torch.cat([z_bar, obs], dim=-1)
+    def forward_bar(self, z_bar: torch.Tensor, obs: torch.Tensor,
+                    action: Optional[torch.Tensor] = None) -> torch.Tensor:
+        if action is not None:
+            x = torch.cat([z_bar, obs, action], dim=-1)
+        else:
+            x = torch.cat([z_bar, obs], dim=-1)
         h = self.bar_trunk(x)
         return self.bar_head(h).squeeze(-1)
 
@@ -665,6 +678,8 @@ class GraphUnetResidualRLPolicy(nn.Module):
         self.actor_action_dim = cfg.action_dim
 
         # Critic: bar head only (U-Net single z)
+        # Q(s,a) mode: action_dim > 0 adds action to critic input
+        critic_action_dim = cfg.action_dim if getattr(cfg, "use_counterfactual_q", False) else 0
         self.critic = DeepValueCritic(
             K=cfg.num_layers,
             z_dim=cfg.z_dim,
@@ -672,6 +687,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             hidden=cfg.critic_hidden,
             act=cfg.activation,
             use_layer_heads=False,
+            action_dim=critic_action_dim,
         )
 
         # Residual scaling: scalar (legacy) or adaptive (state-dependent)
@@ -1351,7 +1367,13 @@ class GraphUnetResidualRLPolicy(nn.Module):
             z_layers = self._get_z_layers_fast(obs)
             z_bar, _ = self.aggregate_latent(z_layers)
             obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
-            v_bar = self.critic.forward_bar(z_bar, obs_critic)
+            if getattr(self.cfg, "use_counterfactual_q", False):
+                # Q(s,a) mode: a_total = a_base when zero_residual → Q(s,a_total) = Q(s,a_base)
+                v_bar = self.critic.forward_bar(z_bar, obs_critic, a_base_norm_full.detach())
+                q_base = v_bar  # Same action → A_res = 0 (correct for warmup)
+            else:
+                v_bar = self.critic.forward_bar(z_bar, obs_critic)
+                q_base = None
             delta = torch.zeros(B, act_dim, device=a_base.device, dtype=a_base.dtype)
             K = self.cfg.num_layers
             gate_w = torch.ones(B, K, device=z_bar.device, dtype=z_bar.dtype) / K
@@ -1360,6 +1382,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
                 "delta": delta, "delta_norm": delta, "log_prob": torch.zeros(B, device=a_base.device),
                 "entropy": torch.zeros(B, device=a_base.device), "z_layers": z_layers, "z_bar": z_bar,
                 "gate_w": gate_w, "v_bar": v_bar, "alpha": torch.tensor(0.0, device=a_base.device),
+                "q_base": q_base,
             }
             if self.history_buffer is not None:
                 action_for_history = a_base_norm_full
@@ -1428,7 +1451,15 @@ class GraphUnetResidualRLPolicy(nn.Module):
         entropy = dist.entropy().sum(dim=-1)
         # Critic: select obs based on critic_obs_mode
         obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
-        v_bar = self.critic.forward_bar(z_bar, obs_critic)
+        if getattr(self.cfg, "use_counterfactual_q", False):
+            # Q(s,a) mode: compute Q(s, a_total) and Q(s, a_base) for counterfactual
+            a_total_norm = (a.detach() - self.action_mean[:act_dim]) / (self.action_std[:act_dim] + 1e-8)
+            q_total = self.critic.forward_bar(z_bar, obs_critic, a_total_norm)
+            q_base = self.critic.forward_bar(z_bar, obs_critic, a_base_norm_full.detach())
+            v_bar = q_total  # Used for GAE (SARSA-style)
+        else:
+            v_bar = self.critic.forward_bar(z_bar, obs_critic)
+            q_base = None
 
         # gate_w: U-Net has no gate; use uniform placeholder for buffer compatibility
         K = self.cfg.num_layers
@@ -1447,6 +1478,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             "z_bar": z_bar,
             "gate_w": gate_w,  # [B, K]; placeholder when no gate (U-Net)
             "v_bar": v_bar,
+            "q_base": q_base,  # Q(s, a_base) for counterfactual; None when V(s) mode
             "alpha": alpha.detach(),
         }
         return a, info
@@ -1526,7 +1558,15 @@ class GraphUnetResidualRLPolicy(nn.Module):
         loss_delta_reg = (delta_norm ** 2).mean()
         alpha = alpha_mean  # for return dict
 
-        # AWR weights (原始)
+        # AWR weights: use counterfactual advantage when Q(s,a) mode
+        if getattr(self.cfg, "use_counterfactual_q", False) and "q_base" in batch:
+            # Counterfactual advantage: A_res = Q(s, a_total) - Q(s, a_base)
+            adv_cf = batch["q_total"] - batch["q_base"]
+            # Log compression: sign(A) * log(1 + |A|/tau) * tau
+            tau = getattr(self.cfg, "counterfactual_log_tau", 0.5)
+            adv_cf = torch.sign(adv_cf) * torch.log1p(adv_cf.abs() / tau) * tau
+            adv = (adv_cf - adv_cf.mean()) / (adv_cf.std() + 1e-8)
+
         beta = max(self.cfg.beta, 1e-8)
         w_adv = torch.exp(adv / beta)
         w_adv = torch.clamp(w_adv, 0.0, self.cfg.weight_clip_max)
@@ -1540,7 +1580,12 @@ class GraphUnetResidualRLPolicy(nn.Module):
         # (actor and critic share z_adapter; critic's large MSE gradients would otherwise
         #  destroy the representation that actor relies on)
         obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
-        V_bar = self.critic.forward_bar(z_bar_new.detach(), obs_critic)
+        if getattr(self.cfg, "use_counterfactual_q", False):
+            # Q(s,a) mode: pass action (detached) to critic
+            a_norm_critic = (action - self.action_mean) / (self.action_std + 1e-8)
+            V_bar = self.critic.forward_bar(z_bar_new.detach(), obs_critic, a_norm_critic.detach())
+        else:
+            V_bar = self.critic.forward_bar(z_bar_new.detach(), obs_critic)
         if getattr(self.cfg, "use_expectile_value", False):
             # Expectile loss (IQL-style): L2^τ(u) = |τ - 1(u<0)| * u²
             # forward_bar already returns [B], no squeeze needed

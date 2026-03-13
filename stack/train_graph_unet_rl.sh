@@ -26,7 +26,9 @@ USE_ADAPTIVE_ALPHA="${USE_ADAPTIVE_ALPHA:-false}"
 USE_ADAPTIVE_ENTROPY="${USE_ADAPTIVE_ENTROPY:-true}"
 C_ENT_BAD="${C_ENT_BAD:-0.04}"
 C_ENT_GOOD="${C_ENT_GOOD:-0.01}"
-CRITIC_WARMUP_ITERS="${CRITIC_WARMUP_ITERS:-5}"
+CRITIC_WARMUP_ITERS="${CRITIC_WARMUP_ITERS:-10}"
+USE_COUNTERFACTUAL_Q="${USE_COUNTERFACTUAL_Q:-true}"
+COUNTERFACTUAL_LOG_TAU="${COUNTERFACTUAL_LOG_TAU:-0.5}"
 LOG_DIR="${LOG_DIR:-./logs/dual_arm_rl}"
 RUN_NAME="${RUN_NAME:-}"
 
@@ -62,6 +64,8 @@ ADAPTIVE_ALPHA_FLAG=""
 [ "$USE_ADAPTIVE_ALPHA" = "false" ] && ADAPTIVE_ALPHA_FLAG="--no_adaptive_alpha"
 ADAPTIVE_ENTROPY_FLAG=""
 [ "$USE_ADAPTIVE_ENTROPY" = "false" ] && ADAPTIVE_ENTROPY_FLAG="--no_adaptive_entropy"
+COUNTERFACTUAL_Q_FLAG=""
+[ "$USE_COUNTERFACTUAL_Q" = "true" ] && COUNTERFACTUAL_Q_FLAG="--use_counterfactual_q --counterfactual_log_tau $COUNTERFACTUAL_LOG_TAU"
 
 echo "========================================"
 echo "Training Dual Arm + Residual RL - Stack"
@@ -70,7 +74,7 @@ echo "Pretrained: $PRETRAINED_CHECKPOINT"
 echo "Task: $TASK"
 echo "Envs=$NUM_ENVS Iter=$MAX_ITERATIONS Steps=$STEPS_PER_ENV"
 echo "Batch=$MINI_BATCH_SIZE Epochs=$NUM_EPOCHS"
-echo "c_delta_reg=$C_DELTA_REG beta=$BETA c_ent=$C_ENT critic_warmup=$CRITIC_WARMUP_ITERS"
+echo "c_delta_reg=$C_DELTA_REG beta=$BETA c_ent=$C_ENT critic_warmup=$CRITIC_WARMUP_ITERS counterfactual_q=$USE_COUNTERFACTUAL_Q"
 echo "Log: $LOG_DIR"
 echo "========================================"
 
@@ -98,6 +102,7 @@ python scripts/graph_dit_rl/train_graph_rl.py \
     --expectile_tau "$EXPECTILE_TAU" \
     $ADAPTIVE_ALPHA_FLAG \
     $ADAPTIVE_ENTROPY_FLAG \
+    $COUNTERFACTUAL_Q_FLAG \
     --lr "$LR" \
     --seed "$SEED" \
     --critic_warmup_iters "$CRITIC_WARMUP_ITERS" \
