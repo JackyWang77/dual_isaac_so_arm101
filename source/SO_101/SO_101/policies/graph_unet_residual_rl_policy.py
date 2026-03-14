@@ -1634,11 +1634,19 @@ class GraphUnetResidualRLPolicy(nn.Module):
         else:
             beta_val = max(self.cfg.beta, 1e-8)
             beta = None  # No learnable beta
+        # Effective sample ratio in LOG-SPACE (before exp/clip, numerically stable)
+        # eff_n = (Σw)² / Σw² where w = exp(adv/β)
+        # log(eff_n) = 2*logsumexp(adv/β) - logsumexp(2*adv/β)
+        log_w = adv / beta_val
+        log_sum_w = torch.logsumexp(log_w, dim=0)       # log(Σw)
+        log_sum_w2 = torch.logsumexp(2 * log_w, dim=0)  # log(Σw²)
+        log_eff_n = 2 * log_sum_w - log_sum_w2           # log((Σw)²/Σw²)
+        eff_ratio = torch.exp(log_eff_n - np.log(log_w.shape[0]))  # eff_n / N
+        eff_ratio = torch.clamp(eff_ratio, 1e-6, 1.0)
+
+        # Actor weights: exp → clip → normalize (standard AWR)
         w_adv = torch.exp(adv / beta_val)
         w_adv = torch.clamp(w_adv, 0.0, self.cfg.weight_clip_max)
-        # Effective sample ratio for beta dual (before normalization; invariant to scaling)
-        eff_n = (w_adv.sum() ** 2) / ((w_adv ** 2).sum() + 1e-8)
-        eff_ratio = eff_n / w_adv.shape[0]
         w_adv = w_adv / (w_adv.mean() + 1e-8)
         loss_actor = -(w_adv.detach() * log_prob).mean()
 
