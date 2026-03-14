@@ -361,6 +361,14 @@ class GraphUnetResidualRLCfg:
     target_entropy: float = -6.0  # Target entropy ≈ -action_dim/2 (e.g. -6 for 12D dual arm)
     c_ent_init: float = 0.01      # Initial entropy coefficient (log-space learnable)
 
+    # ===== SAC-style adaptive AWR beta =====
+    # Learnable β via effective sample ratio: auto-adjusts exploration-exploitation balance
+    # β too small → weights too sharp → only extreme actions learn → increase β
+    # β too large → weights too uniform → no learning signal → decrease β
+    use_adaptive_beta: bool = True
+    target_eff_ratio: float = 0.4  # Target effective sample ratio ∈ (0,1); 0.4 = use ~40% of batch
+    beta_init: float = 0.3         # Initial β (log-space learnable)
+
 
 # =========================================================
 # Modules: Gate / Actor / Critic (unchanged)
@@ -746,6 +754,18 @@ class GraphUnetResidualRLPolicy(nn.Module):
         else:
             self.log_c_ent = None
             self.target_entropy = None
+
+        # ===== SAC-style adaptive AWR beta =====
+        # Learnable β: auto-adjusts to maintain target effective sample ratio
+        self.use_adaptive_beta = getattr(cfg, "use_adaptive_beta", False)
+        if self.use_adaptive_beta:
+            _beta_init = getattr(cfg, "beta_init", 0.3)
+            self.log_beta = nn.Parameter(torch.tensor(np.log(_beta_init), dtype=torch.float32))
+            self.target_eff_ratio = getattr(cfg, "target_eff_ratio", 0.4)
+            print(f"[GraphUnetResidualRLPolicy] Adaptive beta: init={_beta_init}, target_eff_ratio={self.target_eff_ratio}")
+        else:
+            self.log_beta = None
+            self.target_eff_ratio = None
 
         # Compute joint/gripper indices for per-arm processing
         self.num_arms = max(1, cfg.action_dim // cfg.arm_action_dim)
@@ -1607,9 +1627,18 @@ class GraphUnetResidualRLPolicy(nn.Module):
             adv_cf = torch.sign(adv_cf) * torch.log1p(adv_cf.abs() / tau) * tau
             adv = (adv_cf - adv_cf.mean()) / (adv_cf.std() + 1e-8)
 
-        beta = max(self.cfg.beta, 1e-8)
-        w_adv = torch.exp(adv / beta)
+        # ===== AWR weights with adaptive or fixed beta =====
+        if self.use_adaptive_beta and self.log_beta is not None:
+            beta = self.log_beta.exp()
+            beta_val = beta.detach()  # For actor weights (β is hyperparameter, not part of actor objective)
+        else:
+            beta_val = max(self.cfg.beta, 1e-8)
+            beta = None  # No learnable beta
+        w_adv = torch.exp(adv / beta_val)
         w_adv = torch.clamp(w_adv, 0.0, self.cfg.weight_clip_max)
+        # Effective sample ratio for beta dual (before normalization; invariant to scaling)
+        eff_n = (w_adv.sum() ** 2) / ((w_adv ** 2).sum() + 1e-8)
+        eff_ratio = eff_n / w_adv.shape[0]
         w_adv = w_adv / (w_adv.mean() + 1e-8)
         loss_actor = -(w_adv.detach() * log_prob).mean()
 
@@ -1679,6 +1708,16 @@ class GraphUnetResidualRLPolicy(nn.Module):
             loss_delta_reg_scaled = self.cfg.c_delta_reg * loss_delta_reg
             loss_delta_dual = torch.tensor(0.0, device=obs.device)
 
+        # ===== Beta dual variable =====
+        if self.use_adaptive_beta and beta is not None:
+            # Dual variable loss: adjust β to target effective sample ratio
+            # ∂/∂log_β = β * (eff_ratio - target)
+            # eff_ratio < target (too sharp) → gradient negative → β increases → softer ✓
+            # eff_ratio > target (too uniform) → gradient positive → β decreases → sharper ✓
+            loss_beta_dual = beta * (eff_ratio.detach() - self.target_eff_ratio)
+        else:
+            loss_beta_dual = torch.tensor(0.0, device=obs.device)
+
         # Total
         loss_total = (
             loss_actor
@@ -1688,11 +1727,13 @@ class GraphUnetResidualRLPolicy(nn.Module):
             + loss_delta_reg_scaled  # Delta regularization (adaptive or fixed)
             + loss_ent_dual          # SAC-style entropy dual variable
             + loss_delta_dual        # SAC-style delta_reg dual variable
+            + loss_beta_dual         # SAC-style beta dual variable
         )
 
         # Report adaptive coefficients
         c_delta_reg_val = self.log_c_delta_reg.exp().detach() if self.log_c_delta_reg is not None else torch.tensor(self.cfg.c_delta_reg)
         c_ent_val = self.log_c_ent.exp().detach() if self.log_c_ent is not None else torch.tensor(self.cfg.cEnt)
+        beta_val_report = self.log_beta.exp().detach() if self.log_beta is not None else torch.tensor(self.cfg.beta)
 
         return {
             "loss_total": loss_total,
@@ -1707,6 +1748,8 @@ class GraphUnetResidualRLPolicy(nn.Module):
             "alpha": alpha.detach(),
             "c_delta_reg": c_delta_reg_val,
             "c_ent": c_ent_val,
+            "beta": beta_val_report,
+            "eff_ratio": eff_ratio.detach(),
         }
     
     # -----------------------------

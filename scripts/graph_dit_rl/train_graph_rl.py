@@ -87,6 +87,14 @@ parser.add_argument("--target_entropy", type=float, default=-6.0,
     help="Target entropy for auto entropy tuning (default: -action_dim/2 ≈ -6)")
 parser.add_argument("--c_ent_init", type=float, default=0.01,
     help="Initial entropy coefficient for auto mode (log-space learnable)")
+parser.add_argument("--use_adaptive_beta", action="store_true", default=True,
+    help="SAC-style learnable AWR beta: auto-adjusts to target effective sample ratio (default: True)")
+parser.add_argument("--no_adaptive_beta", action="store_false", dest="use_adaptive_beta",
+    help="Use fixed beta instead of adaptive")
+parser.add_argument("--target_eff_ratio", type=float, default=0.4,
+    help="Target effective sample ratio for adaptive beta (0.4 = ~40%% of batch effectively used)")
+parser.add_argument("--beta_init", type=float, default=0.3,
+    help="Initial AWR beta for adaptive mode (log-space learnable)")
 
 # AppLauncher
 AppLauncher.add_app_launcher_args(parser)
@@ -776,6 +784,8 @@ class GraphDiTRLTrainer:
         total_alpha = 0.0
         total_c_delta_reg = 0.0
         total_c_ent = 0.0
+        total_beta = 0.0
+        total_eff_ratio = 0.0
         num_updates = 0
         all_returns = []
         all_values = []
@@ -817,6 +827,12 @@ class GraphDiTRLTrainer:
             c_ent_val = losses.get("c_ent")
             if c_ent_val is not None:
                 total_c_ent += c_ent_val.item() if hasattr(c_ent_val, "item") else float(c_ent_val)
+            beta_val = losses.get("beta")
+            if beta_val is not None:
+                total_beta += beta_val.item() if hasattr(beta_val, "item") else float(beta_val)
+            eff_val = losses.get("eff_ratio")
+            if eff_val is not None:
+                total_eff_ratio += eff_val.item() if hasattr(eff_val, "item") else float(eff_val)
             num_updates += 1
             all_returns.append(batch["returns"])
             all_values.append(batch["values"])
@@ -842,6 +858,8 @@ class GraphDiTRLTrainer:
             "explained_variance": explained_variance,
             "c_delta_reg": total_c_delta_reg / n if n > 0 else 0.0,
             "c_ent": total_c_ent / n if n > 0 else 0.0,
+            "beta": total_beta / n if n > 0 else 0.0,
+            "eff_ratio": total_eff_ratio / n if n > 0 else 0.0,
         }
 
     def train(self, max_iterations: int, save_interval: int = 50, start_iteration: int = 1):
@@ -1136,6 +1154,8 @@ class GraphDiTRLTrainer:
         _scalar("main/lr", update_stats.get("lr", 0), step)
         _scalar("main/c_delta_reg", update_stats.get("c_delta_reg", 0), step)
         _scalar("main/c_ent", update_stats.get("c_ent", 0), step)
+        _scalar("main/beta", update_stats.get("beta", 0), step)
+        _scalar("main/eff_ratio", update_stats.get("eff_ratio", 0), step)
 
         sr = rollout_stats.get("success_rate", 0) * 100
         sr_100 = rollout_stats.get("success_rate_100", 0) * 100
@@ -1167,16 +1187,17 @@ class GraphDiTRLTrainer:
 
         c_dreg = update_stats.get("c_delta_reg", 0)
         c_ent_v = update_stats.get("c_ent", 0)
+        beta_v = update_stats.get("beta", 0)
+        eff_r = update_stats.get("eff_ratio", 0)
         print(
             f"{progress_str} "
             f"SR={sr:5.1f}% (100:{sr_100:4.1f}% {self.best_sr_window}ep:{sr_win:4.1f}%) [{num_eps:2d}ep] | "
             f"Rew={reward:6.1f} | "
             f"EV={ev:5.2f} | "
             f"Δ={delta:.3f} | "
-            f"α={alpha:.2f} | "
-            f"cΔ={c_dreg:.2f} cH={c_ent_v:.4f} | "
-            f"L={loss:.3f} | "
-            f"LR={lr:.1e}"
+            f"α={alpha:.2f} β={beta_v:.3f} | "
+            f"cΔ={c_dreg:.1f} cH={c_ent_v:.4f} eff={eff_r:.2f} | "
+            f"L={loss:.3f}"
         )
 
     def _save_best(self, iteration: int):
@@ -1363,6 +1384,9 @@ def main():
         use_auto_entropy=getattr(args, "use_auto_entropy", True),
         target_entropy=getattr(args, "target_entropy", -6.0),
         c_ent_init=getattr(args, "c_ent_init", 0.01),
+        use_adaptive_beta=getattr(args, "use_adaptive_beta", True),
+        target_eff_ratio=getattr(args, "target_eff_ratio", 0.4),
+        beta_init=getattr(args, "beta_init", 0.3),
     )
     print(f"[Main] residual_action_mask: {residual_action_mask.tolist()} (all 1s, no mask)")
     print(f"[Main] Residual RL obs_structure: {policy_cfg.obs_structure}")
@@ -1385,6 +1409,12 @@ def main():
     else:
         dreg_mode = f"Fixed c_delta_reg={policy_cfg.c_delta_reg}"
     print(f"[Main] Delta Reg: {dreg_mode}")
+    # Beta mode
+    if getattr(policy_cfg, "use_adaptive_beta", False):
+        beta_mode = f"Adaptive beta (SAC-style, init={getattr(policy_cfg,'beta_init',0.3)}, target_eff={getattr(policy_cfg,'target_eff_ratio',0.4)})"
+    else:
+        beta_mode = f"Fixed beta={policy_cfg.beta}"
+    print(f"[Main] AWR Beta: {beta_mode}")
     if policy_cfg.use_counterfactual_q:
         print(f"[Main] Q(s,a) counterfactual baseline ENABLED (log_tau={policy_cfg.counterfactual_log_tau})")
     else:

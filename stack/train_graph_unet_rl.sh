@@ -36,6 +36,9 @@ C_DELTA_REG_INIT="${C_DELTA_REG_INIT:-5.0}"
 USE_AUTO_ENTROPY="${USE_AUTO_ENTROPY:-true}"
 TARGET_ENTROPY="${TARGET_ENTROPY:--6.0}"
 C_ENT_INIT="${C_ENT_INIT:-0.01}"
+USE_ADAPTIVE_BETA="${USE_ADAPTIVE_BETA:-true}"
+TARGET_EFF_RATIO="${TARGET_EFF_RATIO:-0.4}"
+BETA_INIT="${BETA_INIT:-0.3}"
 
 # Legacy manual entropy (only used when USE_AUTO_ENTROPY=false)
 USE_ADAPTIVE_ENTROPY="${USE_ADAPTIVE_ENTROPY:-true}"
@@ -86,6 +89,12 @@ else
     # Fall back to manual adaptive/fixed entropy
     [ "$USE_ADAPTIVE_ENTROPY" = "false" ] && AUTO_ENTROPY_FLAG="$AUTO_ENTROPY_FLAG --no_adaptive_entropy"
 fi
+ADAPTIVE_BETA_FLAG=""
+if [ "$USE_ADAPTIVE_BETA" = "true" ]; then
+    ADAPTIVE_BETA_FLAG="--use_adaptive_beta --target_eff_ratio $TARGET_EFF_RATIO --beta_init $BETA_INIT"
+else
+    ADAPTIVE_BETA_FLAG="--no_adaptive_beta"
+fi
 
 echo "========================================"
 echo "Training Dual Arm + Residual RL - Stack"
@@ -94,9 +103,10 @@ echo "Pretrained: $PRETRAINED_CHECKPOINT"
 echo "Task: $TASK"
 echo "Envs=$NUM_ENVS Iter=$MAX_ITERATIONS Steps=$STEPS_PER_ENV"
 echo "Batch=$MINI_BATCH_SIZE Epochs=$NUM_EPOCHS"
-echo "beta=$BETA critic_warmup=$CRITIC_WARMUP_ITERS counterfactual_q=$USE_COUNTERFACTUAL_Q"
-echo "adaptive_delta_reg=$USE_ADAPTIVE_DELTA_REG target_δ=$TARGET_DELTA_NORM c_delta_init=$C_DELTA_REG_INIT"
-echo "auto_entropy=$USE_AUTO_ENTROPY target_H=$TARGET_ENTROPY c_ent_init=$C_ENT_INIT"
+echo "critic_warmup=$CRITIC_WARMUP_ITERS counterfactual_q=$USE_COUNTERFACTUAL_Q"
+echo "[Adaptive] delta_reg=$USE_ADAPTIVE_DELTA_REG (target_δ=$TARGET_DELTA_NORM c_init=$C_DELTA_REG_INIT)"
+echo "[Adaptive] entropy=$USE_AUTO_ENTROPY (target_H=$TARGET_ENTROPY c_init=$C_ENT_INIT)"
+echo "[Adaptive] beta=$USE_ADAPTIVE_BETA (target_eff=$TARGET_EFF_RATIO β_init=$BETA_INIT)"
 echo "Log: $LOG_DIR"
 echo "========================================"
 
@@ -126,6 +136,7 @@ python scripts/graph_dit_rl/train_graph_rl.py \
     $COUNTERFACTUAL_Q_FLAG \
     $ADAPTIVE_DELTA_REG_FLAG \
     $AUTO_ENTROPY_FLAG \
+    $ADAPTIVE_BETA_FLAG \
     --lr "$LR" \
     --seed "$SEED" \
     --critic_warmup_iters "$CRITIC_WARMUP_ITERS" \
