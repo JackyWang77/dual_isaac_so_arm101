@@ -347,6 +347,20 @@ class GraphUnetResidualRLCfg:
     # Log compression temperature for counterfactual advantage (prevents "big score eats small score")
     counterfactual_log_tau: float = 0.5
 
+    # ===== SAC-style adaptive delta regularization =====
+    # Learnable c_delta_reg via dual gradient: auto-adjusts to keep ||δ|| near target
+    # When δ too large → c increases → more penalty; when δ small → c decreases → less penalty
+    use_adaptive_delta_reg: bool = True
+    target_delta_norm: float = 0.15  # Target ||δ||; ~0.15 = small corrections only
+    c_delta_reg_init: float = 5.0    # Initial c_delta_reg (log-space learnable)
+
+    # ===== SAC-style auto entropy tuning =====
+    # Replaces manual adaptive entropy (c_ent_bad/c_ent_good) with single learnable coefficient
+    # Dual gradient: entropy too low → c increases → more exploration; entropy high → c decreases
+    use_auto_entropy: bool = True
+    target_entropy: float = -6.0  # Target entropy ≈ -action_dim/2 (e.g. -6 for 12D dual arm)
+    c_ent_init: float = 0.01      # Initial entropy coefficient (log-space learnable)
+
 
 # =========================================================
 # Modules: Gate / Actor / Critic (unchanged)
@@ -706,6 +720,32 @@ class GraphUnetResidualRLPolicy(nn.Module):
         else:
             self.alpha = nn.Parameter(torch.tensor(cfg.alpha_init, dtype=torch.float32))
             self.alpha_net = None
+
+        # ===== SAC-style adaptive delta regularization =====
+        # Learnable log_c_delta_reg: gradient descent automatically adjusts penalty strength
+        # When ||δ|| > target → c increases → more penalty; ||δ|| < target → c decreases
+        self.use_adaptive_delta_reg = getattr(cfg, "use_adaptive_delta_reg", False)
+        if self.use_adaptive_delta_reg:
+            _c_init = getattr(cfg, "c_delta_reg_init", 5.0)
+            self.log_c_delta_reg = nn.Parameter(torch.tensor(np.log(_c_init), dtype=torch.float32))
+            self.target_delta_sq = getattr(cfg, "target_delta_norm", 0.15) ** 2
+            print(f"[GraphUnetResidualRLPolicy] Adaptive delta_reg: c_init={_c_init}, target_δ={getattr(cfg, 'target_delta_norm', 0.15)}")
+        else:
+            self.log_c_delta_reg = None
+            self.target_delta_sq = None
+
+        # ===== SAC-style auto entropy tuning =====
+        # Learnable log_c_ent: replaces manual adaptive entropy (c_ent_bad/c_ent_good)
+        # When entropy < target → c increases → more exploration; entropy > target → c decreases
+        self.use_auto_entropy = getattr(cfg, "use_auto_entropy", False)
+        if self.use_auto_entropy:
+            _c_ent_init = getattr(cfg, "c_ent_init", 0.01)
+            self.log_c_ent = nn.Parameter(torch.tensor(np.log(_c_ent_init), dtype=torch.float32))
+            self.target_entropy = getattr(cfg, "target_entropy", -float(cfg.action_dim) / 2.0)
+            print(f"[GraphUnetResidualRLPolicy] Auto entropy: c_init={_c_ent_init}, target_H={self.target_entropy:.1f}")
+        else:
+            self.log_c_ent = None
+            self.target_entropy = None
 
         # Compute joint/gripper indices for per-arm processing
         self.num_arms = max(1, cfg.action_dim // cfg.arm_action_dim)
@@ -1600,14 +1640,44 @@ class GraphUnetResidualRLPolicy(nn.Module):
         gate_entropy = torch.tensor(0.0, device=obs.device)
         loss_gate = torch.tensor(0.0, device=obs.device)
 
-        # Entropy: 固定 或 Adaptive (adv<0 高熵探索, adv>0 低熵收敛)
-        if getattr(self.cfg, "use_adaptive_entropy", False):
+        # ===== Entropy loss =====
+        # Priority: auto_entropy (SAC-style learnable) > adaptive_entropy (manual) > fixed
+        if self.use_auto_entropy and self.log_c_ent is not None:
+            # SAC-style auto entropy: learnable c_ent with target entropy constraint
+            c_ent = self.log_c_ent.exp()
+            # Actor entropy term: -c_ent * H (encourages exploration)
+            loss_entropy = -(c_ent.detach() * entropy).mean()
+            # Dual variable loss (SAC convention): minimize c * (H - target_H)
+            # ∂/∂log_c = c * (H - target_H)
+            # H < target → gradient negative → optimizer increases log_c → c goes up → more exploration ✓
+            # H > target → gradient positive → optimizer decreases log_c → c goes down → less exploration ✓
+            loss_ent_dual = c_ent * (entropy.detach().mean() - self.target_entropy)
+        elif getattr(self.cfg, "use_adaptive_entropy", False):
             c_ent_bad = getattr(self.cfg, "c_ent_bad", 0.1)
             c_ent_good = getattr(self.cfg, "c_ent_good", 0.005)
             entropy_coef = torch.where(adv < 0, c_ent_bad, c_ent_good)
             loss_entropy = -(entropy_coef * entropy).mean()
+            loss_ent_dual = torch.tensor(0.0, device=obs.device)
         else:
             loss_entropy = -self.cfg.cEnt * entropy.mean()
+            loss_ent_dual = torch.tensor(0.0, device=obs.device)
+
+        # ===== Delta regularization =====
+        # Priority: adaptive_delta_reg (SAC-style learnable) > fixed c_delta_reg
+        if self.use_adaptive_delta_reg and self.log_c_delta_reg is not None:
+            # SAC-style adaptive delta_reg: learnable c_delta_reg with target ||δ||
+            c_delta_reg = self.log_c_delta_reg.exp()
+            delta_sq_mean = (delta_norm ** 2).mean()
+            # Actor penalty: c * ||δ||² (detached c so actor doesn't fight dual variable)
+            loss_delta_reg_scaled = c_delta_reg.detach() * delta_sq_mean
+            # Dual variable loss: minimize -c * (||δ||² - target²)
+            # ∂/∂log_c = -c * (Δ² - target²)
+            # Δ² > target² → gradient negative → optimizer increases log_c → c goes up → more penalty ✓
+            # Δ² < target² → gradient positive → optimizer decreases log_c → c goes down → less penalty ✓
+            loss_delta_dual = -c_delta_reg * (delta_sq_mean.detach() - self.target_delta_sq)
+        else:
+            loss_delta_reg_scaled = self.cfg.c_delta_reg * loss_delta_reg
+            loss_delta_dual = torch.tensor(0.0, device=obs.device)
 
         # Total
         loss_total = (
@@ -1615,8 +1685,14 @@ class GraphUnetResidualRLPolicy(nn.Module):
             + self.cfg.cV * (loss_critic + 0.5 * loss_v_bar)
             + self.cfg.cGate * loss_gate
             + loss_entropy
-            + self.cfg.c_delta_reg * loss_delta_reg  # Delta regularization: encourage small residuals (smoother)
+            + loss_delta_reg_scaled  # Delta regularization (adaptive or fixed)
+            + loss_ent_dual          # SAC-style entropy dual variable
+            + loss_delta_dual        # SAC-style delta_reg dual variable
         )
+
+        # Report adaptive coefficients
+        c_delta_reg_val = self.log_c_delta_reg.exp().detach() if self.log_c_delta_reg is not None else torch.tensor(self.cfg.c_delta_reg)
+        c_ent_val = self.log_c_ent.exp().detach() if self.log_c_ent is not None else torch.tensor(self.cfg.cEnt)
 
         return {
             "loss_total": loss_total,
@@ -1629,6 +1705,8 @@ class GraphUnetResidualRLPolicy(nn.Module):
             "entropy": entropy.mean().detach(),
             "loss_delta_reg": loss_delta_reg.detach(),
             "alpha": alpha.detach(),
+            "c_delta_reg": c_delta_reg_val,
+            "c_ent": c_ent_val,
         }
     
     # -----------------------------

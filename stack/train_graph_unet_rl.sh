@@ -23,14 +23,24 @@ HEADLESS="${15:-true}"
 TASK="${TASK:-SO-ARM101-Dual-Cube-Stack-RL-v0}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-10}"
 USE_ADAPTIVE_ALPHA="${USE_ADAPTIVE_ALPHA:-false}"
-USE_ADAPTIVE_ENTROPY="${USE_ADAPTIVE_ENTROPY:-true}"
-C_ENT_BAD="${C_ENT_BAD:-0.04}"
-C_ENT_GOOD="${C_ENT_GOOD:-0.01}"
 CRITIC_WARMUP_ITERS="${CRITIC_WARMUP_ITERS:-10}"
 USE_COUNTERFACTUAL_Q="${USE_COUNTERFACTUAL_Q:-true}"
 COUNTERFACTUAL_LOG_TAU="${COUNTERFACTUAL_LOG_TAU:-0.5}"
 LOG_DIR="${LOG_DIR:-./logs/dual_arm_rl}"
 RUN_NAME="${RUN_NAME:-}"
+
+# SAC-style adaptive parameters (data-driven, replaces manual tuning)
+USE_ADAPTIVE_DELTA_REG="${USE_ADAPTIVE_DELTA_REG:-true}"
+TARGET_DELTA_NORM="${TARGET_DELTA_NORM:-0.15}"
+C_DELTA_REG_INIT="${C_DELTA_REG_INIT:-5.0}"
+USE_AUTO_ENTROPY="${USE_AUTO_ENTROPY:-true}"
+TARGET_ENTROPY="${TARGET_ENTROPY:--6.0}"
+C_ENT_INIT="${C_ENT_INIT:-0.01}"
+
+# Legacy manual entropy (only used when USE_AUTO_ENTROPY=false)
+USE_ADAPTIVE_ENTROPY="${USE_ADAPTIVE_ENTROPY:-true}"
+C_ENT_BAD="${C_ENT_BAD:-0.04}"
+C_ENT_GOOD="${C_ENT_GOOD:-0.01}"
 
 if [ -z "$PRETRAINED_CHECKPOINT" ] || [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
     echo "Usage: $0 <pretrained_checkpoint> [resume_checkpoint] [num_envs] [max_iter] ..."
@@ -42,17 +52,13 @@ if [ -z "$PRETRAINED_CHECKPOINT" ] || [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
     echo "Example (resume from iter 100 to 200):"
     echo "  $0 ./logs/gated_small/stack_joint/best_model.pt ./logs/dual_arm_rl/xxx/policy_iter_100.pt 128 200"
     echo ""
-    echo "Ablation examples:"
-    echo "  $0 ./path/to/best_model.pt 128 200 160 64 2 0.5   # c_delta_reg=0.5"
-    echo "  $0 ./path/to/best_model.pt 128 200 160 64 2 2.0 0.0 0.3  # beta=0.3"
-    echo "  $0 ./path/to/best_model.pt 128 200 160 32  # mini_batch_size=32"
-    echo ""
     echo "Environment variables:"
     echo "  TASK=SO-ARM101-Dual-Cube-Stack-RL-v0  (RL rewards, default)"
-    echo "  TASK=SO-ARM101-Dual-Cube-Stack-v0     (original BC rewards)"
     echo "  LOG_DIR=./logs/ablation_xxx            (custom log directory)"
     echo "  SEED=123                               (random seed)"
-    echo "  CRITIC_WARMUP_ITERS=5                  (first N iters: only train critic, default 5)"
+    echo "  CRITIC_WARMUP_ITERS=10                 (first N iters: only train critic)"
+    echo "  TARGET_DELTA_NORM=0.15                 (target ||δ|| for adaptive delta_reg)"
+    echo "  TARGET_ENTROPY=-6.0                    (target entropy for auto entropy)"
     exit 1
 fi
 
@@ -62,10 +68,24 @@ if [ "$HEADLESS" = "true" ] || [ "$HEADLESS" = "1" ]; then
 fi
 ADAPTIVE_ALPHA_FLAG=""
 [ "$USE_ADAPTIVE_ALPHA" = "false" ] && ADAPTIVE_ALPHA_FLAG="--no_adaptive_alpha"
-ADAPTIVE_ENTROPY_FLAG=""
-[ "$USE_ADAPTIVE_ENTROPY" = "false" ] && ADAPTIVE_ENTROPY_FLAG="--no_adaptive_entropy"
 COUNTERFACTUAL_Q_FLAG=""
 [ "$USE_COUNTERFACTUAL_Q" = "true" ] && COUNTERFACTUAL_Q_FLAG="--use_counterfactual_q --counterfactual_log_tau $COUNTERFACTUAL_LOG_TAU"
+
+# SAC-style adaptive flags
+ADAPTIVE_DELTA_REG_FLAG=""
+if [ "$USE_ADAPTIVE_DELTA_REG" = "true" ]; then
+    ADAPTIVE_DELTA_REG_FLAG="--use_adaptive_delta_reg --target_delta_norm $TARGET_DELTA_NORM --c_delta_reg_init $C_DELTA_REG_INIT"
+else
+    ADAPTIVE_DELTA_REG_FLAG="--no_adaptive_delta_reg"
+fi
+AUTO_ENTROPY_FLAG=""
+if [ "$USE_AUTO_ENTROPY" = "true" ]; then
+    AUTO_ENTROPY_FLAG="--use_auto_entropy --target_entropy $TARGET_ENTROPY --c_ent_init $C_ENT_INIT"
+else
+    AUTO_ENTROPY_FLAG="--no_auto_entropy"
+    # Fall back to manual adaptive/fixed entropy
+    [ "$USE_ADAPTIVE_ENTROPY" = "false" ] && AUTO_ENTROPY_FLAG="$AUTO_ENTROPY_FLAG --no_adaptive_entropy"
+fi
 
 echo "========================================"
 echo "Training Dual Arm + Residual RL - Stack"
@@ -74,7 +94,9 @@ echo "Pretrained: $PRETRAINED_CHECKPOINT"
 echo "Task: $TASK"
 echo "Envs=$NUM_ENVS Iter=$MAX_ITERATIONS Steps=$STEPS_PER_ENV"
 echo "Batch=$MINI_BATCH_SIZE Epochs=$NUM_EPOCHS"
-echo "c_delta_reg=$C_DELTA_REG beta=$BETA c_ent=$C_ENT critic_warmup=$CRITIC_WARMUP_ITERS counterfactual_q=$USE_COUNTERFACTUAL_Q"
+echo "beta=$BETA critic_warmup=$CRITIC_WARMUP_ITERS counterfactual_q=$USE_COUNTERFACTUAL_Q"
+echo "adaptive_delta_reg=$USE_ADAPTIVE_DELTA_REG target_δ=$TARGET_DELTA_NORM c_delta_init=$C_DELTA_REG_INIT"
+echo "auto_entropy=$USE_AUTO_ENTROPY target_H=$TARGET_ENTROPY c_ent_init=$C_ENT_INIT"
 echo "Log: $LOG_DIR"
 echo "========================================"
 
@@ -101,8 +123,9 @@ python scripts/graph_dit_rl/train_graph_rl.py \
     --alpha_init "$ALPHA_INIT" \
     --expectile_tau "$EXPECTILE_TAU" \
     $ADAPTIVE_ALPHA_FLAG \
-    $ADAPTIVE_ENTROPY_FLAG \
     $COUNTERFACTUAL_Q_FLAG \
+    $ADAPTIVE_DELTA_REG_FLAG \
+    $AUTO_ENTROPY_FLAG \
     --lr "$LR" \
     --seed "$SEED" \
     --critic_warmup_iters "$CRITIC_WARMUP_ITERS" \

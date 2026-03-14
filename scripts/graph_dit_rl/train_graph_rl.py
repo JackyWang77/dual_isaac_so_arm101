@@ -70,6 +70,24 @@ parser.add_argument("--use_counterfactual_q", action="store_true", default=False
 parser.add_argument("--counterfactual_log_tau", type=float, default=0.5,
     help="Log compression temperature for counterfactual advantage: sign(A)*log(1+|A|/tau)*tau")
 
+# SAC-style adaptive parameters (data-driven, no manual tuning)
+parser.add_argument("--use_adaptive_delta_reg", action="store_true", default=True,
+    help="SAC-style learnable delta_reg: auto-adjusts to keep ||δ|| near target (default: True)")
+parser.add_argument("--no_adaptive_delta_reg", action="store_false", dest="use_adaptive_delta_reg",
+    help="Use fixed c_delta_reg instead of adaptive")
+parser.add_argument("--target_delta_norm", type=float, default=0.15,
+    help="Target ||δ|| for adaptive delta_reg (default: 0.15)")
+parser.add_argument("--c_delta_reg_init", type=float, default=5.0,
+    help="Initial c_delta_reg for adaptive mode (log-space learnable)")
+parser.add_argument("--use_auto_entropy", action="store_true", default=True,
+    help="SAC-style learnable entropy coefficient: auto-adjusts to target entropy (default: True)")
+parser.add_argument("--no_auto_entropy", action="store_false", dest="use_auto_entropy",
+    help="Use manual entropy (adaptive or fixed) instead of auto")
+parser.add_argument("--target_entropy", type=float, default=-6.0,
+    help="Target entropy for auto entropy tuning (default: -action_dim/2 ≈ -6)")
+parser.add_argument("--c_ent_init", type=float, default=0.01,
+    help="Initial entropy coefficient for auto mode (log-space learnable)")
+
 # AppLauncher
 AppLauncher.add_app_launcher_args(parser)
 args, hydra_args = parser.parse_known_args()
@@ -756,6 +774,8 @@ class GraphDiTRLTrainer:
         total_loss_critic_bar = 0
         total_entropy = 0
         total_alpha = 0.0
+        total_c_delta_reg = 0.0
+        total_c_ent = 0.0
         num_updates = 0
         all_returns = []
         all_values = []
@@ -791,6 +811,12 @@ class GraphDiTRLTrainer:
             alpha_val = losses.get("alpha")
             if alpha_val is not None:
                 total_alpha += alpha_val.item() if hasattr(alpha_val, "item") else float(alpha_val)
+            c_delta_val = losses.get("c_delta_reg")
+            if c_delta_val is not None:
+                total_c_delta_reg += c_delta_val.item() if hasattr(c_delta_val, "item") else float(c_delta_val)
+            c_ent_val = losses.get("c_ent")
+            if c_ent_val is not None:
+                total_c_ent += c_ent_val.item() if hasattr(c_ent_val, "item") else float(c_ent_val)
             num_updates += 1
             all_returns.append(batch["returns"])
             all_values.append(batch["values"])
@@ -814,6 +840,8 @@ class GraphDiTRLTrainer:
             "entropy": total_entropy / n,
             "alpha": alpha_reported,
             "explained_variance": explained_variance,
+            "c_delta_reg": total_c_delta_reg / n if n > 0 else 0.0,
+            "c_ent": total_c_ent / n if n > 0 else 0.0,
         }
 
     def train(self, max_iterations: int, save_interval: int = 50, start_iteration: int = 1):
@@ -1106,6 +1134,8 @@ class GraphDiTRLTrainer:
         _scalar("main/loss_critic_bar", update_stats.get("loss_critic_bar", 0), step)
         _scalar("main/entropy", update_stats.get("entropy", 0), step)
         _scalar("main/lr", update_stats.get("lr", 0), step)
+        _scalar("main/c_delta_reg", update_stats.get("c_delta_reg", 0), step)
+        _scalar("main/c_ent", update_stats.get("c_ent", 0), step)
 
         sr = rollout_stats.get("success_rate", 0) * 100
         sr_100 = rollout_stats.get("success_rate_100", 0) * 100
@@ -1135,6 +1165,8 @@ class GraphDiTRLTrainer:
         else:
             progress_str = f"[{iteration}/{max_iter}]{warmup_tag}"
 
+        c_dreg = update_stats.get("c_delta_reg", 0)
+        c_ent_v = update_stats.get("c_ent", 0)
         print(
             f"{progress_str} "
             f"SR={sr:5.1f}% (100:{sr_100:4.1f}% {self.best_sr_window}ep:{sr_win:4.1f}%) [{num_eps:2d}ep] | "
@@ -1142,6 +1174,7 @@ class GraphDiTRLTrainer:
             f"EV={ev:5.2f} | "
             f"Δ={delta:.3f} | "
             f"α={alpha:.2f} | "
+            f"cΔ={c_dreg:.2f} cH={c_ent_v:.4f} | "
             f"L={loss:.3f} | "
             f"LR={lr:.1e}"
         )
@@ -1323,6 +1356,13 @@ def main():
         c_ent_good=args.c_ent_good,
         use_counterfactual_q=getattr(args, "use_counterfactual_q", False),
         counterfactual_log_tau=getattr(args, "counterfactual_log_tau", 0.5),
+        # SAC-style adaptive parameters
+        use_adaptive_delta_reg=getattr(args, "use_adaptive_delta_reg", True),
+        target_delta_norm=getattr(args, "target_delta_norm", 0.15),
+        c_delta_reg_init=getattr(args, "c_delta_reg_init", 5.0),
+        use_auto_entropy=getattr(args, "use_auto_entropy", True),
+        target_entropy=getattr(args, "target_entropy", -6.0),
+        c_ent_init=getattr(args, "c_ent_init", 0.01),
     )
     print(f"[Main] residual_action_mask: {residual_action_mask.tolist()} (all 1s, no mask)")
     print(f"[Main] Residual RL obs_structure: {policy_cfg.obs_structure}")
@@ -1331,8 +1371,20 @@ def main():
         print("[Main] ⚠️  WARNING: obs_structure MISMATCH between backbone and Residual RL!")
     else:
         print("[Main] ✅ obs_structure consistent")
-    ent_mode = f"Adaptive Entropy (bad={getattr(policy_cfg,'c_ent_bad',0.1)}, good={getattr(policy_cfg,'c_ent_good',0.005)})" if getattr(policy_cfg, "use_adaptive_entropy", False) else f"Fixed cEnt={policy_cfg.cEnt}"
+    # Entropy mode
+    if getattr(policy_cfg, "use_auto_entropy", False):
+        ent_mode = f"Auto Entropy (SAC-style, c_init={getattr(policy_cfg,'c_ent_init',0.01)}, target_H={getattr(policy_cfg,'target_entropy',-6.0)})"
+    elif getattr(policy_cfg, "use_adaptive_entropy", False):
+        ent_mode = f"Adaptive Entropy (bad={getattr(policy_cfg,'c_ent_bad',0.1)}, good={getattr(policy_cfg,'c_ent_good',0.005)})"
+    else:
+        ent_mode = f"Fixed cEnt={policy_cfg.cEnt}"
     print(f"[Main] Entropy: {ent_mode}")
+    # Delta reg mode
+    if getattr(policy_cfg, "use_adaptive_delta_reg", False):
+        dreg_mode = f"Adaptive delta_reg (SAC-style, c_init={getattr(policy_cfg,'c_delta_reg_init',5.0)}, target_δ={getattr(policy_cfg,'target_delta_norm',0.15)})"
+    else:
+        dreg_mode = f"Fixed c_delta_reg={policy_cfg.c_delta_reg}"
+    print(f"[Main] Delta Reg: {dreg_mode}")
     if policy_cfg.use_counterfactual_q:
         print(f"[Main] Q(s,a) counterfactual baseline ENABLED (log_tau={policy_cfg.counterfactual_log_tau})")
     else:
