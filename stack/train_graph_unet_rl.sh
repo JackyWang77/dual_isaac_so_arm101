@@ -11,14 +11,11 @@ MAX_ITERATIONS="${4:-200}"
 STEPS_PER_ENV="${5:-405}"
 MINI_BATCH_SIZE="${6:-512}"
 NUM_EPOCHS="${7:-2}"
-C_DELTA_REG="${8:-5.0}"
-C_ENT="${9:-0.01}"
-BETA="${10:-0.3}"
-ALPHA_INIT="${11:-0.10}"
-EXPECTILE_TAU="${12:-0.5}"
-LR="${13:-1e-4}"
-SEED="${14:-42}"
-HEADLESS="${15:-true}"
+ALPHA_INIT="${8:-0.10}"
+EXPECTILE_TAU="${9:-0.5}"
+LR="${10:-1e-4}"
+SEED="${11:-42}"
+HEADLESS="${12:-true}"
 
 TASK="${TASK:-SO-ARM101-Dual-Cube-Stack-RL-v0}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-10}"
@@ -29,7 +26,7 @@ COUNTERFACTUAL_LOG_TAU="${COUNTERFACTUAL_LOG_TAU:-0.5}"
 LOG_DIR="${LOG_DIR:-./logs/dual_arm_rl}"
 RUN_NAME="${RUN_NAME:-}"
 
-# SAC-style adaptive parameters (data-driven, replaces manual tuning)
+# SAC-style adaptive parameters (all data-driven, no manual tuning needed)
 USE_ADAPTIVE_DELTA_REG="${USE_ADAPTIVE_DELTA_REG:-true}"
 TARGET_DELTA_NORM="${TARGET_DELTA_NORM:-0.25}"
 C_DELTA_REG_INIT="${C_DELTA_REG_INIT:-5.0}"
@@ -39,11 +36,6 @@ C_ENT_INIT="${C_ENT_INIT:-0.01}"
 USE_ADAPTIVE_BETA="${USE_ADAPTIVE_BETA:-true}"
 TARGET_EFF_RATIO="${TARGET_EFF_RATIO:-0.4}"
 BETA_INIT="${BETA_INIT:-2.0}"
-
-# Legacy manual entropy (only used when USE_AUTO_ENTROPY=false)
-USE_ADAPTIVE_ENTROPY="${USE_ADAPTIVE_ENTROPY:-true}"
-C_ENT_BAD="${C_ENT_BAD:-0.04}"
-C_ENT_GOOD="${C_ENT_GOOD:-0.01}"
 
 if [ -z "$PRETRAINED_CHECKPOINT" ] || [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
     echo "Usage: $0 <pretrained_checkpoint> [resume_checkpoint] [num_envs] [max_iter] ..."
@@ -60,7 +52,7 @@ if [ -z "$PRETRAINED_CHECKPOINT" ] || [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
     echo "  LOG_DIR=./logs/ablation_xxx            (custom log directory)"
     echo "  SEED=123                               (random seed)"
     echo "  CRITIC_WARMUP_ITERS=10                 (first N iters: only train critic)"
-    echo "  TARGET_DELTA_NORM=0.15                 (target ||δ|| for adaptive delta_reg)"
+    echo "  TARGET_DELTA_NORM=0.25                 (target ||δ|| for adaptive delta_reg)"
     echo "  TARGET_ENTROPY=-6.0                    (target entropy for auto entropy)"
     exit 1
 fi
@@ -86,8 +78,6 @@ if [ "$USE_AUTO_ENTROPY" = "true" ]; then
     AUTO_ENTROPY_FLAG="--use_auto_entropy --target_entropy $TARGET_ENTROPY --c_ent_init $C_ENT_INIT"
 else
     AUTO_ENTROPY_FLAG="--no_auto_entropy"
-    # Fall back to manual adaptive/fixed entropy
-    [ "$USE_ADAPTIVE_ENTROPY" = "false" ] && AUTO_ENTROPY_FLAG="$AUTO_ENTROPY_FLAG --no_adaptive_entropy"
 fi
 ADAPTIVE_BETA_FLAG=""
 if [ "$USE_ADAPTIVE_BETA" = "true" ]; then
@@ -126,11 +116,9 @@ python scripts/graph_dit_rl/train_graph_rl.py \
     --steps_per_env "$STEPS_PER_ENV" \
     --mini_batch_size "$MINI_BATCH_SIZE" \
     --num_epochs "$NUM_EPOCHS" \
-    --c_delta_reg "$C_DELTA_REG" \
-    --c_ent "$C_ENT" \
-    --c_ent_bad "$C_ENT_BAD" \
-    --c_ent_good "$C_ENT_GOOD" \
-    --beta "$BETA" \
+    --c_delta_reg "$C_DELTA_REG_INIT" \
+    --c_ent "$C_ENT_INIT" \
+    --beta "$BETA_INIT" \
     --alpha_init "$ALPHA_INIT" \
     --expectile_tau "$EXPECTILE_TAU" \
     $ADAPTIVE_ALPHA_FLAG \
