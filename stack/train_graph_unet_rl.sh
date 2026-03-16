@@ -11,7 +11,8 @@ MAX_ITERATIONS="${4:-200}"
 STEPS_PER_ENV="${5:-405}"
 MINI_BATCH_SIZE="${6:-512}"
 NUM_EPOCHS="${7:-2}"
-ALPHA_INIT="${8:-0.10}"
+ALPHA_INIT="${8:-0.05}"
+ALPHA_MAX="${ALPHA_MAX:-0.05}"
 EXPECTILE_TAU="${9:-0.5}"
 LR="${10:-1e-4}"
 SEED="${11:-42}"
@@ -19,7 +20,7 @@ HEADLESS="${12:-true}"
 
 TASK="${TASK:-SO-ARM101-Dual-Cube-Stack-RL-v0}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-10}"
-USE_ADAPTIVE_ALPHA="${USE_ADAPTIVE_ALPHA:-true}"
+USE_ADAPTIVE_ALPHA="${USE_ADAPTIVE_ALPHA:-false}"
 CRITIC_WARMUP_ITERS="${CRITIC_WARMUP_ITERS:-10}"
 USE_COUNTERFACTUAL_Q="${USE_COUNTERFACTUAL_Q:-true}"
 COUNTERFACTUAL_LOG_TAU="${COUNTERFACTUAL_LOG_TAU:-0.5}"
@@ -28,7 +29,7 @@ RUN_NAME="${RUN_NAME:-}"
 
 # SAC-style adaptive parameters (all data-driven, no manual tuning needed)
 USE_ADAPTIVE_DELTA_REG="${USE_ADAPTIVE_DELTA_REG:-true}"
-TARGET_DELTA_NORM="${TARGET_DELTA_NORM:-0.25}"
+TARGET_DELTA_NORM="${TARGET_DELTA_NORM:-0.30}"
 C_DELTA_REG_INIT="${C_DELTA_REG_INIT:-5.0}"
 USE_AUTO_ENTROPY="${USE_AUTO_ENTROPY:-true}"
 TARGET_ENTROPY="${TARGET_ENTROPY:--6.0}"
@@ -97,7 +98,7 @@ echo "critic_warmup=$CRITIC_WARMUP_ITERS counterfactual_q=$USE_COUNTERFACTUAL_Q"
 echo "[Adaptive] delta_reg=$USE_ADAPTIVE_DELTA_REG (target_δ=$TARGET_DELTA_NORM c_init=$C_DELTA_REG_INIT)"
 echo "[Adaptive] entropy=$USE_AUTO_ENTROPY (target_H=$TARGET_ENTROPY c_init=$C_ENT_INIT)"
 echo "[Adaptive] beta=$USE_ADAPTIVE_BETA (target_eff=$TARGET_EFF_RATIO β_init=$BETA_INIT)"
-echo "[Adaptive] alpha=$USE_ADAPTIVE_ALPHA (α_init=$ALPHA_INIT)"
+echo "[Adaptive] alpha=$USE_ADAPTIVE_ALPHA (α_init=$ALPHA_INIT α_max=$ALPHA_MAX)"
 echo "Log: $LOG_DIR"
 echo "========================================"
 
@@ -120,6 +121,7 @@ python scripts/graph_dit_rl/train_graph_rl.py \
     --c_ent "$C_ENT_INIT" \
     --beta "$BETA_INIT" \
     --alpha_init "$ALPHA_INIT" \
+    --alpha_max "$ALPHA_MAX" \
     --expectile_tau "$EXPECTILE_TAU" \
     $ADAPTIVE_ALPHA_FLAG \
     $COUNTERFACTUAL_Q_FLAG \
