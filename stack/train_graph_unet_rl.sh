@@ -13,6 +13,7 @@ MINI_BATCH_SIZE="${6:-512}"
 NUM_EPOCHS="${7:-2}"
 ALPHA_INIT="${8:-0.05}"
 ALPHA_MAX="${ALPHA_MAX:-0.05}"
+MAX_DELTA_NORM="${MAX_DELTA_NORM:-0.12}"
 EXPECTILE_TAU="${9:-0.5}"
 LR="${10:-1e-4}"
 SEED="${11:-42}"
@@ -98,7 +99,7 @@ echo "critic_warmup=$CRITIC_WARMUP_ITERS counterfactual_q=$USE_COUNTERFACTUAL_Q"
 echo "[Adaptive] delta_reg=$USE_ADAPTIVE_DELTA_REG (target_δ=$TARGET_DELTA_NORM c_init=$C_DELTA_REG_INIT)"
 echo "[Adaptive] entropy=$USE_AUTO_ENTROPY (target_H=$TARGET_ENTROPY c_init=$C_ENT_INIT)"
 echo "[Adaptive] beta=$USE_ADAPTIVE_BETA (target_eff=$TARGET_EFF_RATIO β_init=$BETA_INIT)"
-echo "[Adaptive] alpha=$USE_ADAPTIVE_ALPHA (α_init=$ALPHA_INIT α_max=$ALPHA_MAX)"
+echo "[Adaptive] alpha=$USE_ADAPTIVE_ALPHA (α_init=$ALPHA_INIT α_max=$ALPHA_MAX max_δ=$MAX_DELTA_NORM)"
 echo "Log: $LOG_DIR"
 echo "========================================"
 
@@ -122,6 +123,7 @@ python scripts/graph_dit_rl/train_graph_rl.py \
     --beta "$BETA_INIT" \
     --alpha_init "$ALPHA_INIT" \
     --alpha_max "$ALPHA_MAX" \
+    --max_delta_norm "$MAX_DELTA_NORM" \
     --expectile_tau "$EXPECTILE_TAU" \
     $ADAPTIVE_ALPHA_FLAG \
     $COUNTERFACTUAL_Q_FLAG \

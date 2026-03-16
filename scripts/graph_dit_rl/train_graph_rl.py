@@ -54,6 +54,7 @@ parser.add_argument("--c_ent", type=float, default=0.01, help="Entropy coefficie
 parser.add_argument("--beta", type=float, default=1.0, help="AWR beta: w=exp(adv/beta); higher=softer weighting, lower=sharper on high-adv samples")
 parser.add_argument("--alpha_init", type=float, default=0.10, help="Residual alpha init: a=base+alpha*delta; arm uses clamped(0,0.5), gripper=1.0")
 parser.add_argument("--alpha_max", type=float, default=0.08, help="Max alpha for scalar mode; lower = more conservative actor")
+parser.add_argument("--max_delta_norm", type=float, default=0.0, help="Hard clamp on ||delta||_2; 0=disabled. Projects delta to L2 ball.")
 parser.add_argument("--expectile_tau", type=float, default=0.7, help="Expectile τ for value loss (IQL-style); τ=0.7 → optimistic; 0.5=MSE")
 parser.add_argument("--use_adaptive_alpha", action="store_true", default=True, help="Use state-dependent alpha_net (default: True)")
 parser.add_argument("--no_adaptive_alpha", action="store_false", dest="use_adaptive_alpha", help="Use scalar alpha instead")
@@ -1368,6 +1369,7 @@ def main():
         beta=args.beta,
         alpha_init=args.alpha_init,
         alpha_max=getattr(args, "alpha_max", 0.08),
+        max_delta_norm=getattr(args, "max_delta_norm", 0.0),
         use_expectile_value=True,
         expectile_tau=args.expectile_tau,
         use_adaptive_alpha=args.use_adaptive_alpha,

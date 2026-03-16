@@ -319,6 +319,7 @@ class GraphUnetResidualRLCfg:
     c_ent_good: float = 0.005  # adv>0 时熵权重，允许收敛
     cGate: float = 0.0  # Unused (no gate)
     c_delta_reg: float = 1.0  # Delta (residual) regularization: higher = smoother, RL "don't move unless reward"
+    max_delta_norm: float = 0.0  # Hard clamp on ||δ||₂; 0 = disabled. Projects delta to sphere when exceeded.
 
     # expectile value loss (IQL-style): τ>0.5 → value learns optimistic target
     use_expectile_value: bool = True
@@ -1483,6 +1484,12 @@ class GraphUnetResidualRLPolicy(nn.Module):
         # Optional mask (if all 1s, no effect; if gripper was masked, would zero it)
         if self.residual_action_mask is not None:
             delta = delta * self.residual_action_mask
+
+        # Hard clamp: project delta onto L2 ball of radius max_delta_norm
+        _max_dn = self.cfg.max_delta_norm
+        if _max_dn > 0:
+            _dn = delta.norm(dim=-1, keepdim=True)  # [B, 1]
+            delta = torch.where(_dn > _max_dn, delta * _max_dn / (_dn + 1e-8), delta)
 
         # Per-channel alpha: adaptive (state-dependent) or scalar
         obs_actor = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
