@@ -658,7 +658,7 @@ class GraphDiTRLTrainer:
             ep_rewards += reward
             ep_lengths += 1
 
-            # Accumulate per-term rewards
+            # Accumulate per-term rewards (_step_reward stores value/dt, multiply back by dt)
             try:
                 unwrapped = self.env.unwrapped if hasattr(self.env, 'unwrapped') else self.env
                 if hasattr(unwrapped, 'reward_manager'):
@@ -666,7 +666,8 @@ class GraphDiTRLTrainer:
                     if _reward_term_names is None:
                         _reward_term_names = list(rm._term_names)
                         _reward_term_accum = torch.zeros(self.num_envs, len(_reward_term_names), device=self.device)
-                    _reward_term_accum += rm._step_reward
+                        _reward_dt = unwrapped.step_dt  # sim.dt * decimation = 0.02
+                    _reward_term_accum += rm._step_reward * _reward_dt
             except Exception:
                 pass
 
