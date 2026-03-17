@@ -424,14 +424,33 @@ class CubeStackRLRewardsCfg:
     - Large success bonus to create high-advantage samples for AWR
     """
 
-    # Tiny lift reward: gives critic signal during pick phase (steps 0-200)
-    # Weight kept very small since pick SR=94%, just for V(s) learning
+    # === Dense shaping rewards (tiny weights, purely for critic V(s) learning) ===
+    # These give critic signal across the entire episode so EV can climb.
+    # Pick phase (steps 0~200):
     object_is_lifted = RewTerm(
         func=mdp.object_is_lifted,
         params={"minimal_height": 0.04, "object_cfg": SceneEntityCfg("cube_1")},
         weight=1.0,
     )
+    # Transport height: cube2 must be high enough during transport to avoid collision
+    cube2_transport_height = RewTerm(
+        func=mdp.object_is_lifted,
+        params={"minimal_height": 0.024, "object_cfg": SceneEntityCfg("cube_2")},
+        weight=1.0,
+    )
+    # Transport: cube near target (move phase)
+    cube_1_near_target = RewTerm(
+        func=mdp.cube_near_target_xy,
+        params={"target_xy": TARGET_XY, "object_cfg": SceneEntityCfg("cube_1")},
+        weight=1.0,
+    )
+    cube_2_near_target = RewTerm(
+        func=mdp.cube_near_target_xy,
+        params={"target_xy": TARGET_XY, "object_cfg": SceneEntityCfg("cube_2")},
+        weight=1.0,
+    )
 
+    # === Main RL rewards (stack phase) ===
     # Stack alignment: cube_2 on top of cube_1 (the dominant pattern in demos)
     # Time-decayed: reward *= 0.99^step, at step 250 still ~8% signal
     # Cumulative alignment (~77) < success_bonus (200), won't hack
