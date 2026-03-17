@@ -111,6 +111,7 @@ def cube_stack_alignment(
     xy_std: float = 0.03,
     z_min: float = 0.010,
     z_max: float = 0.030,
+    decay_rate: float = 0.9,
     cube_top_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_base_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
 ) -> torch.Tensor:
@@ -118,6 +119,8 @@ def cube_stack_alignment(
 
     Gate: z_diff in [z_min, z_max] (cube is actually on top, not floating too high).
     Reward: continuous, xy distance as small as possible (1 - tanh(xy_dist / xy_std)).
+    Time decay: reward *= decay_rate^step to prevent cumulative reward from dominating
+    one-shot success bonus. With decay_rate=0.9, cumulative sum converges to ~10*weight.
     """
     top: RigidObject = env.scene[cube_top_cfg.name]
     base: RigidObject = env.scene[cube_base_cfg.name]
@@ -126,7 +129,10 @@ def cube_stack_alignment(
     z_diff = top_pos[:, 2] - base_pos[:, 2]
     z_gate = ((z_diff >= z_min) & (z_diff <= z_max)).float()
     xy_dist = torch.norm(top_pos[:, :2] - base_pos[:, :2], dim=1)
-    return z_gate * (1 - torch.tanh(xy_dist / xy_std))
+    # Time decay: earlier alignment steps get higher reward
+    step = env.episode_length_buf.float()  # current step per env
+    time_decay = decay_rate ** step
+    return z_gate * (1 - torch.tanh(xy_dist / xy_std)) * time_decay
 
 
 def cube_near_target_xy(

@@ -425,16 +425,19 @@ class CubeStackRLRewardsCfg:
     """
 
     # Stack alignment: cube_2 on top of cube_1 (the dominant pattern in demos)
+    # Time-decayed: reward *= 0.9^step, cumulative sum converges to ~10*weight=150
+    # This ensures success_bonus (200, one-shot) always dominates alignment
     stack_2_on_1 = RewTerm(
         func=mdp.cube_stack_alignment,
         params={
             "xy_std": 0.008,
             "z_min": 0.010,
             "z_max": 0.030,
+            "decay_rate": 0.9,
             "cube_top_cfg": SceneEntityCfg("cube_2"),
             "cube_base_cfg": SceneEntityCfg("cube_1"),
         },
-        weight=3.0,
+        weight=15.0,
     )
 
     # Gripper release when stacked
