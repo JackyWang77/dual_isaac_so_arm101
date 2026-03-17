@@ -424,25 +424,6 @@ class CubeStackRLRewardsCfg:
     - Large success bonus to create high-advantage samples for AWR
     """
 
-    # Phase 1: Already learned by BC (low weight, prevent regression)
-    manipulation_baseline = RewTerm(
-        func=mdp.object_is_lifted,
-        params={"minimal_height": 0.04, "object_cfg": SceneEntityCfg("cube_1")},
-        weight=2.0,
-    )
-
-    # Phase 2: Needs RL improvement
-    cube_1_near_target = RewTerm(
-        func=mdp.cube_near_target_xy,
-        params={"target_xy": TARGET_XY, "xy_std": 0.05, "object_cfg": SceneEntityCfg("cube_1")},
-        weight=5.0,
-    )
-    cube_2_near_target = RewTerm(
-        func=mdp.cube_near_target_xy,
-        params={"target_xy": TARGET_XY, "xy_std": 0.05, "object_cfg": SceneEntityCfg("cube_2")},
-        weight=5.0,
-    )
-
     # Stack alignment: cube_2 on top of cube_1 (the dominant pattern in demos)
     stack_2_on_1 = RewTerm(
         func=mdp.cube_stack_alignment,
@@ -483,7 +464,7 @@ class CubeStackRLRewardsCfg:
             "right_arm_cfg": SceneEntityCfg("right_arm"),
             "left_arm_cfg": SceneEntityCfg("left_arm"),
         },
-        weight=100.0,
+        weight=200.0,
     )
 
     # Smooth control penalties
