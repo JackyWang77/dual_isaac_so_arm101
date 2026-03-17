@@ -458,8 +458,8 @@ class CubeStackRLRewardsCfg:
         func=mdp.cube_stack_alignment,
         params={
             "xy_std": 0.008,
-            "z_min": 0.010,
-            "z_max": 0.030,
+            "z_min": 0.014,
+            "z_max": 0.045,
             "decay_rate": 0.99,
             "cube_top_cfg": SceneEntityCfg("cube_2"),
             "cube_base_cfg": SceneEntityCfg("cube_1"),
