@@ -108,31 +108,25 @@ def grasp_intent(
 
 def cube_stack_alignment(
     env: ManagerBasedRLEnv,
-    xy_std: float = 0.03,
-    z_min: float = 0.010,
-    z_max: float = 0.030,
-    decay_rate: float = 0.9,
+    std: float = 0.02,
+    target_height: float = 0.018,
     cube_top_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_base_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
+    **kwargs,
 ) -> torch.Tensor:
-    """Reward xy alignment when cube_top is at correct stacking height above cube_base.
+    """Reward cube_top being close to ideal stacked position above cube_base.
 
-    Gate: z_diff in [z_min, z_max] (cube is actually on top, not floating too high).
-    Reward: continuous, xy distance as small as possible (1 - tanh(xy_dist / xy_std)).
-    Time decay: reward *= decay_rate^step to prevent cumulative reward from dominating
-    one-shot success bonus. With decay_rate=0.9, cumulative sum converges to ~10*weight.
+    Ideal position = cube_base xy + cube_base z + target_height.
+    Reward = 1 - tanh(dist_to_ideal / std). Dense signal every step.
     """
     top: RigidObject = env.scene[cube_top_cfg.name]
     base: RigidObject = env.scene[cube_base_cfg.name]
     top_pos = top.data.root_pos_w[:, :3]
     base_pos = base.data.root_pos_w[:, :3]
-    z_diff = top_pos[:, 2] - base_pos[:, 2]
-    z_gate = ((z_diff >= z_min) & (z_diff <= z_max)).float()
-    xy_dist = torch.norm(top_pos[:, :2] - base_pos[:, :2], dim=1)
-    # Time decay: earlier alignment steps get higher reward
-    step = env.episode_length_buf.float()  # current step per env
-    time_decay = decay_rate ** step
-    return z_gate * (1 - torch.tanh(xy_dist / xy_std)) * time_decay
+    ideal_pos = base_pos.clone()
+    ideal_pos[:, 2] += target_height
+    dist_to_ideal = torch.norm(top_pos - ideal_pos, dim=1)
+    return 1 - torch.tanh(dist_to_ideal / std)
 
 
 def cube_near_target_xy(
