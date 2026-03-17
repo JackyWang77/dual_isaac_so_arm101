@@ -453,7 +453,7 @@ class CubeStackRLRewardsCfg:
             "cube_top_cfg": SceneEntityCfg("cube_2"),
             "cube_base_cfg": SceneEntityCfg("cube_1"),
         },
-        weight=80.0,
+        weight=50.0,
     )
 
     # Gripper release when stacked
@@ -483,7 +483,7 @@ class CubeStackRLRewardsCfg:
             "right_arm_cfg": SceneEntityCfg("right_arm"),
             "left_arm_cfg": SceneEntityCfg("left_arm"),
         },
-        weight=30.0,
+        weight=50.0,
     )
 
     # Smooth control penalties
