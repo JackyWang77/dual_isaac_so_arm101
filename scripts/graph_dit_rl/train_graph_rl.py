@@ -871,17 +871,9 @@ class GraphDiTRLTrainer:
         else:
             print(f"\n[Trainer] Starting training for {max_iterations} iterations...")
 
-        # Step Decay LR Scheduler: 0-25% 1.0, 25-50% 0.8, 50-75% 0.6, 75-100% 0.4 (final lr = 2e-4 when base=5e-4)
+        # Constant LR (no decay for short 50-iter runs)
         def lr_lambda(epoch):
-            progress = (epoch + 1) / max_iterations
-            if progress < 0.25:
-                return 1.0
-            elif progress < 0.50:
-                return 0.8
-            elif progress < 0.75:
-                return 0.6
-            else:
-                return 0.4
+            return 1.0
 
         scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda)
         self._train_start = time.time()
