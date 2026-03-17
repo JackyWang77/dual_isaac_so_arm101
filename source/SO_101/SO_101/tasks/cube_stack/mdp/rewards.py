@@ -112,7 +112,6 @@ def cube_stack_alignment(
     target_height: float = 0.018,
     cube_top_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_base_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
-    **kwargs,
 ) -> torch.Tensor:
     """Reward cube_top being close to ideal stacked position above cube_base.
 
