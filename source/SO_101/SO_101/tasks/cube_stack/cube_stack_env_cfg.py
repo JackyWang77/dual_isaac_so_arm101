@@ -300,9 +300,6 @@ class CubeStackRewardsCfg:
     stack_1_on_2 = RewTerm(
         func=mdp.cube_stack_alignment,
         params={
-            "xy_std": 0.03,
-            "z_min": 0.010,
-            "z_max": 0.030,
             "cube_top_cfg": SceneEntityCfg("cube_1"),
             "cube_base_cfg": SceneEntityCfg("cube_2"),
         },
@@ -311,9 +308,6 @@ class CubeStackRewardsCfg:
     stack_2_on_1 = RewTerm(
         func=mdp.cube_stack_alignment,
         params={
-            "xy_std": 0.03,
-            "z_min": 0.010,
-            "z_max": 0.030,
             "cube_top_cfg": SceneEntityCfg("cube_2"),
             "cube_base_cfg": SceneEntityCfg("cube_1"),
         },
@@ -443,9 +437,6 @@ class CubeStackRLRewardsCfg:
     stack_2_on_1 = RewTerm(
         func=mdp.cube_stack_alignment,
         params={
-            "xy_std": 0.008,
-            "z_min": 0.012,
-            "z_max": 0.045,
             "cube_top_cfg": SceneEntityCfg("cube_2"),
             "cube_base_cfg": SceneEntityCfg("cube_1"),
         },
