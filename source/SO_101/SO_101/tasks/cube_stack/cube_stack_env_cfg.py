@@ -453,7 +453,7 @@ class CubeStackRLRewardsCfg:
             "cube_top_cfg": SceneEntityCfg("cube_2"),
             "cube_base_cfg": SceneEntityCfg("cube_1"),
         },
-        weight=30.0,
+        weight=3.0,
     )
 
     # Gripper release when stacked
