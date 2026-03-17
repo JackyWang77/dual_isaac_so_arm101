@@ -438,20 +438,18 @@ class CubeStackRLRewardsCfg:
     )
 
     # === Main RL rewards (stack phase) ===
-    # Stack alignment: cube_2 on top of cube_1 (the dominant pattern in demos)
-    # Time-decayed: reward *= 0.99^step, at step 250 still ~8% signal
-    # Cumulative alignment (~77) < success_bonus (200), won't hack
+    # Stack alignment: cube_2 on top of cube_1
+    # No time decay - dense per-step signal for critic learning
     stack_2_on_1 = RewTerm(
         func=mdp.cube_stack_alignment,
         params={
-            "xy_std": 0.005,
+            "xy_std": 0.008,
             "z_min": 0.012,
             "z_max": 0.045,
-            "decay_rate": 0.99,
             "cube_top_cfg": SceneEntityCfg("cube_2"),
             "cube_base_cfg": SceneEntityCfg("cube_1"),
         },
-        weight=15.0,
+        weight=50.0,
     )
 
     # Gripper release when stacked
