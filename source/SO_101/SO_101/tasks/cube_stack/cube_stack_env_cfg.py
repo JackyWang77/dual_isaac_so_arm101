@@ -457,7 +457,7 @@ class CubeStackRLRewardsCfg:
     stack_2_on_1 = RewTerm(
         func=mdp.cube_stack_alignment,
         params={
-            "xy_std": 0.008,
+            "xy_std": 0.005,
             "z_min": 0.018,
             "z_max": 0.045,
             "decay_rate": 0.99,
