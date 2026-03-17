@@ -425,29 +425,16 @@ class CubeStackRLRewardsCfg:
     """
 
     # === Dense shaping rewards (tiny weights, purely for critic V(s) learning) ===
-    # These give critic signal across the entire episode so EV can climb.
-    # Pick phase (steps 0~200):
-    object_is_lifted = RewTerm(
+    # Pick phase: cube lifted above table
+    cube1_is_lifted = RewTerm(
         func=mdp.object_is_lifted,
         params={"minimal_height": 0.04, "object_cfg": SceneEntityCfg("cube_1")},
-        weight=1.0,
+        weight=0.5,
     )
-    # Transport height: cube2 must be high enough during transport to avoid collision
-    cube2_transport_height = RewTerm(
+    cube2_is_lifted = RewTerm(
         func=mdp.object_is_lifted,
-        params={"minimal_height": 0.024, "object_cfg": SceneEntityCfg("cube_2")},
-        weight=1.0,
-    )
-    # Transport: cube near target (move phase)
-    cube_1_near_target = RewTerm(
-        func=mdp.cube_near_target_xy,
-        params={"target_xy": TARGET_XY, "object_cfg": SceneEntityCfg("cube_1")},
-        weight=1.0,
-    )
-    cube_2_near_target = RewTerm(
-        func=mdp.cube_near_target_xy,
-        params={"target_xy": TARGET_XY, "object_cfg": SceneEntityCfg("cube_2")},
-        weight=1.0,
+        params={"minimal_height": 0.04, "object_cfg": SceneEntityCfg("cube_2")},
+        weight=0.5,
     )
 
     # === Main RL rewards (stack phase) ===

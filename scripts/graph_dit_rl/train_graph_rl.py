@@ -551,6 +551,11 @@ class GraphDiTRLTrainer:
         rollout_successes = []
         delta_norms_all = []
 
+        # Track per-term reward accumulation
+        _reward_term_accum = None
+        _reward_term_names = None
+        _reward_term_episodes = []
+
         for step in range(self.steps_per_env):
             # FIXED: 1e-8 除零保护
             if self.obs_mean is not None and self.obs_std is not None:
@@ -653,6 +658,18 @@ class GraphDiTRLTrainer:
             ep_rewards += reward
             ep_lengths += 1
 
+            # Accumulate per-term rewards
+            try:
+                unwrapped = self.env.unwrapped if hasattr(self.env, 'unwrapped') else self.env
+                if hasattr(unwrapped, 'reward_manager'):
+                    rm = unwrapped.reward_manager
+                    if _reward_term_names is None:
+                        _reward_term_names = list(rm._term_names)
+                        _reward_term_accum = torch.zeros(self.num_envs, len(_reward_term_names), device=self.device)
+                    _reward_term_accum += rm._step_reward
+            except Exception:
+                pass
+
             if self.action_mean is not None and self.action_std is not None:
                 action_for_history = (action - self.action_mean) / (self.action_std + 1e-8)
             else:
@@ -691,6 +708,12 @@ class GraphDiTRLTrainer:
                     rollout_successes.append(float(is_success))
                     self.episode_successes.append(float(is_success))
                 pass
+
+                # Record per-term episode rewards
+                if _reward_term_accum is not None:
+                    for i in done_envs.tolist():
+                        _reward_term_episodes.append(_reward_term_accum[i].clone())
+                    _reward_term_accum[done_envs] = 0
 
                 # Pre-fill histories with post-reset obs (matches BC training padding)
                 self._prefill_histories_from_obs(next_obs, env_ids=done_envs)
@@ -735,6 +758,15 @@ class GraphDiTRLTrainer:
             last_value = last_info["v_bar"]
 
         self.buffer.compute_returns(last_value, self.cfg.gamma, self.cfg.lam)
+
+        # Print per-term episode reward breakdown
+        if _reward_term_names and len(_reward_term_episodes) > 0:
+            stacked = torch.stack(_reward_term_episodes[-100:])  # last 100 episodes
+            mean_per_term = stacked.mean(dim=0)
+            parts = []
+            for name, val in zip(_reward_term_names, mean_per_term):
+                parts.append(f"{name}={val.item():.1f}")
+            print(f"  [Rew breakdown] {' | '.join(parts)}")
 
         stats = {}
         if len(self.episode_rewards) > 0:
