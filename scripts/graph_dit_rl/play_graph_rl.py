@@ -315,6 +315,22 @@ def play_graph_rl_policy(
     policy.prefill_node_history(obs)
     print(f"[Play] Pre-filled histories from initial obs (matching BC training padding)")
 
+    # Save home EE positions for fixing stale body transforms after auto-reset.
+    # Isaac Lab step() auto-reset calls _reset_idx() but NOT sim.forward(),
+    # so EE/cube positions from FrameTransformer are STALE after reset.
+    # We save home positions here and overwrite stale obs for reset envs.
+    _home_ee_per_env = []
+    _ee_keys = ["left_ee_position", "left_ee_orientation", "right_ee_position", "right_ee_orientation"]
+    for _ei in range(num_envs):
+        _slices = {}
+        for _hk in _ee_keys:
+            if obs_struct is not None and _hk in obs_struct:
+                _s, _e = obs_struct[_hk]
+                _slices[_hk] = obs[_ei, _s:_e].clone()
+        _home_ee_per_env.append(_slices)
+    if _home_ee_per_env and _home_ee_per_env[0]:
+        print(f"[Play] Saved per-env home EE for stale obs fix: {list(_home_ee_per_env[0].keys())}")
+
     # Stats (tensor for per-env tracking; lists for final stats like play.py)
     episode_rewards = torch.zeros(num_envs, device=device)
     episode_lengths = torch.zeros(num_envs, device=device)
@@ -453,6 +469,23 @@ def play_graph_rl_policy(
             # 必须用 obs（step 前 = 终止前最后一帧）判断 success
             done_envs = done.nonzero(as_tuple=False).squeeze(-1)
             if len(done_envs) > 0:
+                # FIX stale EE positions after auto-reset (from BC play.py).
+                # step() auto-reset calls _reset_idx() but NOT sim.forward(),
+                # so EE positions from FrameTransformer are stale.
+                # Overwrite stale EE in next_obs with saved home positions.
+                if _home_ee_per_env and obs_struct is not None:
+                    for env_id in done_envs.tolist():
+                        if env_id < len(_home_ee_per_env):
+                            for _hk, _hv in _home_ee_per_env[env_id].items():
+                                if _hk in obs_struct:
+                                    _s, _e = obs_struct[_hk]
+                                    val = _hv.to(next_obs.device).clone()
+                                    # Home EE is in local frame. next_obs was converted to local
+                                    # by _obs_to_local which subtracts env_origins.
+                                    # But next_obs for reset envs has stale WORLD-frame EE,
+                                    # so after _obs_to_local it's wrong. Write correct local values.
+                                    next_obs[env_id, _s:_e] = val
+
                 policy.reset_envs(done_envs)
                 for i in done_envs.tolist():
                     is_truncated = bool(truncated[i].item() if truncated.dim() > 0 else truncated.item())
