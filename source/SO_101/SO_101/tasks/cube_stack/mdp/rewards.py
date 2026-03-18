@@ -157,11 +157,10 @@ def cube_stack_alignment(
     fire_now = both_open & env._gripper_was_closed & (~env._alignment_fired)
     env._alignment_fired = env._alignment_fired | fire_now
 
-    # Reset on env reset
-    if hasattr(env, 'termination_manager'):
-        resets = env.termination_manager.dones
-        env._alignment_fired[resets] = False
-        env._gripper_was_closed[resets] = False
+    # Reset flags for envs that just started a new episode
+    new_episode = (env.episode_length_buf <= 1)
+    env._alignment_fired[new_episode] = False
+    env._gripper_was_closed[new_episode] = False
 
     return (alignment_quality * fire_now.float())
 
@@ -228,10 +227,9 @@ def gripper_release_when_stacked(
     release_now = is_stacked & both_open & (~env._release_fired)
     env._release_fired = env._release_fired | (is_stacked & both_open)
 
-    # Reset flag for envs that got reset
-    if hasattr(env, 'termination_manager'):
-        resets = env.termination_manager.dones
-        env._release_fired[resets] = False
+    # Reset flags for envs that just started a new episode
+    new_episode = (env.episode_length_buf <= 1)
+    env._release_fired[new_episode] = False
 
     return release_now.float()
 
@@ -283,11 +281,8 @@ def stack_success_bonus(
     success_now = stacked & both_open & (~env._success_fired)
     env._success_fired = env._success_fired | (stacked & both_open)
 
-    # Reset flag for envs that got reset
-    if hasattr(env, 'reset_buf'):
-        env._success_fired[env.reset_buf.bool()] = False
-    elif hasattr(env, 'termination_manager'):
-        resets = env.termination_manager.dones
-        env._success_fired[resets] = False
+    # Reset flags for envs that just started a new episode
+    new_episode = (env.episode_length_buf <= 1)
+    env._success_fired[new_episode] = False
 
     return success_now.float()
