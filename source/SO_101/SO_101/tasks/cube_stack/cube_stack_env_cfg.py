@@ -361,7 +361,7 @@ class TerminationsCfg:
             "target_eps_xy": 0.2,
             "gripper_open_threshold": -0.1,
             "vel_threshold": 0.001,
-            "stable_steps_required": 50,
+            "stable_steps_required": 1,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
@@ -443,7 +443,7 @@ class CubeStackRLRewardsCfg:
         weight=15.0,
     )
 
-    # Gripper release when stacked (one-shot)
+    # Gripper release when stacked (one-shot, right arm only)
     gripper_release = RewTerm(
         func=mdp.gripper_release_when_stacked,
         params={
@@ -452,12 +452,11 @@ class CubeStackRLRewardsCfg:
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
-            "left_arm_cfg": SceneEntityCfg("left_arm"),
         },
-        weight=500.0,
+        weight=5.0,
     )
 
-    # Large success bonus (one-shot)
+    # Large success bonus (one-shot, right arm only)
     success_bonus = RewTerm(
         func=mdp.stack_success_bonus,
         params={
@@ -467,7 +466,6 @@ class CubeStackRLRewardsCfg:
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
-            "left_arm_cfg": SceneEntityCfg("left_arm"),
         },
         weight=1500.0,
     )

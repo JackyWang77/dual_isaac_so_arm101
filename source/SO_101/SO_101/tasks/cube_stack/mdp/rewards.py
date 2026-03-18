@@ -173,16 +173,14 @@ def gripper_release_when_stacked(
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
-    left_arm_cfg: SceneEntityCfg = SceneEntityCfg("left_arm"),
 ) -> torch.Tensor:
-    """One-time reward for opening grippers when cubes are stacked.
+    """One-time reward for RIGHT gripper release when cubes are stacked.
 
-    Gripper joint: 0=open, -0.36=closed. Open threshold: > -0.1.
+    Only checks right arm (which places cube_1).
     """
     c1: RigidObject = env.scene[cube_1_cfg.name]
     c2: RigidObject = env.scene[cube_2_cfg.name]
     right_arm = env.scene[right_arm_cfg.name]
-    left_arm = env.scene[left_arm_cfg.name]
 
     num_envs = env.num_envs
     device = c1.data.root_pos_w.device
@@ -197,13 +195,10 @@ def gripper_release_when_stacked(
     z_diff = torch.abs(p1[:, 2] - p2[:, 2])
     is_stacked = (xy_dist < xy_threshold) & (z_diff > z_tolerance)
 
-    both_open = (
-        (right_arm.data.joint_pos[:, -1] > gripper_open_thresh)
-        & (left_arm.data.joint_pos[:, -1] > gripper_open_thresh)
-    )
+    right_open = (right_arm.data.joint_pos[:, -1] > gripper_open_thresh)
 
-    release_now = is_stacked & both_open & (~env._release_fired)
-    env._release_fired = env._release_fired | (is_stacked & both_open)
+    release_now = is_stacked & right_open & (~env._release_fired)
+    env._release_fired = env._release_fired | (is_stacked & right_open)
 
     new_episode = (env.episode_length_buf <= 1)
     env._release_fired[new_episode] = False
@@ -220,16 +215,14 @@ def stack_success_bonus(
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
-    left_arm_cfg: SceneEntityCfg = SceneEntityCfg("left_arm"),
 ) -> torch.Tensor:
-    """Large one-time bonus when stack success conditions are met.
+    """Large one-time bonus when stack success + right gripper open.
 
-    Gripper joint: 0=open, -0.36=closed. Open threshold: > -0.1.
+    Only checks right arm (which places cube_1).
     """
     c1: RigidObject = env.scene[cube_1_cfg.name]
     c2: RigidObject = env.scene[cube_2_cfg.name]
     right_arm = env.scene[right_arm_cfg.name]
-    left_arm = env.scene[left_arm_cfg.name]
 
     num_envs = env.num_envs
     device = c1.data.root_pos_w.device
@@ -248,13 +241,10 @@ def stack_success_bonus(
     ok_2on1 = (torch.abs(z_diff_2on1 - expected_height) < eps_z) & (xy_dist < eps_xy)
     stacked = ok_1on2 | ok_2on1
 
-    both_open = (
-        (right_arm.data.joint_pos[:, -1] > gripper_open_thresh)
-        & (left_arm.data.joint_pos[:, -1] > gripper_open_thresh)
-    )
+    right_open = (right_arm.data.joint_pos[:, -1] > gripper_open_thresh)
 
-    success_now = stacked & both_open & (~env._success_fired)
-    env._success_fired = env._success_fired | (stacked & both_open)
+    success_now = stacked & right_open & (~env._success_fired)
+    env._success_fired = env._success_fired | (stacked & right_open)
 
     new_episode = (env.episode_length_buf <= 1)
     env._success_fired[new_episode] = False
