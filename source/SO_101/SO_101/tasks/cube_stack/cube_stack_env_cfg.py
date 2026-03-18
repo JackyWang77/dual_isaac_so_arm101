@@ -453,7 +453,7 @@ class CubeStackRLRewardsCfg:
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
-        weight=5.0,
+        weight=250.0,
     )
 
     # Large success bonus (one-shot, right arm only)
