@@ -52,7 +52,7 @@ def _detect_checkpoint_type(path: str) -> str:
 
 
 def _check_position_success(obs: torch.Tensor, env_idx: int, cfg) -> bool:
-    """Position-based success check (matching train_graph_rl.py)."""
+    """Position-based success check with gripper open requirement."""
     s = getattr(cfg, "obs_structure", None)
     if s is None:
         return False
@@ -63,10 +63,19 @@ def _check_position_success(obs: torch.Tensor, env_idx: int, cfg) -> bool:
         xy_dist_a = torch.norm(c1[:2] - c2[:2])
         z_diff_b = torch.abs((c2[2] - c1[2]) - 0.018)
         xy_dist_b = torch.norm(c2[:2] - c1[:2])
-        return bool(
+        stacked = bool(
             (z_diff_a < 0.003 and xy_dist_a < 0.009) or
             (z_diff_b < 0.003 and xy_dist_b < 0.009)
         )
+        if not stacked:
+            return False
+        # Check right gripper is open (open ≈ 0, closed ≈ -0.36, threshold -0.1)
+        if "right_joint_pos" in s:
+            right_end = s["right_joint_pos"][1]
+            right_gripper = obs[env_idx, right_end - 1].item()  # last joint = gripper
+            if right_gripper < -0.1:  # gripper still closed
+                return False
+        return True
     return False
 
 

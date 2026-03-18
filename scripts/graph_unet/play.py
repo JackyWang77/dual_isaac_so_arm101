@@ -1714,6 +1714,12 @@ def play_graph_unet_policy(
                             z_ok_b = torch.abs((c2[2] - c1[2]) - STACK_EXPECTED_HEIGHT) < STACK_EPS_Z
                             xy_ok_b = torch.norm(c2[:2] - c1[:2]) < STACK_EPS_XY
                             stack_ok = (z_ok_a and xy_ok_a) or (z_ok_b and xy_ok_b)
+                            # Also check right gripper is open (open ≈ 0, closed ≈ -0.36)
+                            if stack_ok and "right_joint_pos" in _obs_offsets:
+                                right_end = _obs_offsets["right_joint_pos"] + 6  # 6 joints
+                                right_gripper = obs_tensor[i, right_end].item()  # last joint = gripper
+                                if right_gripper < -0.1:
+                                    stack_ok = False
                             episode_pick_success.append(pick_ok)
                             episode_stack_success.append(stack_ok)
 
