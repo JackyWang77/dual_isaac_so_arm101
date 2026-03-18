@@ -131,6 +131,8 @@ def cube_stack_alignment(
 
     if not hasattr(env, '_alignment_fired'):
         env._alignment_fired = torch.zeros(num_envs, dtype=torch.bool, device=device)
+    if not hasattr(env, '_gripper_was_closed'):
+        env._gripper_was_closed = torch.zeros(num_envs, dtype=torch.bool, device=device)
 
     top_pos = top.data.root_pos_w[:, :3]
     base_pos = base.data.root_pos_w[:, :3]
@@ -144,12 +146,22 @@ def cube_stack_alignment(
         & (left_arm.data.joint_pos[:, -1] > gripper_open_threshold)
     )
 
-    fire_now = both_open & (~env._alignment_fired)
-    env._alignment_fired = env._alignment_fired | both_open
+    # Track if grippers were ever closed (= picked something up)
+    any_closed = (
+        (right_arm.data.joint_pos[:, -1] < gripper_open_threshold)
+        | (left_arm.data.joint_pos[:, -1] < gripper_open_threshold)
+    )
+    env._gripper_was_closed = env._gripper_was_closed | any_closed
+
+    # Only fire after grippers were closed then reopened (= released after gripping)
+    fire_now = both_open & env._gripper_was_closed & (~env._alignment_fired)
+    env._alignment_fired = env._alignment_fired | fire_now
 
     # Reset on env reset
     if hasattr(env, 'termination_manager'):
-        env._alignment_fired[env.termination_manager.dones] = False
+        resets = env.termination_manager.dones
+        env._alignment_fired[resets] = False
+        env._gripper_was_closed[resets] = False
 
     return (alignment_quality * fire_now.float())
 
