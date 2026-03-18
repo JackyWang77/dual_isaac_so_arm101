@@ -546,6 +546,11 @@ class GraphDiTRLTrainer:
         # Pre-fill histories with first observation (matches BC training padding)
         self._prefill_histories_from_obs(obs)
 
+        # Save home obs for fixing stale EE after mid-rollout auto-reset.
+        # env.reset() calls sim.forward() so this obs is correct.
+        # step() auto-reset does NOT call sim.forward(), so EE positions are stale.
+        self._home_obs = obs.clone()
+
         ep_rewards = torch.zeros(self.num_envs, device=self.device)
         ep_lengths = torch.zeros(self.num_envs, device=self.device)
         rollout_successes = []
@@ -715,6 +720,22 @@ class GraphDiTRLTrainer:
                     for i in done_envs.tolist():
                         _reward_term_episodes.append(_reward_term_accum[i].clone())
                     _reward_term_accum[done_envs] = 0
+
+                # FIX stale EE positions after auto-reset.
+                # step() auto-reset calls _reset_idx() but NOT sim.forward(),
+                # so EE positions in next_obs are stale (from previous episode's final state).
+                # This causes backbone to output wrong actions for reset envs.
+                # Fix: overwrite stale EE positions with saved home positions.
+                if hasattr(self, '_home_obs') and self._home_obs is not None:
+                    obs_struct = getattr(self.cfg, "obs_structure", None)
+                    if obs_struct is not None:
+                        _ee_keys = ["left_ee_position", "left_ee_orientation",
+                                    "right_ee_position", "right_ee_orientation"]
+                        for _hk in _ee_keys:
+                            if _hk in obs_struct:
+                                _s, _e = obs_struct[_hk]
+                                for idx in done_envs.tolist():
+                                    next_obs[idx, _s:_e] = self._home_obs[idx, _s:_e]
 
                 # Pre-fill histories with post-reset obs (matches BC training padding)
                 self._prefill_histories_from_obs(next_obs, env_ids=done_envs)
