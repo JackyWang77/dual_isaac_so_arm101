@@ -111,57 +111,38 @@ def cube_stack_alignment(
     std: float = 0.02,
     target_height: float = 0.018,
     gripper_open_thresh: float = -0.1,
-    gripper_closed_thresh: float = -0.2,
     cube_top_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_base_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
     left_arm_cfg: SceneEntityCfg = SceneEntityCfg("left_arm"),
 ) -> torch.Tensor:
-    """One-shot alignment reward after gripper release.
+    """Alignment reward: right gripper open + cube2 above cube1 (z>0.018) + xy close.
 
-    Fires ONCE when grippers reopen after having been closed.
+    Not one-shot. Gated by conditions so no hack possible:
+    - Right hand must be open (released cube)
+    - Cube2 must be above cube1 by at least target_height
+    - Reward = 1 - tanh(xy_dist / std), closer = higher
     Gripper joint: 0=open, -0.36=closed.
     """
     top: RigidObject = env.scene[cube_top_cfg.name]
     base: RigidObject = env.scene[cube_base_cfg.name]
     right_arm = env.scene[right_arm_cfg.name]
-    left_arm = env.scene[left_arm_cfg.name]
-
-    device = top.data.root_pos_w.device
-    num_envs = env.num_envs
-
-    if not hasattr(env, '_alignment_fired'):
-        env._alignment_fired = torch.zeros(num_envs, dtype=torch.bool, device=device)
-    if not hasattr(env, '_gripper_was_closed'):
-        env._gripper_was_closed = torch.zeros(num_envs, dtype=torch.bool, device=device)
 
     top_pos = top.data.root_pos_w[:, :3]
     base_pos = base.data.root_pos_w[:, :3]
-    ideal_pos = base_pos.clone()
-    ideal_pos[:, 2] += target_height
-    dist_to_ideal = torch.norm(top_pos - ideal_pos, dim=1)
-    alignment_quality = 1 - torch.tanh(dist_to_ideal / std)
 
-    # Open: joint > -0.1, Closed: joint < -0.2
-    both_open = (
-        (right_arm.data.joint_pos[:, -1] > gripper_open_thresh)
-        & (left_arm.data.joint_pos[:, -1] > gripper_open_thresh)
-    )
-    any_closed = (
-        (right_arm.data.joint_pos[:, -1] < gripper_closed_thresh)
-        | (left_arm.data.joint_pos[:, -1] < gripper_closed_thresh)
-    )
-    env._gripper_was_closed = env._gripper_was_closed | any_closed
+    # Height gate: cube2 center must be above cube1 center by >= target_height
+    z_diff = top_pos[:, 2] - base_pos[:, 2]
+    height_ok = (z_diff >= target_height).float()
 
-    fire_now = both_open & env._gripper_was_closed & (~env._alignment_fired)
-    env._alignment_fired = env._alignment_fired | fire_now
+    # XY distance: closer = better
+    xy_dist = torch.norm(top_pos[:, :2] - base_pos[:, :2], dim=1)
+    alignment_quality = 1 - torch.tanh(xy_dist / std)
 
-    # Reset flags for new episodes
-    new_episode = (env.episode_length_buf <= 1)
-    env._alignment_fired[new_episode] = False
-    env._gripper_was_closed[new_episode] = False
+    # Right gripper must be open
+    right_open = (right_arm.data.joint_pos[:, -1] > gripper_open_thresh).float()
 
-    return (alignment_quality * fire_now.float())
+    return alignment_quality * height_ok * right_open
 
 
 def cube_near_target_xy(
