@@ -440,7 +440,7 @@ class CubeStackRLRewardsCfg:
             "cube_base_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
-        weight=15.0,
+        weight=30.0,
     )
 
     # Gripper release when stacked (one-shot, right arm only)
