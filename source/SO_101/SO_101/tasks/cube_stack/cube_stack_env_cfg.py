@@ -432,15 +432,13 @@ class CubeStackRLRewardsCfg:
     )
 
     # === Main RL rewards (stack phase) ===
-    # Stack alignment: cube_2 on top of cube_1
-    # No time decay - dense per-step signal for critic learning
-    stack_2_on_1 = RewTerm(
+    # Stack alignment: cube_1 on top of cube_2 (right arm places cube_1)
+    stack_1_on_2 = RewTerm(
         func=mdp.cube_stack_alignment,
         params={
-            "cube_top_cfg": SceneEntityCfg("cube_2"),
-            "cube_base_cfg": SceneEntityCfg("cube_1"),
+            "cube_top_cfg": SceneEntityCfg("cube_1"),
+            "cube_base_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
-            "left_arm_cfg": SceneEntityCfg("left_arm"),
         },
         weight=1000.0,
     )
