@@ -466,7 +466,6 @@ class CubeStackRLRewardsCfg:
             "expected_height": 0.018,
             "eps_z": 0.005,
             "eps_xy": 0.012,
-            "gripper_open_threshold": 0.1,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),

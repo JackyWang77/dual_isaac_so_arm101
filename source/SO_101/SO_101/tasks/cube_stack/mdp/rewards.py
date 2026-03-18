@@ -110,7 +110,8 @@ def cube_stack_alignment(
     env: ManagerBasedRLEnv,
     std: float = 0.02,
     target_height: float = 0.018,
-    gripper_open_threshold: float = 0.1,
+    gripper_open_thresh: float = -0.1,
+    gripper_closed_thresh: float = -0.2,
     cube_top_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_base_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
@@ -118,8 +119,8 @@ def cube_stack_alignment(
 ) -> torch.Tensor:
     """One-shot alignment reward after gripper release.
 
-    Fires ONCE when both grippers open, giving alignment quality as reward.
-    Prevents hold-without-release hacking.
+    Fires ONCE when grippers reopen after having been closed.
+    Gripper joint: 0=open, -0.36=closed.
     """
     top: RigidObject = env.scene[cube_top_cfg.name]
     base: RigidObject = env.scene[cube_base_cfg.name]
@@ -141,23 +142,21 @@ def cube_stack_alignment(
     dist_to_ideal = torch.norm(top_pos - ideal_pos, dim=1)
     alignment_quality = 1 - torch.tanh(dist_to_ideal / std)
 
+    # Open: joint > -0.1, Closed: joint < -0.2
     both_open = (
-        (right_arm.data.joint_pos[:, -1] > gripper_open_threshold)
-        & (left_arm.data.joint_pos[:, -1] > gripper_open_threshold)
+        (right_arm.data.joint_pos[:, -1] > gripper_open_thresh)
+        & (left_arm.data.joint_pos[:, -1] > gripper_open_thresh)
     )
-
-    # Track if grippers were ever closed (= picked something up)
     any_closed = (
-        (right_arm.data.joint_pos[:, -1] < gripper_open_threshold)
-        | (left_arm.data.joint_pos[:, -1] < gripper_open_threshold)
+        (right_arm.data.joint_pos[:, -1] < gripper_closed_thresh)
+        | (left_arm.data.joint_pos[:, -1] < gripper_closed_thresh)
     )
     env._gripper_was_closed = env._gripper_was_closed | any_closed
 
-    # Only fire after grippers were closed then reopened (= released after gripping)
     fire_now = both_open & env._gripper_was_closed & (~env._alignment_fired)
     env._alignment_fired = env._alignment_fired | fire_now
 
-    # Reset flags for envs that just started a new episode
+    # Reset flags for new episodes
     new_episode = (env.episode_length_buf <= 1)
     env._alignment_fired[new_episode] = False
     env._gripper_was_closed[new_episode] = False
@@ -189,7 +188,7 @@ def gripper_release_when_stacked(
     env: ManagerBasedRLEnv,
     xy_threshold: float = 0.015,
     z_tolerance: float = 0.01,
-    jaw_open: float = 0.4,
+    gripper_open_thresh: float = -0.1,
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
@@ -197,7 +196,7 @@ def gripper_release_when_stacked(
 ) -> torch.Tensor:
     """One-time reward for opening grippers when cubes are stacked.
 
-    Uses a flag to ensure the bonus is only given ONCE per episode.
+    Gripper joint: 0=open, -0.36=closed. Open threshold: > -0.1.
     """
     c1: RigidObject = env.scene[cube_1_cfg.name]
     c2: RigidObject = env.scene[cube_2_cfg.name]
@@ -207,27 +206,24 @@ def gripper_release_when_stacked(
     num_envs = env.num_envs
     device = c1.data.root_pos_w.device
 
-    # Initialize one-shot flag on first call
     if not hasattr(env, '_release_fired'):
         env._release_fired = torch.zeros(num_envs, dtype=torch.bool, device=device)
 
     p1 = c1.data.root_pos_w[:, :3]
     p2 = c2.data.root_pos_w[:, :3]
 
-    # Check if cubes are stacked (either order)
     xy_dist = torch.norm(p1[:, :2] - p2[:, :2], dim=1)
     z_diff = torch.abs(p1[:, 2] - p2[:, 2])
     is_stacked = (xy_dist < xy_threshold) & (z_diff > z_tolerance)
 
-    # Gripper openness check
-    right_open = right_arm.data.joint_pos[:, -1] > (jaw_open * 0.5)
-    left_open = left_arm.data.joint_pos[:, -1] > (jaw_open * 0.5)
-    both_open = right_open & left_open
+    both_open = (
+        (right_arm.data.joint_pos[:, -1] > gripper_open_thresh)
+        & (left_arm.data.joint_pos[:, -1] > gripper_open_thresh)
+    )
 
     release_now = is_stacked & both_open & (~env._release_fired)
     env._release_fired = env._release_fired | (is_stacked & both_open)
 
-    # Reset flags for envs that just started a new episode
     new_episode = (env.episode_length_buf <= 1)
     env._release_fired[new_episode] = False
 
@@ -239,7 +235,7 @@ def stack_success_bonus(
     expected_height: float = 0.018,
     eps_z: float = 0.005,
     eps_xy: float = 0.012,
-    gripper_open_threshold: float = 0.1,
+    gripper_open_thresh: float = -0.1,
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
@@ -247,7 +243,7 @@ def stack_success_bonus(
 ) -> torch.Tensor:
     """Large one-time bonus when stack success conditions are met.
 
-    Uses a flag to ensure the bonus is only given ONCE per episode.
+    Gripper joint: 0=open, -0.36=closed. Open threshold: > -0.1.
     """
     c1: RigidObject = env.scene[cube_1_cfg.name]
     c2: RigidObject = env.scene[cube_2_cfg.name]
@@ -263,7 +259,6 @@ def stack_success_bonus(
     p1 = c1.data.root_pos_w[:, :3]
     p2 = c2.data.root_pos_w[:, :3]
 
-    # Check both stacking orders: 1-on-2 or 2-on-1
     z_diff_1on2 = p1[:, 2] - p2[:, 2]
     z_diff_2on1 = p2[:, 2] - p1[:, 2]
     xy_dist = torch.norm(p1[:, :2] - p2[:, :2], dim=1)
@@ -272,16 +267,14 @@ def stack_success_bonus(
     ok_2on1 = (torch.abs(z_diff_2on1 - expected_height) < eps_z) & (xy_dist < eps_xy)
     stacked = ok_1on2 | ok_2on1
 
-    # Both grippers open
     both_open = (
-        (right_arm.data.joint_pos[:, -1] > gripper_open_threshold)
-        & (left_arm.data.joint_pos[:, -1] > gripper_open_threshold)
+        (right_arm.data.joint_pos[:, -1] > gripper_open_thresh)
+        & (left_arm.data.joint_pos[:, -1] > gripper_open_thresh)
     )
 
     success_now = stacked & both_open & (~env._success_fired)
     env._success_fired = env._success_fired | (stacked & both_open)
 
-    # Reset flags for envs that just started a new episode
     new_episode = (env.episode_length_buf <= 1)
     env._success_fired[new_episode] = False
 
