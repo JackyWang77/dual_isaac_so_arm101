@@ -467,7 +467,7 @@ class CubeStackRLRewardsCfg:
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
-        weight=1500.0,
+        weight=1000.0,
     )
 
     # Smooth control penalties
