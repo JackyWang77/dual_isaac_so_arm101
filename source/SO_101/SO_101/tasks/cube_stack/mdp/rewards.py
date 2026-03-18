@@ -116,30 +116,42 @@ def cube_stack_alignment(
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
     left_arm_cfg: SceneEntityCfg = SceneEntityCfg("left_arm"),
 ) -> torch.Tensor:
-    """Reward cube_top being close to ideal stacked position above cube_base.
+    """One-shot alignment reward after gripper release.
 
-    Only fires AFTER both grippers are open, preventing hold-without-release hacking.
-    Ideal position = cube_base xy + cube_base z + target_height.
-    Reward = 1 - tanh(dist_to_ideal / std).
+    Fires ONCE when both grippers open, giving alignment quality as reward.
+    Prevents hold-without-release hacking.
     """
     top: RigidObject = env.scene[cube_top_cfg.name]
     base: RigidObject = env.scene[cube_base_cfg.name]
     right_arm = env.scene[right_arm_cfg.name]
     left_arm = env.scene[left_arm_cfg.name]
 
+    device = top.data.root_pos_w.device
+    num_envs = env.num_envs
+
+    if not hasattr(env, '_alignment_fired'):
+        env._alignment_fired = torch.zeros(num_envs, dtype=torch.bool, device=device)
+
     top_pos = top.data.root_pos_w[:, :3]
     base_pos = base.data.root_pos_w[:, :3]
     ideal_pos = base_pos.clone()
     ideal_pos[:, 2] += target_height
     dist_to_ideal = torch.norm(top_pos - ideal_pos, dim=1)
+    alignment_quality = 1 - torch.tanh(dist_to_ideal / std)
 
-    # Only give alignment reward when both grippers are open
     both_open = (
         (right_arm.data.joint_pos[:, -1] > gripper_open_threshold)
         & (left_arm.data.joint_pos[:, -1] > gripper_open_threshold)
-    ).float()
+    )
 
-    return (1 - torch.tanh(dist_to_ideal / std)) * both_open
+    fire_now = both_open & (~env._alignment_fired)
+    env._alignment_fired = env._alignment_fired | both_open
+
+    # Reset on env reset
+    if hasattr(env, 'termination_manager'):
+        env._alignment_fired[env.termination_manager.dones] = False
+
+    return (alignment_quality * fire_now.float())
 
 
 def cube_near_target_xy(
@@ -233,9 +245,8 @@ def stack_success_bonus(
     left_arm = env.scene[left_arm_cfg.name]
 
     num_envs = env.num_envs
-    device = p1.device if hasattr(env, '_success_fired') else c1.data.root_pos_w.device
+    device = c1.data.root_pos_w.device
 
-    # Initialize one-shot flag on first call
     if not hasattr(env, '_success_fired'):
         env._success_fired = torch.zeros(num_envs, dtype=torch.bool, device=device)
 
