@@ -439,6 +439,8 @@ class CubeStackRLRewardsCfg:
         params={
             "cube_top_cfg": SceneEntityCfg("cube_2"),
             "cube_base_cfg": SceneEntityCfg("cube_1"),
+            "right_arm_cfg": SceneEntityCfg("right_arm"),
+            "left_arm_cfg": SceneEntityCfg("left_arm"),
         },
         weight=110.0,
     )

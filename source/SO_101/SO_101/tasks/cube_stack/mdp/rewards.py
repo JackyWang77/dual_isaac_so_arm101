@@ -110,22 +110,36 @@ def cube_stack_alignment(
     env: ManagerBasedRLEnv,
     std: float = 0.02,
     target_height: float = 0.018,
+    gripper_open_threshold: float = 0.1,
     cube_top_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_base_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
+    right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
+    left_arm_cfg: SceneEntityCfg = SceneEntityCfg("left_arm"),
 ) -> torch.Tensor:
     """Reward cube_top being close to ideal stacked position above cube_base.
 
+    Only fires AFTER both grippers are open, preventing hold-without-release hacking.
     Ideal position = cube_base xy + cube_base z + target_height.
-    Reward = 1 - tanh(dist_to_ideal / std). Dense signal every step.
+    Reward = 1 - tanh(dist_to_ideal / std).
     """
     top: RigidObject = env.scene[cube_top_cfg.name]
     base: RigidObject = env.scene[cube_base_cfg.name]
+    right_arm = env.scene[right_arm_cfg.name]
+    left_arm = env.scene[left_arm_cfg.name]
+
     top_pos = top.data.root_pos_w[:, :3]
     base_pos = base.data.root_pos_w[:, :3]
     ideal_pos = base_pos.clone()
     ideal_pos[:, 2] += target_height
     dist_to_ideal = torch.norm(top_pos - ideal_pos, dim=1)
-    return 1 - torch.tanh(dist_to_ideal / std)
+
+    # Only give alignment reward when both grippers are open
+    both_open = (
+        (right_arm.data.joint_pos[:, -1] > gripper_open_threshold)
+        & (left_arm.data.joint_pos[:, -1] > gripper_open_threshold)
+    ).float()
+
+    return (1 - torch.tanh(dist_to_ideal / std)) * both_open
 
 
 def cube_near_target_xy(
@@ -158,15 +172,21 @@ def gripper_release_when_stacked(
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
     left_arm_cfg: SceneEntityCfg = SceneEntityCfg("left_arm"),
 ) -> torch.Tensor:
-    """Reward opening grippers when cubes are stacked (either order).
+    """One-time reward for opening grippers when cubes are stacked.
 
-    BC sometimes "doesn't dare to release" - this encourages letting go
-    once the stack is aligned.
+    Uses a flag to ensure the bonus is only given ONCE per episode.
     """
     c1: RigidObject = env.scene[cube_1_cfg.name]
     c2: RigidObject = env.scene[cube_2_cfg.name]
     right_arm = env.scene[right_arm_cfg.name]
     left_arm = env.scene[left_arm_cfg.name]
+
+    num_envs = env.num_envs
+    device = c1.data.root_pos_w.device
+
+    # Initialize one-shot flag on first call
+    if not hasattr(env, '_release_fired'):
+        env._release_fired = torch.zeros(num_envs, dtype=torch.bool, device=device)
 
     p1 = c1.data.root_pos_w[:, :3]
     p2 = c2.data.root_pos_w[:, :3]
@@ -174,13 +194,22 @@ def gripper_release_when_stacked(
     # Check if cubes are stacked (either order)
     xy_dist = torch.norm(p1[:, :2] - p2[:, :2], dim=1)
     z_diff = torch.abs(p1[:, 2] - p2[:, 2])
-    is_stacked = ((xy_dist < xy_threshold) & (z_diff > z_tolerance)).float()
+    is_stacked = (xy_dist < xy_threshold) & (z_diff > z_tolerance)
 
-    # Gripper openness: 0=closed, 1=fully open
-    right_open = (right_arm.data.joint_pos[:, -1] / jaw_open).clamp(0, 1)
-    left_open = (left_arm.data.joint_pos[:, -1] / jaw_open).clamp(0, 1)
+    # Gripper openness check
+    right_open = right_arm.data.joint_pos[:, -1] > (jaw_open * 0.5)
+    left_open = left_arm.data.joint_pos[:, -1] > (jaw_open * 0.5)
+    both_open = right_open & left_open
 
-    return is_stacked * (right_open + left_open) * 0.5
+    release_now = is_stacked & both_open & (~env._release_fired)
+    env._release_fired = env._release_fired | (is_stacked & both_open)
+
+    # Reset flag for envs that got reset
+    if hasattr(env, 'termination_manager'):
+        resets = env.termination_manager.dones
+        env._release_fired[resets] = False
+
+    return release_now.float()
 
 
 def stack_success_bonus(
@@ -196,13 +225,19 @@ def stack_success_bonus(
 ) -> torch.Tensor:
     """Large one-time bonus when stack success conditions are met.
 
-    Looser than termination criterion (no velocity/stability check)
-    so the agent gets rewarded more frequently during learning.
+    Uses a flag to ensure the bonus is only given ONCE per episode.
     """
     c1: RigidObject = env.scene[cube_1_cfg.name]
     c2: RigidObject = env.scene[cube_2_cfg.name]
     right_arm = env.scene[right_arm_cfg.name]
     left_arm = env.scene[left_arm_cfg.name]
+
+    num_envs = env.num_envs
+    device = p1.device if hasattr(env, '_success_fired') else c1.data.root_pos_w.device
+
+    # Initialize one-shot flag on first call
+    if not hasattr(env, '_success_fired'):
+        env._success_fired = torch.zeros(num_envs, dtype=torch.bool, device=device)
 
     p1 = c1.data.root_pos_w[:, :3]
     p2 = c2.data.root_pos_w[:, :3]
@@ -214,12 +249,22 @@ def stack_success_bonus(
 
     ok_1on2 = (torch.abs(z_diff_1on2 - expected_height) < eps_z) & (xy_dist < eps_xy)
     ok_2on1 = (torch.abs(z_diff_2on1 - expected_height) < eps_z) & (xy_dist < eps_xy)
-    stacked = (ok_1on2 | ok_2on1).float()
+    stacked = ok_1on2 | ok_2on1
 
     # Both grippers open
     both_open = (
         (right_arm.data.joint_pos[:, -1] > gripper_open_threshold)
         & (left_arm.data.joint_pos[:, -1] > gripper_open_threshold)
-    ).float()
+    )
 
-    return stacked * both_open
+    success_now = stacked & both_open & (~env._success_fired)
+    env._success_fired = env._success_fired | (stacked & both_open)
+
+    # Reset flag for envs that got reset
+    if hasattr(env, 'reset_buf'):
+        env._success_fired[env.reset_buf.bool()] = False
+    elif hasattr(env, 'termination_manager'):
+        resets = env.termination_manager.dones
+        env._success_fired[resets] = False
+
+    return success_now.float()
