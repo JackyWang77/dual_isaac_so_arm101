@@ -337,6 +337,21 @@ def play_graph_rl_policy(
     episode_success = []  # list of bool for SR(100ep)
     episode_rewards_list = []  # list of float for mean_reward
 
+    # Per-term reward breakdown tracking
+    _reward_term_names = None
+    _reward_term_accum = None  # [num_envs, num_terms]
+    _reward_term_episodes = []  # list of [num_terms] tensors
+    try:
+        _base = env.unwrapped if hasattr(env, "unwrapped") else env
+        if hasattr(_base, "reward_manager"):
+            _rm = _base.reward_manager
+            _reward_term_names = list(_rm._term_names)
+            _reward_term_accum = torch.zeros(num_envs, len(_reward_term_names), device=device)
+            _reward_dt = getattr(_base, "step_dt", 0.02)
+            print(f"[Play] Reward terms: {_reward_term_names}")
+    except Exception as e:
+        print(f"[Play] WARNING: reward breakdown init failed: {e}")
+
     print(f"\n[Play] Starting playback (deterministic={deterministic})...")
     print(f"[Play] Press Ctrl+C to stop\n")
 
@@ -465,6 +480,13 @@ def play_graph_rl_policy(
             episode_rewards += reward
             episode_lengths += 1
 
+            # Accumulate per-term rewards
+            if _reward_term_accum is not None:
+                try:
+                    _reward_term_accum += _rm._step_reward * _reward_dt
+                except Exception:
+                    pass
+
             # Handle resets: Isaac Lab 在 reset 之后才计算 obs，所以 next_obs 对 done env 是 reset 后的新 episode 初始 obs（cube 在地面）
             # 必须用 obs（step 前 = 终止前最后一帧）判断 success
             done_envs = done.nonzero(as_tuple=False).squeeze(-1)
@@ -495,10 +517,16 @@ def play_graph_rl_policy(
                         is_success = _check_success_from_info(env, env_info, i, obs_before_step=obs, cfg=cfg)
                     episode_success.append(is_success)
                     episode_rewards_list.append(episode_rewards[i].item())
+                    # Record per-term reward for this episode
+                    if _reward_term_accum is not None:
+                        _reward_term_episodes.append(_reward_term_accum[i].clone())
                     episode_count = len(episode_success)
                     status = "✅" if is_success else "❌"
                     sr = sum(episode_success) / len(episode_success) * 100.0
                     print(f"[Play] Ep {episode_count:3d} {status} | SR={sr:.1f}%")
+                # Reset per-term accumulators for done envs
+                if _reward_term_accum is not None:
+                    _reward_term_accum[done_envs] = 0
 
                 # Vectorized reset: zero out and prefill histories (matching train_graph_rl.py)
                 ee_node_reset, obj_node_reset = policy._extract_nodes_from_obs(next_obs)
@@ -552,6 +580,12 @@ def play_graph_rl_policy(
             f"[Play] SR={sr_final:.1f}% (100ep:{sr_100_final:.1f}%) [{n}ep] | "
             f"Rew_mean={mean_reward:.1f} | {sum(episode_success)}/{n} success"
         )
+        # Print per-term reward breakdown
+        if _reward_term_names and _reward_term_episodes:
+            stacked = torch.stack(_reward_term_episodes)
+            mean_per_term = stacked.mean(dim=0)
+            parts = [f"{name}={val.item():.2f}" for name, val in zip(_reward_term_names, mean_per_term)]
+            print(f"[Play] Rew breakdown: {' | '.join(parts)}")
     print(f"\n[Play] Playback completed!")
 
     # Cleanup

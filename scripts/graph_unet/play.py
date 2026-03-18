@@ -561,6 +561,20 @@ def play_graph_unet_policy(
     current_episode_rewards = torch.zeros(num_envs, device=device)
     is_stack_task = "Stack" in task_name or "Cube-Stack" in task_name
     is_table_task = "Table-Setting" in task_name
+
+    # Per-term reward breakdown tracking
+    _rew_term_names = None
+    _rew_term_accum = None
+    _rew_term_episodes = []
+    try:
+        if hasattr(_base_env, "reward_manager"):
+            _rew_mgr = _base_env.reward_manager
+            _rew_term_names = list(_rew_mgr._term_names)
+            _rew_term_accum = torch.zeros(num_envs, len(_rew_term_names), device=device)
+            _rew_dt = getattr(_base_env, "step_dt", 0.02)
+            print(f"[Play] Reward terms: {_rew_term_names}")
+    except Exception as e:
+        print(f"[Play] WARNING: reward breakdown init failed: {e}")
     
     # Success rate: directly read per-env termination signals from the termination manager.
     # Isaac Lab's extras["log"]["Episode_Termination/X"] are scalar averages (useless per-env).
@@ -1613,6 +1627,13 @@ def play_graph_unet_policy(
                     if hasattr(rewards, "to")
                     else torch.tensor(rewards, device=device)
                 )
+
+            # Accumulate per-term rewards
+            if _rew_term_accum is not None:
+                try:
+                    _rew_term_accum += _rew_mgr._step_reward * _rew_dt
+                except Exception:
+                    pass
             
             # Check for episode completion and reset history buffers + action buffers
             if done.any():
@@ -1665,6 +1686,9 @@ def play_graph_unet_policy(
                 for i in range(num_envs):
                     if done[i]:
                         episode_rewards.append(current_episode_rewards[i].item())
+                        # Record per-term reward for this episode
+                        if _rew_term_accum is not None:
+                            _rew_term_episodes.append(_rew_term_accum[i].clone())
 
                         # 成功率：优先用 env 信号，Stack 用 step 前 obs_tensor（终端态）计算 pick/stack
                         # obs_tensor 为 step 前，即终止前最后一帧；step 后 obs 可能是 reset 后的
@@ -1739,6 +1763,8 @@ def play_graph_unet_policy(
                             episode_id_per_env[i] += 1
 
                         current_episode_rewards[i] = 0.0
+                        if _rew_term_accum is not None:
+                            _rew_term_accum[i] = 0
 
                         # Reset history buffers for this environment
                         # Training pads early-episode histories with copies of the
@@ -1804,6 +1830,12 @@ def play_graph_unet_policy(
             f"[Play] SR={sr_final:.1f}% (100ep:{sr_100_final:.1f}%) [{n}ep] | "
             f"Rew_mean={mean_reward:.1f} | {sum(episode_success)}/{n} success"
         )
+        # Print per-term reward breakdown
+        if _rew_term_names and _rew_term_episodes:
+            stacked = torch.stack(_rew_term_episodes)
+            mean_per_term = stacked.mean(dim=0)
+            parts = [f"{name}={val.item():.2f}" for name, val in zip(_rew_term_names, mean_per_term)]
+            print(f"[Play] Rew breakdown: {' | '.join(parts)}")
         if is_stack_task and episode_pick_success and episode_stack_success:
             pick_sr = sum(episode_pick_success) / len(episode_pick_success) * 100.0
             stack_sr = sum(episode_stack_success) / len(episode_stack_success) * 100.0
