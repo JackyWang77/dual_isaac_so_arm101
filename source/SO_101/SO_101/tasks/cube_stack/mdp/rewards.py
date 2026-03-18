@@ -108,13 +108,12 @@ def grasp_intent(
 
 def cube_stack_alignment(
     env: ManagerBasedRLEnv,
-    std: float = 0.02,
+    std: float = 0.01,
     target_height: float = 0.018,
     gripper_open_thresh: float = -0.1,
     cube_top_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_base_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
-    left_arm_cfg: SceneEntityCfg = SceneEntityCfg("left_arm"),
 ) -> torch.Tensor:
     """Alignment reward: right gripper open + cube2 above cube1 (z>0.018) + xy close.
 
