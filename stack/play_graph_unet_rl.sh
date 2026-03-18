@@ -24,7 +24,8 @@ if [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
 fi
 
 # Same structure as play_disentangled_graph_gated.sh
-NUM_ENVS="${NUM_ENVS:-250}"
+HEADLESS="${HEADLESS:-true}"
+NUM_ENVS="${NUM_ENVS:-10}"
 NUM_EPISODES="${NUM_EPISODES:-1000}"
 EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-10}"
 TASK="${TASK:-SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-Play-v0}"
@@ -38,11 +39,15 @@ echo "Base: $PRETRAINED_CHECKPOINT"
 echo "Task: $TASK"
 echo "========================================"
 
+HEADLESS_FLAG=""
+[ "$HEADLESS" = "true" ] || [ "$HEADLESS" = "1" ] && HEADLESS_FLAG="--headless"
+
 python scripts/graph_dit_rl/play_graph_rl.py \
     --task "$TASK" \
     --checkpoint "$CHECKPOINT" \
     --pretrained_checkpoint "$PRETRAINED_CHECKPOINT" \
+    --deterministic \
     --num_envs "$NUM_ENVS" \
     --num_episodes "$NUM_EPISODES" \
     --episode_length_s "$EPISODE_LENGTH_S" \
-    --headless
+    $HEADLESS_FLAG

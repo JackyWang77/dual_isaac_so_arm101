@@ -1,36 +1,146 @@
 
-Creating window for environment.
-[INFO]: Completed setting up the environment...
-[Play] Observation space: Dict('policy': Dict('cube_1_ori': Box(-inf, inf, (1, 4), float32), 'cube_1_pos': Box(-inf, inf, (1, 3), float32), 'cube_2_ori': Box(-inf, inf, (1, 4), float32), 'cube_2_pos': Box(-inf, inf, (1, 3), float32), 'last_action_all': Box(-inf, inf, (1, 12), float32), 'left_ee_orientation': Box(-inf, inf, (1, 4), float32), 'left_ee_position': Box(-inf, inf, (1, 3), float32), 'left_joint_pos': Box(-inf, inf, (1, 6), float32), 'left_joint_vel': Box(-inf, inf, (1, 6), float32), 'right_ee_orientation': Box(-inf, inf, (1, 4), float32), 'right_ee_position': Box(-inf, inf, (1, 3), float32), 'right_joint_pos': Box(-inf, inf, (1, 6), float32), 'right_joint_vel': Box(-inf, inf, (1, 6), float32)), 'subtask_terms': Dict('pick_cube': Box(-inf, inf, (1,), float32), 'stack_cube': Box(-inf, inf, (1,), float32)))
-[Play] Action space: Box(-inf, inf, (1, 12), float32)
-Traceback (most recent call last):
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/play_graph_rl.py", line 568, in <module>
-    main()
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/play_graph_rl.py", line 554, in main
-    play_graph_rl_policy(
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/play_graph_rl.py", line 263, in play_graph_rl_policy
-    obs = _process_obs(obs, device)
-          ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/mnt/ssd/dual_isaac_so_arm101/scripts/graph_dit_rl/play_graph_rl.py", line 483, in _process_obs
-    return obs.to(device).float()
-           ^^^^^^
-AttributeError: 'dict' object has no attribute 'to'
-2026-03-13T11:22:44Z [21,683ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
-2026-03-13T11:22:44Z [21,683ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
-2026-03-13T11:22:44Z [21,683ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator' for removal
-2026-03-13T11:22:44Z [21,683ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
-2026-03-13T11:22:44Z [21,683ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
-2026-03-13T11:22:44Z [21,683ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
-2026-03-13T11:22:44Z [21,683ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
-2026-03-13T11:22:44Z [21,683ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
-2026-03-13T11:22:44Z [21,683ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
-2026-03-13T11:22:44Z [21,683ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
-2026-03-13T11:22:44Z [21,683ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
-2026-03-13T11:22:44Z [21,683ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
-2026-03-13T11:22:44Z [21,683ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Annotators' for removal
-2026-03-13T11:22:44Z [21,683ms] [Warning] [omni.graph.core.plugin] Could not find category 'Replicator:Core' for removal
-2026-03-13T11:22:44Z [21,685ms] [Warning] [omni.graph.core.plugin] Could not find category 'animation' for removal
-2026-03-13T11:22:44Z [21,686ms] [Warning] [omni.physx.plugin] USD stage detach not called, holding a loose ptr to a stage!
-2026-03-13T11:22:45Z [22,018ms] [Warning] [omni.fabric.plugin] gFabricState->gUsdStageToSimStageWithHistoryMap had 1 outstanding SimStageWithHistory(s) at shutdown
-2026-03-13T11:22:45Z [22,022ms] [Warning] [carb.audio.context] 1 contexts were leaked
-2026-03-13T11:22:45Z [22,041ms] [Warning] [carb] Recursive unloadAllPlugins() detected!
+[Trainer] Starting training for 50 iterations...
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=15.9 | gripper_release=5.1 | success_bonus=32.3 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[1/50 | 2m | ETA 2h19m] [critic_warmup] SR= 64.3% (100:38.0% 200ep:30.0%) [512ep] | Rew=  53.6 | EV= 0.00 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.391
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr64_iter1.pt
+[Trainer] Peak SR saved (iter 1, SR=64.3%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr64_iter1.pt
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.3 | gripper_release=3.8 | success_bonus=14.1 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[2/50 | 5m | ETA 2h18m] [critic_warmup] SR= 65.8% (100:25.0% 200ep:23.0%) [512ep] | Rew=  32.4 | EV= 0.12 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.459
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr66_iter2.pt
+[Trainer] Peak SR saved (iter 2, SR=65.8%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr66_iter2.pt
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=12.5 | gripper_release=4.0 | success_bonus=23.6 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[3/50 | 8m | ETA 2h17m] [critic_warmup] SR= 61.9% (100:25.0% 200ep:24.5%) [512ep] | Rew=  40.5 | EV= 0.16 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.481
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.5 | gripper_release=3.5 | success_bonus=22.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[4/50 | 11m | ETA 2h17m] [critic_warmup] SR= 63.1% (100:19.0% 200ep:21.5%) [512ep] | Rew=  39.3 | EV= 0.15 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.478
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=14.6 | gripper_release=5.1 | success_bonus=40.6 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[5/50 | 15m | ETA 2h15m] [critic_warmup] SR= 61.7% (100:24.0% 200ep:23.5%) [512ep] | Rew=  60.7 | EV= 0.16 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.495
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_5.pt
+[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_5.pt
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.7 | gripper_release=4.4 | success_bonus=30.4 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[6/50 | 18m | ETA 2h12m] [critic_warmup] SR= 67.0% (100:34.0% 200ep:31.5%) [512ep] | Rew=  48.7 | EV= 0.13 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.496
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr67_iter6.pt
+[Trainer] Peak SR saved (iter 6, SR=67.0%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr67_iter6.pt
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.5 | gripper_release=4.8 | success_bonus=29.5 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[7/50 | 21m | ETA 2h10m] [critic_warmup] SR= 67.8% (100:31.0% 200ep:30.5%) [512ep] | Rew=  48.1 | EV= 0.12 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.500
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr68_iter7.pt
+[Trainer] Peak SR saved (iter 7, SR=67.8%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr68_iter7.pt
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.1 | gripper_release=3.9 | success_bonus=13.8 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[8/50 | 24m | ETA 2h08m] [critic_warmup] SR= 63.7% (100:25.0% 200ep:24.5%) [512ep] | Rew=  31.0 | EV= 0.15 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.485
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=16.0 | gripper_release=4.6 | success_bonus=20.9 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[9/50 | 27m | ETA 2h05m] [critic_warmup] SR= 64.8% (100:29.0% 200ep:29.5%) [512ep] | Rew=  41.8 | EV= 0.13 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.469
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.1 | gripper_release=4.4 | success_bonus=12.8 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[10/50 | 30m | ETA 2h02m] [critic_warmup] SR= 63.9% (100:28.0% 200ep:26.0%) [512ep] | Rew=  30.5 | EV= 0.14 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.499
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_10.pt
+[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_10.pt
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.4 | gripper_release=4.3 | success_bonus=19.7 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[11/50 | 33m | ETA 1h59m] SR= 63.7% (100:30.0% 200ep:28.0%) [512ep] | Rew=  38.6 | EV= 0.14 | Δ=0.085 | α=0.07 β=2.096 | cΔ=9.4 cH=0.0095 eff=0.14 | L=-12.818
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/best_model.pt
+[Trainer] Best model saved (SR_200ep=28.0%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/best_model.pt
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.3 | gripper_release=3.9 | success_bonus=21.6 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[12/50 | 36m | ETA 1h56m] SR= 62.9% (100:23.0% 200ep:24.0%) [512ep] | Rew=  40.0 | EV= 0.13 | Δ=0.084 | α=0.08 β=2.291 | cΔ=8.7 cH=0.0087 eff=0.06 | L=-12.854
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.4 | gripper_release=4.5 | success_bonus=30.3 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[13/50 | 39m | ETA 1h53m] SR= 63.3% (100:26.0% 200ep:29.0%) [512ep] | Rew=  48.4 | EV= 0.16 | Δ=0.084 | α=0.08 β=2.501 | cΔ=8.4 cH=0.0084 eff=0.07 | L=-13.435
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/best_model.pt
+[Trainer] Best model saved (SR_200ep=29.0%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/best_model.pt
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=12.4 | gripper_release=3.9 | success_bonus=32.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[14/50 | 43m | ETA 1h50m] SR= 62.7% (100:20.0% 200ep:22.0%) [512ep] | Rew=  48.5 | EV= 0.16 | Δ=0.083 | α=0.08 β=2.710 | cΔ=8.1 cH=0.0086 eff=0.11 | L=-13.914
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=14.0 | gripper_release=4.7 | success_bonus=20.7 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[15/50 | 46m | ETA 1h47m] SR= 67.0% (100:34.0% 200ep:36.0%) [512ep] | Rew=  39.7 | EV= 0.15 | Δ=0.082 | α=0.08 β=2.921 | cΔ=7.5 cH=0.0096 eff=0.13 | L=-14.369
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/best_model.pt
+[Trainer] Best model saved (SR_200ep=36.0%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/best_model.pt
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_15.pt
+[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_15.pt
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=14.7 | gripper_release=5.1 | success_bonus=31.1 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[16/50 | 49m | ETA 1h44m] SR= 65.0% (100:31.0% 200ep:29.0%) [512ep] | Rew=  51.2 | EV= 0.21 | Δ=0.081 | α=0.08 β=3.121 | cΔ=7.0 cH=0.0109 eff=0.20 | L=-14.593
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=14.1 | gripper_release=4.5 | success_bonus=21.2 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[17/50 | 52m | ETA 1h41m] SR= 65.8% (100:27.0% 200ep:28.0%) [512ep] | Rew=  40.1 | EV= 0.17 | Δ=0.079 | α=0.08 β=3.310 | cΔ=6.4 cH=0.0123 eff=0.23 | L=-14.908
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.8 | gripper_release=3.9 | success_bonus=14.3 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[18/50 | 55m | ETA 1h38m] SR= 65.6% (100:28.0% 200ep:27.5%) [512ep] | Rew=  33.3 | EV= 0.14 | Δ=0.077 | α=0.08 β=3.496 | cΔ=5.8 cH=0.0138 eff=0.25 | L=-15.222
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=10.9 | gripper_release=3.2 | success_bonus=8.6 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[19/50 | 58m | ETA 1h35m] SR= 59.6% (100:28.0% 200ep:23.0%) [512ep] | Rew=  23.0 | EV= 0.17 | Δ=0.075 | α=0.08 β=3.628 | cΔ=5.4 cH=0.0153 eff=0.34 | L=-15.314
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=11.9 | gripper_release=4.0 | success_bonus=28.5 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[20/50 | 61m | ETA 1h32m] SR= 65.4% (100:22.0% 200ep:21.0%) [512ep] | Rew=  44.6 | EV= 0.16 | Δ=0.073 | α=0.08 β=3.745 | cΔ=4.9 cH=0.0170 eff=0.31 | L=-15.766
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_20.pt
+[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_20.pt
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.6 | gripper_release=3.9 | success_bonus=37.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[21/50 | 64m | ETA 1h29m] SR= 61.1% (100:22.0% 200ep:21.0%) [512ep] | Rew=  54.8 | EV= 0.13 | Δ=0.071 | α=0.08 β=3.820 | cΔ=4.6 cH=0.0188 eff=0.39 | L=-15.790
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.9 | gripper_release=4.0 | success_bonus=17.6 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[22/50 | 68m | ETA 1h26m] SR= 67.2% (100:31.0% 200ep:27.0%) [512ep] | Rew=  35.7 | EV= 0.13 | Δ=0.070 | α=0.08 β=3.910 | cΔ=4.2 cH=0.0207 eff=0.30 | L=-16.375
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=12.0 | gripper_release=4.2 | success_bonus=19.9 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[23/50 | 71m | ETA 1h23m] SR= 65.6% (100:24.0% 200ep:28.0%) [512ep] | Rew=  36.3 | EV= 0.17 | Δ=0.068 | α=0.08 β=3.997 | cΔ=3.9 cH=0.0228 eff=0.39 | L=-16.299
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=12.9 | gripper_release=2.9 | success_bonus=6.2 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[24/50 | 74m | ETA 1h20m] SR= 66.4% (100:20.0% 200ep:25.0%) [512ep] | Rew=  22.3 | EV= 0.14 | Δ=0.067 | α=0.08 β=4.046 | cΔ=3.6 cH=0.0250 eff=0.35 | L=-16.701
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=15.2 | gripper_release=4.4 | success_bonus=26.8 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[25/50 | 77m | ETA 1h17m] SR= 68.4% (100:29.0% 200ep:33.5%) [512ep] | Rew=  46.6 | EV= 0.16 | Δ=0.066 | α=0.08 β=3.913 | cΔ=3.3 cH=0.0275 eff=0.60 | L=-15.938
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr68_iter25.pt
+[Trainer] Peak SR saved (iter 25, SR=68.4%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr68_iter25.pt
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_25.pt
+[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_25.pt
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.1 | gripper_release=3.7 | success_bonus=26.4 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[26/50 | 80m | ETA 1h14m] SR= 64.3% (100:18.0% 200ep:25.0%) [512ep] | Rew=  43.4 | EV= 0.13 | Δ=0.065 | α=0.08 β=3.747 | cΔ=3.1 cH=0.0302 eff=0.43 | L=-16.838
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.7 | gripper_release=4.0 | success_bonus=20.1 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[27/50 | 83m | ETA 1h11m] SR= 64.1% (100:24.0% 200ep:24.5%) [512ep] | Rew=  38.1 | EV= 0.12 | Δ=0.063 | α=0.08 β=3.707 | cΔ=2.9 cH=0.0331 eff=0.41 | L=-17.040
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=12.8 | gripper_release=4.1 | success_bonus=17.8 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[28/50 | 87m | ETA 1h08m] SR= 66.6% (100:26.0% 200ep:29.5%) [512ep] | Rew=  34.9 | EV= 0.14 | Δ=0.063 | α=0.08 β=3.746 | cΔ=2.7 cH=0.0362 eff=0.34 | L=-17.406
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=16.2 | gripper_release=4.9 | success_bonus=23.4 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[29/50 | 90m | ETA 1h05m] SR= 62.9% (100:30.0% 200ep:31.5%) [512ep] | Rew=  44.8 | EV= 0.15 | Δ=0.062 | α=0.08 β=3.755 | cΔ=2.5 cH=0.0397 eff=0.43 | L=-17.137
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=15.1 | gripper_release=4.3 | success_bonus=12.8 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[30/50 | 93m | ETA 1h02m] SR= 67.4% (100:33.0% 200ep:31.0%) [512ep] | Rew=  32.4 | EV= 0.13 | Δ=0.061 | α=0.08 β=3.828 | cΔ=2.3 cH=0.0435 eff=0.28 | L=-17.720
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_30.pt
+[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_30.pt
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.9 | gripper_release=4.1 | success_bonus=15.8 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[31/50 | 96m | ETA 59m11s] SR= 61.5% (100:22.0% 200ep:24.5%) [512ep] | Rew=  34.0 | EV= 0.16 | Δ=0.061 | α=0.08 β=3.864 | cΔ=2.1 cH=0.0476 eff=0.46 | L=-17.042
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.0 | gripper_release=4.4 | success_bonus=36.3 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[32/50 | 99m | ETA 56m04s] SR= 64.1% (100:25.0% 200ep:26.0%) [512ep] | Rew=  54.9 | EV= 0.14 | Δ=0.061 | α=0.08 β=3.735 | cΔ=2.0 cH=0.0522 eff=0.47 | L=-17.065
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=12.9 | gripper_release=4.4 | success_bonus=27.3 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[33/50 | 102m | ETA 52m59s] SR= 62.7% (100:29.0% 200ep:28.5%) [512ep] | Rew=  44.8 | EV= 0.16 | Δ=0.060 | α=0.08 β=3.648 | cΔ=1.8 cH=0.0572 eff=0.43 | L=-17.235
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.0 | gripper_release=4.0 | success_bonus=28.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[34/50 | 105m | ETA 49m51s] SR= 63.5% (100:28.0% 200ep:27.5%) [512ep] | Rew=  46.3 | EV= 0.14 | Δ=0.060 | α=0.08 β=3.652 | cΔ=1.7 cH=0.0626 eff=0.37 | L=-17.434
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.3 | gripper_release=3.9 | success_bonus=16.4 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[35/50 | 109m | ETA 46m44s] SR= 65.8% (100:28.0% 200ep:31.0%) [512ep] | Rew=  33.8 | EV= 0.14 | Δ=0.060 | α=0.08 β=3.619 | cΔ=1.6 cH=0.0685 eff=0.45 | L=-17.082
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_35.pt
+[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_35.pt
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.0 | gripper_release=5.0 | success_bonus=28.1 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[36/50 | 112m | ETA 43m36s] SR= 65.2% (100:31.0% 200ep:30.5%) [512ep] | Rew=  46.4 | EV= 0.14 | Δ=0.060 | α=0.08 β=3.583 | cΔ=1.5 cH=0.0751 eff=0.39 | L=-17.307
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.6 | gripper_release=4.3 | success_bonus=13.9 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[37/50 | 115m | ETA 40m30s] SR= 69.3% (100:36.0% 200ep:35.0%) [512ep] | Rew=  32.1 | EV= 0.15 | Δ=0.060 | α=0.08 β=3.630 | cΔ=1.4 cH=0.0821 eff=0.36 | L=-17.248
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr69_iter37.pt
+[Trainer] Peak SR saved (iter 37, SR=69.3%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr69_iter37.pt
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.7 | gripper_release=5.0 | success_bonus=26.3 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[38/50 | 118m | ETA 37m23s] SR= 67.8% (100:36.0% 200ep:32.0%) [512ep] | Rew=  45.3 | EV= 0.16 | Δ=0.061 | α=0.08 β=3.669 | cΔ=1.3 cH=0.0898 eff=0.39 | L=-17.021
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.9 | gripper_release=4.3 | success_bonus=25.7 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[39/50 | 121m | ETA 34m17s] SR= 67.8% (100:33.0% 200ep:33.0%) [512ep] | Rew=  45.1 | EV= 0.14 | Δ=0.061 | α=0.08 β=3.561 | cΔ=1.2 cH=0.0984 eff=0.52 | L=-16.344
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.6 | gripper_release=4.2 | success_bonus=17.2 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[40/50 | 124m | ETA 31m09s] SR= 66.2% (100:35.0% 200ep:29.5%) [512ep] | Rew=  35.4 | EV= 0.17 | Δ=0.062 | α=0.08 β=3.552 | cΔ=1.1 cH=0.1075 eff=0.29 | L=-16.926
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_40.pt
+[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_40.pt
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=13.8 | gripper_release=5.3 | success_bonus=34.1 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[41/50 | 127m | ETA 28m01s] SR= 65.8% (100:26.0% 200ep:28.5%) [512ep] | Rew=  53.5 | EV= 0.14 | Δ=0.063 | α=0.08 β=3.650 | cΔ=1.0 cH=0.1176 eff=0.38 | L=-16.364
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=12.8 | gripper_release=4.0 | success_bonus=11.5 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[42/50 | 130m | ETA 24m53s] SR= 60.7% (100:34.0% 200ep:28.5%) [512ep] | Rew=  28.6 | EV= 0.16 | Δ=0.064 | α=0.08 β=3.502 | cΔ=1.0 cH=0.1289 eff=0.62 | L=-15.162
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=16.0 | gripper_release=4.6 | success_bonus=21.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[43/50 | 133m | ETA 21m46s] SR= 63.3% (100:32.0% 200ep:27.0%) [512ep] | Rew=  41.9 | EV= 0.15 | Δ=0.066 | α=0.08 β=3.201 | cΔ=0.9 cH=0.1411 eff=0.74 | L=-14.521
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.8 | gripper_release=3.6 | success_bonus=11.8 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[44/50 | 136m | ETA 18m40s] SR= 61.5% (100:26.0% 200ep:23.5%) [512ep] | Rew=  30.4 | EV= 0.20 | Δ=0.067 | α=0.08 β=3.090 | cΔ=0.8 cH=0.1536 eff=0.31 | L=-15.521
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.8 | gripper_release=4.1 | success_bonus=47.3 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[45/50 | 140m | ETA 15m33s] SR= 62.3% (100:21.0% 200ep:20.5%) [512ep] | Rew=  66.5 | EV= 0.21 | Δ=0.069 | α=0.08 β=3.103 | cΔ=0.8 cH=0.1673 eff=0.43 | L=-14.760
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_45.pt
+[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_45.pt
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.2 | gripper_release=4.6 | success_bonus=19.8 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[46/50 | 143m | ETA 12m26s] SR= 64.6% (100:33.0% 200ep:30.5%) [512ep] | Rew=  38.8 | EV= 0.16 | Δ=0.071 | α=0.08 β=3.127 | cΔ=0.7 cH=0.1825 eff=0.33 | L=-14.574
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.0 | gripper_release=5.0 | success_bonus=21.9 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[47/50 | 146m | ETA 9m19s] SR= 65.6% (100:33.0% 200ep:28.5%) [512ep] | Rew=  41.2 | EV= 0.16 | Δ=0.073 | α=0.08 β=3.266 | cΔ=0.7 cH=0.1985 eff=0.25 | L=-14.312
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.1 | gripper_release=3.8 | success_bonus=13.2 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[48/50 | 149m | ETA 6m13s] SR= 63.1% (100:21.0% 200ep:22.5%) [512ep] | Rew=  31.4 | EV= 0.14 | Δ=0.076 | α=0.08 β=3.249 | cΔ=0.6 cH=0.2164 eff=0.56 | L=-12.638
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=14.6 | gripper_release=4.8 | success_bonus=34.5 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[49/50 | 152m | ETA 3m06s] SR= 69.5% (100:32.0% 200ep:30.5%) [512ep] | Rew=  54.2 | EV= 0.18 | Δ=0.079 | α=0.08 β=3.067 | cΔ=0.6 cH=0.2360 eff=0.57 | L=-12.052
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr70_iter49.pt
+[Trainer] Peak SR saved (iter 49, SR=69.5%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr70_iter49.pt
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.6 | gripper_release=4.2 | success_bonus=16.9 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[50/50 | 155m | ETA 0m00s] SR= 63.7% (100:33.0% 200ep:27.5%) [512ep] | Rew=  34.9 | EV= 0.21 | Δ=0.082 | α=0.08 β=3.013 | cΔ=0.6 cH=0.2560 eff=0.33 | L=-12.184
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_50.pt
+[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_50.pt
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_final.pt
+[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_final.pt
+
+[Trainer] Training complete!
