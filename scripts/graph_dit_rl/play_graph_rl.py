@@ -514,7 +514,6 @@ def play_graph_rl_policy(
                             for row_name, row in zip(['dx', 'dy', 'dz'], jac_ee_xyz):
                                 print(f"  {row_name}: [{', '.join(f'{v:.4f}' for v in row)}]")
                             # How much joint change for 3mm EE movement in each axis
-                            import numpy as np
                             jac_pinv = np.linalg.pinv(jac_ee_xyz)  # [5, 3]
                             for axis_name, axis_idx in [('x', 0), ('y', 1), ('z', 2)]:
                                 dq_3mm = jac_pinv[:, axis_idx] * 0.003  # 3mm movement
