@@ -432,7 +432,17 @@ class CubeStackRLRewardsCfg:
     )
 
     # === Main RL rewards (stack phase) ===
-    # Stack alignment: cube_1 on top of cube_2 (right arm places cube_1)
+    # Dense alignment: continuously guides cube_1 above cube_2 (no gripper gate)
+    stack_1_align_2 = RewTerm(
+        func=mdp.cube_stack_alignment_dense,
+        params={
+            "cube_top_cfg": SceneEntityCfg("cube_1"),
+            "cube_base_cfg": SceneEntityCfg("cube_2"),
+        },
+        weight=250.0,
+    )
+
+    # One-shot alignment: cube_1 on cube_2 with gripper open (big reward for releasing while aligned)
     stack_1_on_2 = RewTerm(
         func=mdp.cube_stack_alignment,
         params={
@@ -440,7 +450,7 @@ class CubeStackRLRewardsCfg:
             "cube_base_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
-        weight=60.0,
+        weight=1000.0,
     )
 
     # Gripper release when stacked (one-shot, right arm only)

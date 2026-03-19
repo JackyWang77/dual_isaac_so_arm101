@@ -144,6 +144,29 @@ def cube_stack_alignment(
     return alignment_quality * height_ok * right_open
 
 
+def cube_stack_alignment_dense(
+    env: ManagerBasedRLEnv,
+    std: float = 0.01,
+    target_height: float = 0.018,
+    cube_top_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
+    cube_base_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
+) -> torch.Tensor:
+    """Dense alignment reward without gripper gate. Continuously guides cube_top above cube_base."""
+    top: RigidObject = env.scene[cube_top_cfg.name]
+    base: RigidObject = env.scene[cube_base_cfg.name]
+
+    top_pos = top.data.root_pos_w[:, :3]
+    base_pos = base.data.root_pos_w[:, :3]
+
+    z_diff = top_pos[:, 2] - base_pos[:, 2]
+    height_ok = (z_diff >= target_height).float()
+
+    xy_dist = torch.norm(top_pos[:, :2] - base_pos[:, :2], dim=1)
+    alignment_quality = 1 - torch.tanh(xy_dist / std)
+
+    return alignment_quality * height_ok
+
+
 def cube_near_target_xy(
     env: ManagerBasedRLEnv,
     target_xy: tuple[float, float] = (0.117, -0.011),
