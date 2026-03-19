@@ -25,7 +25,7 @@ fi
 
 # Same structure as play_disentangled_graph_gated.sh
 HEADLESS="${HEADLESS:-true}"
-NUM_ENVS="${NUM_ENVS:-10}"
+NUM_ENVS="${NUM_ENVS:-1}"
 NUM_EPISODES="${NUM_EPISODES:-1000}"
 EPISODE_LENGTH_S="${EPISODE_LENGTH_S:-10}"
 TASK="${TASK:-SO-ARM101-Dual-Cube-Stack-Joint-States-Mimic-Play-v0}"
@@ -49,5 +49,5 @@ python scripts/graph_dit_rl/play_graph_rl.py \
     --deterministic \
     --num_envs "$NUM_ENVS" \
     --num_episodes "$NUM_EPISODES" \
-    --episode_length_s "$EPISODE_LENGTH_S" \
-    $HEADLESS_FLAG
+    --episode_length_s "$EPISODE_LENGTH_S"
+    # $HEADLESS_FLAG

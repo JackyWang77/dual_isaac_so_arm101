@@ -6,7 +6,7 @@ set -e
 
 PRETRAINED_CHECKPOINT="${1:-}"
 RESUME_CHECKPOINT="${2:-}"
-NUM_ENVS="${3:-2}"
+NUM_ENVS="${3:-512}"
 MAX_ITERATIONS="${4:-50}"
 STEPS_PER_ENV="${5:-305}"
 MINI_BATCH_SIZE="${6:-512}"
@@ -135,5 +135,5 @@ python scripts/graph_dit_rl/train_graph_rl.py \
     --critic_warmup_iters "$CRITIC_WARMUP_ITERS" \
     --log_dir "$LOG_DIR" \
     --save_interval "$SAVE_INTERVAL" \
-    $RUN_NAME_ARGS 
-    # $HEADLESS_FLAG
+    $RUN_NAME_ARGS \
+    $HEADLESS_FLAG
