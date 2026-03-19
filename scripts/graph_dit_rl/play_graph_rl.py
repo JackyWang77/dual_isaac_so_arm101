@@ -489,6 +489,43 @@ def play_graph_rl_policy(
             episode_rewards += reward
             episode_lengths += 1
 
+            # Debug: print Jacobian and delta info every 50 steps for env 0
+            if step_count % 50 == 0 and step_count > 0:
+                try:
+                    unwrapped = env.unwrapped if hasattr(env, 'unwrapped') else env
+                    r_arm = unwrapped.scene["right_arm"]
+                    # Get right arm joint positions (5 arm joints, exclude gripper)
+                    r_joints = r_arm.data.joint_pos[0, :5].detach().cpu().numpy()
+                    # Get right EE position
+                    if "right_ee_position" in obs_struct:
+                        s, e = obs_struct["right_ee_position"]
+                        r_ee = next_obs[0, s:e].detach().cpu().numpy()
+                    else:
+                        r_ee = None
+                    # Get Jacobian if available
+                    try:
+                        jac = r_arm.root_physx_view.get_jacobians()  # [N, num_bodies, 6, num_joints]
+                        if jac is not None:
+                            # Last body (EE), first 3 rows (xyz), first 5 cols (arm joints)
+                            jac_ee_xyz = jac[0, -1, :3, :5].detach().cpu().numpy()
+                            print(f"[JAC] step={step_count} | R_joints={r_joints}")
+                            print(f"[JAC] R_EE={r_ee}")
+                            print(f"[JAC] Jacobian (EE xyz vs 5 joints):")
+                            for row_name, row in zip(['dx', 'dy', 'dz'], jac_ee_xyz):
+                                print(f"  {row_name}: [{', '.join(f'{v:.4f}' for v in row)}]")
+                            # How much joint change for 3mm EE movement in each axis
+                            import numpy as np
+                            jac_pinv = np.linalg.pinv(jac_ee_xyz)  # [5, 3]
+                            for axis_name, axis_idx in [('x', 0), ('y', 1), ('z', 2)]:
+                                dq_3mm = jac_pinv[:, axis_idx] * 0.003  # 3mm movement
+                                print(f"  dq for 3mm in {axis_name}: [{', '.join(f'{v:.4f}' for v in dq_3mm)}]")
+                    except Exception as e:
+                        print(f"[JAC] Jacobian not available: {e}")
+                        # Fallback: just print joints and EE
+                        print(f"[JAC] step={step_count} | R_joints={r_joints} | R_EE={r_ee}")
+                except Exception as e:
+                    print(f"[JAC] Error: {e}")
+
             # Accumulate per-term rewards
             if _reward_term_accum is not None:
                 try:
