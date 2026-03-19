@@ -1756,8 +1756,24 @@ def play_graph_unet_policy(
                             extra = f" | Pick={'✓' if pick_ok else '✗'} Stack={'✓' if stack_ok else '✗'}"
                         if fork_ok is not None and knife_ok is not None:
                             extra = f" | Fork={'✓' if fork_ok else '✗'} Knife={'✓' if knife_ok else '✗'}"
+                        # Debug: print gripper joint values
+                        gripper_dbg = ""
+                        if is_stack_task:
+                            try:
+                                unwrapped = env.unwrapped if hasattr(env, 'unwrapped') else env
+                                r_arm = unwrapped.scene["right_arm"]
+                                l_arm = unwrapped.scene["left_arm"]
+                                r_grip = r_arm.data.joint_pos[i, -1].item()
+                                l_grip = l_arm.data.joint_pos[i, -1].item()
+                                gripper_dbg = f" | R_grip={r_grip:.3f} L_grip={l_grip:.3f}"
+                                # Also show obs-based gripper if available
+                                if "right_joint_pos" in _obs_offsets:
+                                    r_obs = obs_tensor[i, _obs_offsets["right_joint_pos"] + 6].item()
+                                    gripper_dbg += f" | R_obs={r_obs:.3f}"
+                            except Exception as e:
+                                gripper_dbg = f" | grip_err={e}"
                         obj_h_str = f"h={obs_tensor[i, OBJ_HEIGHT_IDX].item():.3f}m " if is_stack_task else ""
-                        print(f"[Play] Ep {episode_count:3d} {obj_h_str}{status} | SR={sr:.1f}%{extra}")
+                        print(f"[Play] Ep {episode_count:3d} {obj_h_str}{status} | SR={sr:.1f}%{extra}{gripper_dbg}")
 
                         if record_obs:
                             completed_episodes.append((i, episode_id_per_env[i], is_success))
