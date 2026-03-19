@@ -400,17 +400,18 @@ class AdaptiveAlphaNet(nn.Module):
     Supports single arm (6D: joints 0-4, gripper 5) and
     dual arm (12D: left joints 0-4, left gripper 5, right joints 6-10, right gripper 11)."""
     def __init__(self, in_dim: int, hidden: Tuple[int, ...], act: str = "silu",
-                 alpha_init: float = 0.10, action_dim: int = 6):
+                 alpha_init: float = 0.10, alpha_max: float = 0.4, action_dim: int = 6):
         super().__init__()
         self.action_dim = action_dim
+        self.alpha_max = alpha_max
         # Gripper indices
         if action_dim == 12:
             self.gripper_indices = [5, 11]
         else:
             self.gripper_indices = [5]
         self.net = mlp(in_dim, hidden, action_dim, act=act)
-        # Init last layer so initial output ~alpha_init/0.3 for arm (sigmoid scale)
-        init_val = alpha_init / 0.3
+        # Init last layer so initial output ~alpha_init/alpha_max for arm (sigmoid scale)
+        init_val = alpha_init / alpha_max
         init_val = max(0.01, min(0.99, init_val))
         logit_init = np.log(init_val / (1 - init_val))
         nn.init.zeros_(self.net[-1].weight)
@@ -419,7 +420,7 @@ class AdaptiveAlphaNet(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: [B, z_dim + obs_dim]
         raw = torch.sigmoid(self.net(x))  # [B, action_dim], range (0, 1)
-        alpha_vec = raw * 0.3  # Arm joints: [0, 0.3]
+        alpha_vec = raw * self.alpha_max  # Arm joints: [0, alpha_max]
         for gi in self.gripper_indices:
             alpha_vec[:, gi] = 1.0  # Gripper: full override
         return alpha_vec
@@ -723,6 +724,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
                 getattr(cfg, "alpha_hidden", (64,)),
                 act=cfg.activation,
                 alpha_init=cfg.alpha_init,
+                alpha_max=cfg.alpha_max,
                 action_dim=act_dim,
             )
             self.alpha = None  # Unused when adaptive
