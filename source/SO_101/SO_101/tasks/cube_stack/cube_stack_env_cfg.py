@@ -439,7 +439,7 @@ class CubeStackRLRewardsCfg:
             "cube_top_cfg": SceneEntityCfg("cube_1"),
             "cube_base_cfg": SceneEntityCfg("cube_2"),
         },
-        weight=250.0,
+        weight=60.0,
     )
 
     # One-shot alignment: cube_1 on cube_2 with gripper open (big reward for releasing while aligned)
