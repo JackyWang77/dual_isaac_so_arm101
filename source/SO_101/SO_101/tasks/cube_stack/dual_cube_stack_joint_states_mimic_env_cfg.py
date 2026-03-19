@@ -93,6 +93,9 @@ class DualCubeStackJointStatesMimicEnvCfg_PLAY(DualCubeStackJointStatesMimicEnvC
             open_command_expr={"jaw_joint": 0.4},
             close_command_expr={"jaw_joint": 0.0002},
         )
+        # Fix gripper threshold for BinaryJoint (range [0.0002, 0.4], not [-0.36, 0])
+        self.terminations.success.params["gripper_open_threshold"] = 0.2
+        self.terminations.stack_success.params["gripper_open_threshold"] = 0.2
 
 
 @configclass
