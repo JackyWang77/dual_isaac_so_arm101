@@ -935,6 +935,28 @@ class GraphDiTRLTrainer:
 
         start_iter = getattr(self, "_start_iteration", 1)
         for iteration in range(start_iter, max_iterations + 1):
+            # === Curriculum: shift from alignment to release at iter 25 ===
+            curriculum_iter = getattr(self, "curriculum_switch_iter", 25)
+            if iteration == curriculum_iter:
+                try:
+                    unwrapped = self.env.unwrapped if hasattr(self.env, 'unwrapped') else self.env
+                    if hasattr(unwrapped, 'reward_manager'):
+                        rm = unwrapped.reward_manager
+                        term_names = list(rm._term_names)
+                        curriculum_weights = {
+                            "stack_1_align_2": 10.0,    # reduce dense alignment
+                            "gripper_release": 1000.0,   # big release reward
+                            "success_bonus": 1000.0,     # big success reward
+                        }
+                        for name, new_w in curriculum_weights.items():
+                            if name in term_names:
+                                idx = term_names.index(name)
+                                old_w = rm._term_weights[idx].item()
+                                rm._term_weights[idx] = new_w
+                                print(f"[Curriculum] iter {iteration}: {name} weight {old_w:.0f} -> {new_w:.0f}")
+                except Exception as e:
+                    print(f"[Curriculum] Warning: failed to update weights: {e}")
+
             current_lr = self.optimizer.param_groups[0]["lr"]
             # Collect
             rollout_stats = self.collect_rollout(iteration=iteration)
