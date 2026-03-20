@@ -945,8 +945,8 @@ class GraphDiTRLTrainer:
                         term_names = list(rm._term_names)
                         curriculum_weights = {
                             "stack_1_align_2": 10.0,    # reduce dense alignment
-                            "gripper_release": 1000.0,   # big release reward
-                            "success_bonus": 1000.0,     # big success reward
+                            "gripper_release": 500.0,    # increase release reward
+                            "success_bonus": 2000.0,     # big success reward
                         }
                         for name, new_w in curriculum_weights.items():
                             if name in term_names:
