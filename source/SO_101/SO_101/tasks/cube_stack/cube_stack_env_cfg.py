@@ -409,17 +409,16 @@ class CubeStackEnvCfg(ManagerBasedRLEnvCfg):
 # =========================================================
 @configclass
 class CubeStackRLRewardsCfg:
-    """Rewards for RL fine-tuning on top of a pretrained BC policy.
+    """All-dense rewards for RL fine-tuning on top of a pretrained BC policy.
 
     Design principles:
-    - Low weight for already-learned skills (reach, grasp, lift) to prevent regression
-    - High weight for stack alignment precision (BC's main weakness)
-    - Explicit gripper release reward (BC sometimes "doesn't dare to let go")
-    - Large success bonus to create high-advantage samples for AWR
+    - ALL rewards are dense (no one-shot) → critic can learn (EV > 0.2)
+    - Phase 1 (iter 1-25): alignment focus
+    - Phase 2 (iter 25+): release + stability focus
+    - Curriculum weights updated dynamically by trainer
     """
 
     # === Dense shaping rewards (tiny weights, purely for critic V(s) learning) ===
-    # Pick phase: cube lifted above table
     cube1_is_lifted = RewTerm(
         func=mdp.object_is_lifted,
         params={"minimal_height": 0.04, "object_cfg": SceneEntityCfg("cube_1")},
@@ -431,8 +430,9 @@ class CubeStackRLRewardsCfg:
         weight=0.5,
     )
 
-    # === Main RL rewards (stack phase) ===
+    # === Main RL rewards (all dense) ===
     # Dense alignment: continuously guides cube_1 above cube_2 (no gripper gate)
+    # Phase 1: 20, Phase 2: 5
     stack_1_align_2 = RewTerm(
         func=mdp.cube_stack_alignment_dense,
         params={
@@ -442,31 +442,35 @@ class CubeStackRLRewardsCfg:
         weight=20.0,
     )
 
-    # Gripper release when stacked (one-shot, right arm only)
-    gripper_release = RewTerm(
-        func=mdp.gripper_release_when_stacked,
+    # Dense gripper opening reward: when aligned, reward proportional to gripper opening
+    # Phase 1: 30, Phase 2: 100
+    gripper_open = RewTerm(
+        func=mdp.gripper_open_reward,
         params={
-            "xy_threshold": 0.015,
-            "z_tolerance": 0.01,
+            "xy_threshold": 0.02,
+            "z_min": 0.01,
+            "jaw_max": 0.4,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
-        weight=1000.0,
+        weight=30.0,
     )
 
-    # Large success bonus (one-shot, right arm only)
-    success_bonus = RewTerm(
-        func=mdp.stack_success_bonus,
+    # Dense stack stability: after release, reward maintaining stack
+    # Phase 1: 50, Phase 2: 100
+    stack_stable = RewTerm(
+        func=mdp.stack_stability,
         params={
-            "expected_height": 0.018,
-            "eps_z": 0.005,
-            "eps_xy": 0.012,
+            "std": 0.01,
+            "gripper_open_thresh": 0.1,
+            "vel_threshold": 0.1,
+            "z_min": 0.01,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
-        weight=1000.0,
+        weight=50.0,
     )
 
     # Smooth control penalties

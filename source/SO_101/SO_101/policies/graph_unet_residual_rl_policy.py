@@ -457,6 +457,51 @@ class ResidualGaussianActor(nn.Module):
         return Normal(mu, std)
 
 
+class GripperHead(nn.Module):
+    """Small MLP that outputs gripper actions directly (not as residual).
+
+    During warmup: trained via MSE distillation to match pretrain gripper output.
+    During RL: trained via PPO alongside arm actor.
+
+    Output: 2D (left_gripper, right_gripper) via tanh -> [-1, 1].
+    """
+    def __init__(
+        self,
+        in_dim: int,
+        hidden: Tuple[int, ...] = (128, 64),
+        act: str = "silu",
+        log_std_init: float = -1.0,
+        log_std_min: float = -5.0,
+        log_std_max: float = 0.0,
+        num_grippers: int = 2,
+    ):
+        super().__init__()
+        self.num_grippers = num_grippers
+        self.body = mlp(in_dim, hidden, hidden[-1], act=act)
+        self.mu = nn.Linear(hidden[-1], num_grippers)
+        # Zero init: output ≈ 0 at start, distill loss will quickly align to pretrain
+        nn.init.zeros_(self.mu.weight)
+        nn.init.zeros_(self.mu.bias)
+
+        # Separate log_std for gripper exploration (PPO)
+        self.log_std = nn.Parameter(torch.ones(num_grippers) * log_std_init)
+        self.log_std_min = log_std_min
+        self.log_std_max = log_std_max
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Deterministic forward: returns tanh(mu) for action execution."""
+        h = self.body(x)
+        return torch.tanh(self.mu(h))
+
+    def dist(self, x: torch.Tensor) -> Normal:
+        """Stochastic forward: returns Normal distribution for PPO."""
+        h = self.body(x)
+        mu = torch.tanh(self.mu(h))
+        log_std = torch.clamp(self.log_std, self.log_std_min, self.log_std_max)
+        std = torch.exp(log_std).expand_as(mu)
+        return Normal(mu, std)
+
+
 class DeepValueCritic(nn.Module):
     def __init__(
         self,
@@ -731,6 +776,19 @@ class GraphUnetResidualRLPolicy(nn.Module):
         else:
             self.alpha = nn.Parameter(torch.tensor(cfg.alpha_init, dtype=torch.float32))
             self.alpha_net = None
+
+        # ===== Gripper Head (distilled, then RL-tuned) =====
+        # Same input as actor: [obs_actor, a_base_norm, z_bar]
+        gripper_in_dim = actor_in_dim  # obs_actor + action_dim + z_dim
+        self.gripper_head = GripperHead(
+            in_dim=gripper_in_dim,
+            hidden=(128, 64),
+            act=cfg.activation,
+            log_std_init=-1.0,
+            num_grippers=2 if cfg.action_dim == 12 else 1,
+        )
+        print(f"[GraphUnetResidualRLPolicy] GripperHead: in_dim={gripper_in_dim}, "
+              f"num_grippers={2 if cfg.action_dim == 12 else 1}")
 
         # ===== SAC-style adaptive delta regularization =====
         # Learnable log_c_delta_reg: gradient descent automatically adjusts penalty strength
@@ -1429,11 +1487,22 @@ class GraphUnetResidualRLPolicy(nn.Module):
         if zero_residual:
             z_layers = self._get_z_layers_fast(obs)
             z_bar, _ = self.aggregate_latent(z_layers)
+
+            # === Gripper head: distill during warmup ===
+            obs_actor_warmup = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
+            gripper_features = torch.cat([obs_actor_warmup, a_base_norm_full, z_bar], dim=-1)
+            # Save pretrain gripper output BEFORE overriding (distill target)
+            gripper_target = a_base[:, self.gripper_indices].clone()
+            gripper_out = self.gripper_head(gripper_features)  # [B, num_grippers]
+            # Override gripper dims with gripper head output
+            a_base_with_gripper = a_base.clone()
+            for i, gi in enumerate(self.gripper_indices):
+                a_base_with_gripper[:, gi] = gripper_out[:, i]
+
             obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
             if getattr(self.cfg, "use_counterfactual_q", False):
-                # Q(s,a) mode: a_total = a_base when zero_residual → Q(s,a_total) = Q(s,a_base)
                 v_bar = self.critic.forward_bar(z_bar, obs_critic, a_base_norm_full.detach())
-                q_base = v_bar  # Same action → A_res = 0 (correct for warmup)
+                q_base = v_bar
             else:
                 v_bar = self.critic.forward_bar(z_bar, obs_critic)
                 q_base = None
@@ -1446,11 +1515,14 @@ class GraphUnetResidualRLPolicy(nn.Module):
                 "entropy": torch.zeros(B, device=a_base.device), "z_layers": z_layers, "z_bar": z_bar,
                 "gate_w": gate_w, "v_bar": v_bar, "alpha": torch.tensor(0.0, device=a_base.device),
                 "q_base": q_base,
+                # Gripper distill data
+                "gripper_head_out": gripper_out,
+                "gripper_target": gripper_target,
             }
             if self.history_buffer is not None:
                 action_for_history = a_base_norm_full
                 self.history_buffer.update(ee_node=ee_node, obj_node=obj_node, action=action_for_history, joint_states=joint_states)
-            return a_base, info
+            return a_base_with_gripper, info
 
         # ============================================================
         # 3. z_layers (high-frequency! called every step with temporal history)
@@ -1500,13 +1572,20 @@ class GraphUnetResidualRLPolicy(nn.Module):
         a = a_base + alpha_vec * delta  # [B, act_dim]
         alpha = alpha_mean  # for info
 
+        # === Gripper head: override gripper dims ===
+        gripper_features = torch.cat([obs_actor, a_base_norm_for_actor, z_bar], dim=-1)
+        gripper_target = a_base[:, self.gripper_indices].clone()
+        if deterministic:
+            gripper_out = self.gripper_head(gripper_features)  # [B, num_grippers]
+        else:
+            gripper_dist = self.gripper_head.dist(gripper_features)
+            gripper_out = gripper_dist.rsample()
+            gripper_out = torch.clamp(gripper_out, -1.0, 1.0)
+        for i, gi in enumerate(self.gripper_indices):
+            a[:, gi] = gripper_out[:, i]
+
         # 7. Update history buffer (AFTER computing action)
         if self.history_buffer is not None:
-            # Use normalized action for history (matches training data format)
-            # Graph-DiT outputs 5D, but history buffer expects 6D (with gripper)
-            # We need to pad with 0 for gripper, or use the final action 'a' which is 6D
-            # Actually, we should store the final action 'a' (6D) after normalization
-            # But for now, let's pad a_base_norm to 6D if needed
             action_for_history = a_base_norm_full  # [B, action_dim] - full normalized action
             self.history_buffer.update(
                 ee_node=ee_node,
@@ -1515,9 +1594,17 @@ class GraphUnetResidualRLPolicy(nn.Module):
                 joint_states=joint_states,
             )
 
-        # Log prob / entropy over full 6D (Actor outputs 6D)
-        log_prob = dist.log_prob(delta_norm).sum(dim=-1)
-        entropy = dist.entropy().sum(dim=-1)
+        # Log prob / entropy: arm actor + gripper head combined
+        log_prob_arm = dist.log_prob(delta_norm).sum(dim=-1)
+        entropy_arm = dist.entropy().sum(dim=-1)
+        if not deterministic:
+            log_prob_gripper = gripper_dist.log_prob(gripper_out).sum(dim=-1)
+            entropy_gripper = gripper_dist.entropy().sum(dim=-1)
+        else:
+            log_prob_gripper = torch.zeros_like(log_prob_arm)
+            entropy_gripper = torch.zeros_like(entropy_arm)
+        log_prob = log_prob_arm + log_prob_gripper
+        entropy = entropy_arm + entropy_gripper
         # Critic: select obs based on critic_obs_mode
         obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
         if getattr(self.cfg, "use_counterfactual_q", False):
@@ -1549,6 +1636,9 @@ class GraphUnetResidualRLPolicy(nn.Module):
             "v_bar": v_bar,
             "q_base": q_base,  # Q(s, a_base) for counterfactual; None when V(s) mode
             "alpha": alpha.detach(),
+            # Gripper head data (for distill loss in warmup, also stored during RL for buffer compat)
+            "gripper_head_out": gripper_out,
+            "gripper_target": gripper_target,
         }
         return a, info
 
@@ -1622,10 +1712,29 @@ class GraphUnetResidualRLPolicy(nn.Module):
         else:
             delta_norm = delta
         delta_norm = torch.clamp(delta_norm, -1.0, 1.0)
-        log_prob = dist.log_prob(delta_norm).sum(dim=-1)
-        entropy = dist.entropy().sum(dim=-1)
+        log_prob_arm = dist.log_prob(delta_norm).sum(dim=-1)
+        entropy_arm = dist.entropy().sum(dim=-1)
         loss_delta_reg = (delta_norm ** 2).mean()
         alpha = alpha_mean  # for return dict
+
+        # === Gripper head: recompute log_prob for PPO ===
+        gripper_features = torch.cat([obs_actor, a_base_norm_full, z_bar_new], dim=-1)
+        gripper_dist = self.gripper_head.dist(gripper_features)
+        # Recover gripper action from executed action (action[:, gripper_indices])
+        gripper_action = action[:, self.gripper_indices]
+        log_prob_gripper = gripper_dist.log_prob(gripper_action).sum(dim=-1)
+        entropy_gripper = gripper_dist.entropy().sum(dim=-1)
+
+        # Gripper distill loss (used during warmup in trainer; computed here for convenience)
+        gripper_target = batch.get("gripper_target")
+        gripper_head_out = self.gripper_head(gripper_features)
+        if gripper_target is not None:
+            loss_gripper_distill = F.mse_loss(gripper_head_out, gripper_target)
+        else:
+            loss_gripper_distill = torch.tensor(0.0, device=obs.device)
+
+        log_prob = log_prob_arm + log_prob_gripper
+        entropy = entropy_arm + entropy_gripper
 
         # AWR weights: use counterfactual advantage when Q(s,a) mode
         if getattr(self.cfg, "use_counterfactual_q", False) and "q_base" in batch:
@@ -1767,6 +1876,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             "c_ent": c_ent_val,
             "beta": beta_val_report,
             "eff_ratio": eff_ratio.detach(),
+            "loss_gripper_distill": loss_gripper_distill,  # For warmup: MSE(gripper_head, pretrain)
         }
     
     # -----------------------------

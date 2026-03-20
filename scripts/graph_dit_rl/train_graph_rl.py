@@ -178,6 +178,10 @@ class RolloutBuffer:
         # Q(s, a_base) for counterfactual advantage (only used when use_counterfactual_q=True)
         self.q_base = torch.zeros(T, N, device=device)
 
+        # Gripper head distillation data
+        self.gripper_head_out = torch.zeros(T, N, 2, device=device)
+        self.gripper_target = torch.zeros(T, N, 2, device=device)
+
         self._initialized = True
 
     def add(
@@ -215,6 +219,12 @@ class RolloutBuffer:
         if info.get("q_base") is not None:
             self.q_base[t] = info["q_base"].detach()
 
+        # Gripper head distill data
+        if info.get("gripper_head_out") is not None:
+            self.gripper_head_out[t] = info["gripper_head_out"].detach()
+        if info.get("gripper_target") is not None:
+            self.gripper_target[t] = info["gripper_target"].detach()
+
         self.ptr += 1
 
     def compute_returns(self, last_value: torch.Tensor, gamma: float, lam: float):
@@ -239,6 +249,8 @@ class RolloutBuffer:
         z_bar_flat = self.z_bar.reshape(total_samples, -1)
         values_flat = self.values.reshape(total_samples)
         q_base_flat = self.q_base.reshape(total_samples)  # Q(s, a_base) for counterfactual
+        gripper_head_out_flat = self.gripper_head_out.reshape(total_samples, -1)
+        gripper_target_flat = self.gripper_target.reshape(total_samples, -1)
 
         # Normalize advantages
         adv_flat = (adv_flat - adv_flat.mean()) / (adv_flat.std() + 1e-8)
@@ -270,6 +282,7 @@ class RolloutBuffer:
                     "values": values_flat[idx],
                     "q_total": values_flat[idx],  # values = Q(s, a_total) in Q mode
                     "q_base": q_base_flat[idx],   # Q(s, a_base) for counterfactual
+                    "gripper_target": gripper_target_flat[idx],
                 }
 
     def reset(self):
@@ -841,6 +854,7 @@ class GraphDiTRLTrainer:
         total_c_ent = 0.0
         total_beta = 0.0
         total_eff_ratio = 0.0
+        total_gripper_distill = 0.0
         num_updates = 0
         all_returns = []
         all_values = []
@@ -856,8 +870,11 @@ class GraphDiTRLTrainer:
 
             self.optimizer.zero_grad()
             if critic_warmup:
-                # Only train critic: don't let actor/z_adapter move before advantage estimates are stable
-                loss_to_backward = self.cfg.cV * 0.5 * losses["loss_critic_bar_raw"]
+                # Train critic + gripper head distillation (MSE to match pretrain gripper)
+                loss_to_backward = (
+                    self.cfg.cV * 0.5 * losses["loss_critic_bar_raw"]
+                    + losses["loss_gripper_distill"]
+                )
                 loss_to_backward.backward()
             else:
                 losses["loss_total"].backward()
@@ -888,6 +905,9 @@ class GraphDiTRLTrainer:
             eff_val = losses.get("eff_ratio")
             if eff_val is not None:
                 total_eff_ratio += eff_val.item() if hasattr(eff_val, "item") else float(eff_val)
+            gd_val = losses.get("loss_gripper_distill")
+            if gd_val is not None:
+                total_gripper_distill += gd_val.item() if hasattr(gd_val, "item") else float(gd_val)
             num_updates += 1
             all_returns.append(batch["returns"])
             all_values.append(batch["values"])
@@ -915,6 +935,7 @@ class GraphDiTRLTrainer:
             "c_ent": total_c_ent / n if n > 0 else 0.0,
             "beta": total_beta / n if n > 0 else 0.0,
             "eff_ratio": total_eff_ratio / n if n > 0 else 0.0,
+            "loss_gripper_distill": total_gripper_distill / n if n > 0 else 0.0,
         }
 
     def train(self, max_iterations: int, save_interval: int = 50, start_iteration: int = 1):
@@ -944,9 +965,9 @@ class GraphDiTRLTrainer:
                         rm = unwrapped.reward_manager
                         term_names = list(rm._term_names)
                         curriculum_weights = {
-                            "stack_1_align_2": 10.0,    # reduce dense alignment
-                            "gripper_release": 500.0,    # increase release reward
-                            "success_bonus": 2000.0,     # big success reward
+                            "stack_1_align_2": 5.0,     # reduce alignment (was 20)
+                            "gripper_open": 100.0,       # increase gripper open (was 30)
+                            "stack_stable": 100.0,       # increase stability (was 50)
                         }
                         for name, new_w in curriculum_weights.items():
                             if name in term_names:
@@ -1225,6 +1246,7 @@ class GraphDiTRLTrainer:
         _scalar("main/c_ent", update_stats.get("c_ent", 0), step)
         _scalar("main/beta", update_stats.get("beta", 0), step)
         _scalar("main/eff_ratio", update_stats.get("eff_ratio", 0), step)
+        _scalar("main/loss_gripper_distill", update_stats.get("loss_gripper_distill", 0), step)
 
         sr = rollout_stats.get("success_rate", 0) * 100
         sr_100 = rollout_stats.get("success_rate_100", 0) * 100
@@ -1258,6 +1280,8 @@ class GraphDiTRLTrainer:
         c_ent_v = update_stats.get("c_ent", 0)
         beta_v = update_stats.get("beta", 0)
         eff_r = update_stats.get("eff_ratio", 0)
+        grip_distill = update_stats.get("loss_gripper_distill", 0)
+        grip_str = f" gD={grip_distill:.4f}" if update_stats.get("critic_warmup", False) else ""
         print(
             f"{progress_str} "
             f"SR={sr:5.1f}% (100:{sr_100:4.1f}% {self.best_sr_window}ep:{sr_win:4.1f}%) [{num_eps:2d}ep] | "
@@ -1266,7 +1290,7 @@ class GraphDiTRLTrainer:
             f"Δ={delta:.3f} | "
             f"α={alpha:.2f} β={beta_v:.3f} | "
             f"cΔ={c_dreg:.1f} cH={c_ent_v:.4f} eff={eff_r:.2f} | "
-            f"L={loss:.3f}"
+            f"L={loss:.3f}{grip_str}"
         )
 
     def _save_best(self, iteration: int):
