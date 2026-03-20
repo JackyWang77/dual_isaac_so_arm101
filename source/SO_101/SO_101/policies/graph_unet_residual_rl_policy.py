@@ -1488,16 +1488,14 @@ class GraphUnetResidualRLPolicy(nn.Module):
             z_layers = self._get_z_layers_fast(obs)
             z_bar, _ = self.aggregate_latent(z_layers)
 
-            # === Gripper head: distill during warmup ===
+            # === Gripper head: compute distill loss data during warmup ===
+            # NOTE: During warmup, do NOT override actual action with gripper head output.
+            # Gripper head starts at ~0 (zero init), which maps to "open" after discretization,
+            # breaking pick behavior. Only compute gripper_out for MSE distill loss.
             obs_actor_warmup = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
             gripper_features = torch.cat([obs_actor_warmup, a_base_norm_full, z_bar], dim=-1)
-            # Save pretrain gripper output BEFORE overriding (distill target)
-            gripper_target = a_base[:, self.gripper_indices].clone()
-            gripper_out = self.gripper_head(gripper_features)  # [B, num_grippers]
-            # Override gripper dims with gripper head output
-            a_base_with_gripper = a_base.clone()
-            for i, gi in enumerate(self.gripper_indices):
-                a_base_with_gripper[:, gi] = gripper_out[:, i]
+            gripper_target = a_base[:, self.gripper_indices].clone()  # pretrain gripper output
+            gripper_out = self.gripper_head(gripper_features)  # [B, num_grippers] for distill loss only
 
             obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
             if getattr(self.cfg, "use_counterfactual_q", False):
@@ -1522,7 +1520,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             if self.history_buffer is not None:
                 action_for_history = a_base_norm_full
                 self.history_buffer.update(ee_node=ee_node, obj_node=obj_node, action=action_for_history, joint_states=joint_states)
-            return a_base_with_gripper, info
+            return a_base, info  # Use pretrain action as-is during warmup
 
         # ============================================================
         # 3. z_layers (high-frequency! called every step with temporal history)
