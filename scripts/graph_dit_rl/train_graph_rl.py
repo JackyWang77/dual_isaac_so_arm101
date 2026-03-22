@@ -453,21 +453,26 @@ class GraphDiTRLTrainer:
         except Exception:
             pass
 
-        # Level 2: position-based check using env's actual DoneTerm thresholds
-        # (env success uses eps_z=0.003, eps_xy=0.009, NOT the stricter play.py obs constants)
+        # Level 2: position + gripper check using env's actual DoneTerm thresholds
         if obs_before_step is not None:
             s = getattr(self.cfg, "obs_structure", None)
             if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
                 c1 = obs_before_step[env_idx, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
                 c2 = obs_before_step[env_idx, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
-                z_diff_a = torch.abs((c1[2] - c2[2]) - 0.018)
+                z_diff_a = torch.abs((c1[2] - c2[2]) - 0.012)
                 xy_dist_a = torch.norm(c1[:2] - c2[:2])
-                z_diff_b = torch.abs((c2[2] - c1[2]) - 0.018)
+                z_diff_b = torch.abs((c2[2] - c1[2]) - 0.012)
                 xy_dist_b = torch.norm(c2[:2] - c1[:2])
                 stack_ok = (z_diff_a < 0.003 and xy_dist_a < 0.009) or \
                            (z_diff_b < 0.003 and xy_dist_b < 0.009)
-                if stack_ok:
-                    return True
+                if not stack_ok:
+                    return False
+                # Gripper check: obs space, >0.1 = clearly open
+                if "right_joint_pos" in s:
+                    right_joints = obs_before_step[env_idx, s["right_joint_pos"][0]:s["right_joint_pos"][1]]
+                    if float(right_joints[-1]) <= 0.1:
+                        return False
+                return True
 
         return False
 
