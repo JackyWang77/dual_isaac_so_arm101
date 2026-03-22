@@ -472,10 +472,9 @@ class GraphDiTRLTrainer:
         return False
 
     def _check_position_success(self, obs: torch.Tensor, env_idx: int) -> bool:
-        """Position-based success check using env DoneTerm thresholds (no gripper requirement).
-        
-        Used for truncated (timeout) episodes where cubes may be stacked but grippers
-        not released, so the env's success DoneTerm didn't fire.
+        """Position + gripper check for truncated (timeout) episodes.
+
+        Requires: cubes stacked (z_diff ≈ 0.012, xy aligned) AND right gripper open (> 0.1).
         """
         s = getattr(self.cfg, "obs_structure", None)
         if s is None:
@@ -488,10 +487,19 @@ class GraphDiTRLTrainer:
             xy_dist_a = torch.norm(c1[:2] - c2[:2])
             z_diff_b = torch.abs((c2[2] - c1[2]) - 0.012)
             xy_dist_b = torch.norm(c2[:2] - c1[:2])
-            return bool(
+            position_ok = bool(
                 (z_diff_a < 0.003 and xy_dist_a < 0.009) or
                 (z_diff_b < 0.003 and xy_dist_b < 0.009)
             )
+            if not position_ok:
+                return False
+            # Gripper check: right gripper (last joint) must be open > 0.1
+            if "right_joint_pos" in s:
+                right_joints = obs[env_idx, s["right_joint_pos"][0]:s["right_joint_pos"][1]]
+                right_gripper = right_joints[-1]  # gripper is last joint
+                if float(right_gripper) <= 0.1:
+                    return False
+            return True
         # Table setting check
         if "fork_pos" in s and "knife_pos" in s:
             fp = obs[env_idx, s["fork_pos"][0]:s["fork_pos"][1]]
