@@ -935,6 +935,7 @@ class GraphDiTRLTrainer:
 
         start_iter = getattr(self, "_start_iteration", 1)
         for iteration in range(start_iter, max_iterations + 1):
+            # Curriculum disabled: black-hole reward is a single dense signal (no phase switch).
             current_lr = self.optimizer.param_groups[0]["lr"]
             # Collect
             rollout_stats = self.collect_rollout(iteration=iteration)

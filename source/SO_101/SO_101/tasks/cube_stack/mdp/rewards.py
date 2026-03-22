@@ -249,3 +249,42 @@ def stack_success_bonus(
     env._success_fired[new_episode] = False
 
     return success_now.float()
+
+
+def black_hole_attraction(
+    env: ManagerBasedRLEnv,
+    target_z_offset: float = 0.012,
+    sigma_xy_coarse: float = 0.02,
+    sigma_xy_fine: float = 0.005,
+    sigma_z_fine: float = 0.003,
+    inner_weight: float = 5.0,
+    cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
+    cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
+) -> torch.Tensor:
+    """Black-hole funnel reward: pull cube1 onto cube2.
+
+    Target position for cube1 = (cube2_x, cube2_y, cube2_z + target_z_offset).
+    No gripper gate — gripper is backbone's job, it auto-opens when close enough.
+
+    Two layers:
+    - Outer funnel (tanh): coarse XY attraction, smooth gradient everywhere.
+      Range ~[0, 1]. Ensures critic has signal even when cubes are far apart.
+    - Inner well (gaussian): sharp 3D peak at exact target. Exponentially increasing
+      reward as cube1 approaches landing position.
+
+    Total reward range: [0, 1 + inner_weight] ≈ [0, 6.0]
+    """
+    c1: RigidObject = env.scene[cube_1_cfg.name]
+    c2: RigidObject = env.scene[cube_2_cfg.name]
+
+    p1 = c1.data.root_pos_w[:, :3]
+    p2 = c2.data.root_pos_w[:, :3]
+
+    xy_dist = torch.norm(p1[:, :2] - p2[:, :2], dim=1)
+    z_err = p1[:, 2] - (p2[:, 2] + target_z_offset)
+
+    xy_coarse = 1.0 - torch.tanh(xy_dist / sigma_xy_coarse)
+    xy_fine = torch.exp(-xy_dist.pow(2) / (2.0 * sigma_xy_fine ** 2))
+    z_fine = torch.exp(-z_err.pow(2) / (2.0 * sigma_z_fine ** 2))
+
+    return xy_coarse + inner_weight * xy_fine * z_fine
