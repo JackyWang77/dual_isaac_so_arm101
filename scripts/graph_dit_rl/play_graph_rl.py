@@ -563,7 +563,8 @@ def play_graph_rl_policy(
                 for i in done_envs.tolist():
                     is_truncated = bool(truncated[i].item() if truncated.dim() > 0 else truncated.item())
                     if is_truncated:
-                        is_success = _check_position_success(obs, i, cfg)
+                        # Timeout = failure (matching BC play.py: stricter eval)
+                        is_success = False
                     else:
                         is_success = _check_success_from_info(env, env_info, i, obs_before_step=obs, cfg=cfg)
                     episode_success.append(is_success)

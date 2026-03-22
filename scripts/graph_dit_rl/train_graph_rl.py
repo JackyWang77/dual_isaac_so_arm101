@@ -716,9 +716,8 @@ class GraphDiTRLTrainer:
                     is_truncated = bool(truncated[i].item() if hasattr(truncated[i], "item") else truncated[i])
                     is_terminated = bool(terminated[i].item() if hasattr(terminated[i], "item") else terminated[i])
                     if is_truncated:
-                        # Timeout: still check if cubes are stacked (env success DoneTerm
-                        # requires gripper release which RL residual may interfere with)
-                        is_success = self._check_position_success(obs, i)
+                        # Timeout = failure (matching BC play.py: stricter eval)
+                        is_success = False
                         n_truncated += 1
                     else:
                         is_success = self._check_success_from_info(env_info, i, obs_before_step=obs)
