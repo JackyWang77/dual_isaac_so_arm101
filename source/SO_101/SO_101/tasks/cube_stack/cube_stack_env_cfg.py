@@ -434,10 +434,7 @@ class CubeStackRLRewardsCfg:
         func=mdp.black_hole_attraction,
         params={
             "target_z_offset": 0.012,
-            "sigma_xy_coarse": 0.02,
-            "sigma_xy_fine": 0.005,
-            "sigma_z_fine": 0.003,
-            "inner_weight": 5.0,
+            "eps": 0.0005,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
         },
