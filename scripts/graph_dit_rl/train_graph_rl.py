@@ -38,10 +38,6 @@ parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--log_dir", type=str, default="./logs/graph_unet_rl", help="Log directory for residual RL (Unet)")
 parser.add_argument("--run_name", type=str, default=None, help="Override run folder name (e.g. for ablation: reg_0.5)")
 parser.add_argument("--save_interval", type=int, default=50)
-parser.add_argument("--best_sr_window", type=int, default=200,
-                    help="Rolling window for best-model SR (100: ±10%% CI, 200: ±7%%)")
-parser.add_argument("--best_sr_require_consistent", action="store_true",
-                    help="Only save best when current SR >= sr_window - 15%% (avoid lucky flukes)")
 
 # Rollout config
 parser.add_argument("--steps_per_env", type=int, default=405, help="Steps per env per iteration (recommend >=401 when env max_episode_steps=400)")
@@ -298,8 +294,6 @@ class GraphDiTRLTrainer:
         max_grad_norm: float = 1.0,
         action_history_length: int = 4,  # From Graph-DiT config
         action_dim_env: int = 6,  # Environment action dim (usually 6, includes gripper)
-        best_sr_window: int = 200,  # Rolling window for best-model selection (200: ±7% CI)
-        best_sr_require_consistent: bool = False,  # Require current SR >= sr_window - 15%
         critic_warmup_iters: int = 0,  # First N iters: only train critic; 0 = disabled
     ):
         self.env = env
@@ -363,10 +357,7 @@ class GraphDiTRLTrainer:
         self.total_steps = 0
         self.episode_rewards = []
         self.episode_lengths = []
-        self.episode_successes = []
-        self.best_sr = -1.0  # For best-model-by-SR saving
-        self.best_sr_window = best_sr_window
-        self.best_sr_require_consistent = best_sr_require_consistent
+        self.best_sr = -1.0  # Best rollout SR (this-iter mean) for best_model.pt
         self.critic_warmup_iters = critic_warmup_iters
 
         # Initialize env buffers
@@ -411,7 +402,7 @@ class GraphDiTRLTrainer:
         # Isaac Lab returns Episode_Termination/success, Episode_Termination/stack_success etc.
         print(f"[Trainer] Success: using env termination signals (Episode_Termination/success)")
         print(f"[Trainer] truncated=timeout=failure, terminated+success_signal=success")
-        print(f"[Trainer] Best-model: SR_{self.best_sr_window}ep window, consistent_check={self.best_sr_require_consistent}")
+        print(f"[Trainer] Best-model: save when rollout SR (this iter) improves after critic warmup")
 
     def _check_success_from_info(self, env_info, env_idx: int, obs_before_step: torch.Tensor = None) -> bool:
         """Check success with multi-level fallback (matching play.py).
@@ -443,13 +434,6 @@ class GraphDiTRLTrainer:
                             break
             if success_found:
                 return True
-            # Diagnostic: print which terms fired (limited count)
-            if not hasattr(self, "_l1_diag_count"):
-                self._l1_diag_count = 0
-            if self._l1_diag_count < 10:
-                self._l1_diag_count += 1
-                fired = [names[j] for j in range(len(names)) if bool(led[env_idx, j].item())]
-                print(f"  [L1 diag] env {env_idx}: terms={names}, fired={fired}")
         except Exception:
             pass
 
@@ -716,7 +700,9 @@ class GraphDiTRLTrainer:
                     is_truncated = bool(truncated[i].item() if hasattr(truncated[i], "item") else truncated[i])
                     is_terminated = bool(terminated[i].item() if hasattr(terminated[i], "item") else terminated[i])
                     if is_truncated:
-                        # Timeout = failure (matching BC play.py: stricter eval)
+                        # Timeout: count as failure (same as play_graph_rl.py).
+                        # _check_position_success() exists for optional "stack+open gripper"
+                        # eval on timeout but is NOT used here — SR is strict timeout=fail.
                         is_success = False
                         n_truncated += 1
                     else:
@@ -725,7 +711,6 @@ class GraphDiTRLTrainer:
                     if is_success:
                         n_success += 1
                     rollout_successes.append(float(is_success))
-                    self.episode_successes.append(float(is_success))
                 pass
 
                 # Record per-term episode rewards
@@ -820,13 +805,6 @@ class GraphDiTRLTrainer:
         else:
             stats["success_rate"] = 0.0
             stats["num_episodes"] = 0
-
-        if len(self.episode_successes) > 0:
-            stats["success_rate_100"] = np.mean(self.episode_successes[-100:])
-            stats["success_rate_window"] = np.mean(self.episode_successes[-self.best_sr_window:])
-        else:
-            stats["success_rate_100"] = 0.0
-            stats["success_rate_window"] = 0.0
 
         if len(delta_norms_all) > 0:
             stats["delta_norm_mean"] = np.mean(delta_norms_all)
@@ -965,26 +943,11 @@ class GraphDiTRLTrainer:
                 and iteration <= self.critic_warmup_iters
             )
 
-            # Save best by success rate (use rolling N-ep SR; 200ep: ±7% CI)
-            # Skip during critic warmup: policy unchanged, SR variance is noise
-            sr_window = rollout_stats.get("success_rate_window", 0.0)
+            # Save best_model.pt when this-iteration rollout SR improves (same semantics as play eval)
             sr_current = rollout_stats.get("success_rate", 0.0)
-            n_eps = len(self.episode_successes)
-            window_valid = n_eps >= self.best_sr_window
-            consistent = (not self.best_sr_require_consistent) or (sr_current >= sr_window - 0.15)
-            if not critic_warmup and window_valid and consistent and sr_window > self.best_sr:
-                self.best_sr = sr_window
+            if not critic_warmup and sr_current > self.best_sr:
+                self.best_sr = sr_current
                 self._save_best(iteration)
-
-            # Save when current iteration SR hits new high (captures peak performance)
-            # During warmup: save iter 1 baseline, don't overwrite with variance
-            if not hasattr(self, "_best_iter_sr"):
-                self._best_iter_sr = -1.0
-            if sr_current > self._best_iter_sr and sr_current > 0:
-                self._best_iter_sr = sr_current
-                path = os.path.join(self.log_dir, f"policy_peak_sr{sr_current*100:.0f}_iter{iteration}.pt")
-                self.policy.save(path)
-                print(f"[Trainer] Peak SR saved (iter {iteration}, SR={sr_current*100:.1f}%): {path}")
 
             # Save interval
             if iteration % save_interval == 0:
@@ -1200,8 +1163,6 @@ class GraphDiTRLTrainer:
 
         _scalar("main/success_rate", rollout_stats.get("success_rate", 0), step)
         _scalar("main/success_rate_by_iter", rollout_stats.get("success_rate", 0), step_iter)
-        _scalar("main/success_rate_100", rollout_stats.get("success_rate_100", 0), step)
-        _scalar("main/success_rate_window", rollout_stats.get("success_rate_window", 0), step)
         _scalar("main/num_episodes", rollout_stats.get("num_episodes", 0), step)
         _scalar("main/ep_reward_mean", rollout_stats.get("ep_reward_mean", 0), step)
         _scalar("main/ep_length_mean", rollout_stats.get("ep_length_mean", 0), step)
@@ -1218,10 +1179,6 @@ class GraphDiTRLTrainer:
         _scalar("main/beta", update_stats.get("beta", 0), step)
         _scalar("main/eff_ratio", update_stats.get("eff_ratio", 0), step)
 
-        sr = rollout_stats.get("success_rate", 0) * 100
-        sr_100 = rollout_stats.get("success_rate_100", 0) * 100
-        sr_win = rollout_stats.get("success_rate_window", 0) * 100
-        num_eps = rollout_stats.get("num_episodes", 0)
         reward = rollout_stats.get("ep_reward_mean", 0)
         ev = update_stats.get("explained_variance", -999)
         delta = rollout_stats.get("delta_norm_mean", 0)
@@ -1250,9 +1207,11 @@ class GraphDiTRLTrainer:
         c_ent_v = update_stats.get("c_ent", 0)
         beta_v = update_stats.get("beta", 0)
         eff_r = update_stats.get("eff_ratio", 0)
+        sr = rollout_stats.get("success_rate", 0) * 100
+        num_eps = rollout_stats.get("num_episodes", 0)
         print(
             f"{progress_str} "
-            f"SR={sr:5.1f}% (100:{sr_100:4.1f}% {self.best_sr_window}ep:{sr_win:4.1f}%) [{num_eps:2d}ep] | "
+            f"SR={sr:5.1f}% [{num_eps}ep] | "
             f"Rew={reward:6.1f} | "
             f"EV={ev:5.2f} | "
             f"Δ={delta:.3f} | "
@@ -1262,10 +1221,10 @@ class GraphDiTRLTrainer:
         )
 
     def _save_best(self, iteration: int):
-        """按 success_rate_window（最近 N episode 平均）保存当前最佳模型"""
+        """Save when rollout SR (this iteration) improves."""
         path = os.path.join(self.log_dir, "best_model.pt")
         self.policy.save(path, iteration=iteration)
-        print(f"[Trainer] Best model saved (SR_{self.best_sr_window}ep={self.best_sr*100:.1f}%): {path}")
+        print(f"[Trainer] Best model saved (SR={self.best_sr*100:.1f}%): {path}")
 
     def _save(self, iteration: int, final: bool = False):
         """保存 checkpoint (includes iteration for resume)"""
@@ -1628,8 +1587,6 @@ def main():
         max_grad_norm=args.max_grad_norm,
         action_history_length=action_history_length,
         action_dim_env=action_dim_env,  # Pass environment action dim (6 or 12) for history buffer
-        best_sr_window=getattr(args, "best_sr_window", 200),
-        best_sr_require_consistent=getattr(args, "best_sr_require_consistent", False),
         critic_warmup_iters=getattr(args, "critic_warmup_iters", 0),
     )
     
