@@ -385,8 +385,8 @@ class CubeStackEnvCfg(ManagerBasedRLEnvCfg):
 
     def __post_init__(self):
         self.decimation = 2
-        # Demos: mean~239 steps (4.8s), max~395 (7.9s) at 50Hz; 8s covers p95+
-        self.episode_length_s = 6.0  # 300 steps at dt=0.02
+        # step_dt = decimation * sim.dt = 0.02 → max_episode_length = episode_length_s / 0.02
+        self.episode_length_s = 8.0  # 400 env steps
         self.viewer.eye = (2.5, 2.5, 1.5)
         self.sim.dt = 0.01
         self.sim.render_interval = self.decimation

@@ -44,7 +44,7 @@ parser.add_argument("--best_sr_require_consistent", action="store_true",
                     help="Only save best when current SR >= sr_window - 15%% (avoid lucky flukes)")
 
 # Rollout config
-parser.add_argument("--steps_per_env", type=int, default=400, help="Steps per env per iteration (must >= env max_episode_steps=400 to avoid premature rollout truncation)")
+parser.add_argument("--steps_per_env", type=int, default=405, help="Steps per env per iteration (recommend >=401 when env max_episode_steps=400)")
 parser.add_argument("--num_epochs", type=int, default=5, help="Epochs per iteration")
 parser.add_argument("--mini_batch_size", type=int, default=64)
 parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
