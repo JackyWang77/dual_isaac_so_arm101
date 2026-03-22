@@ -493,11 +493,12 @@ class GraphDiTRLTrainer:
             )
             if not position_ok:
                 return False
-            # Gripper check: right gripper (last joint) must be open > 0.1
+            # Gripper check: right gripper (last joint) must be open
+            # obs gripper range differs from env joint_pos; obs uses ~-0.36 (closed), > -0.1 = open
             if "right_joint_pos" in s:
                 right_joints = obs[env_idx, s["right_joint_pos"][0]:s["right_joint_pos"][1]]
                 right_gripper = right_joints[-1]  # gripper is last joint
-                if float(right_gripper) <= 0.1:
+                if float(right_gripper) <= -0.1:
                     return False
             return True
         # Table setting check
