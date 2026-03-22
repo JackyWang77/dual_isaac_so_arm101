@@ -254,23 +254,20 @@ def stack_success_bonus(
 def black_hole_attraction(
     env: ManagerBasedRLEnv,
     target_z_offset: float = 0.012,
-    sigma_xy_coarse: float = 0.02,
-    sigma_xy_fine: float = 0.005,
-    sigma_z_fine: float = 0.003,
-    inner_weight: float = 5.0,
+    eps: float = 0.0005,
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
 ) -> torch.Tensor:
-    """Potential-based black-hole reward: reward = Φ(s') - Φ(s).
+    """Potential-based inverse-distance black-hole reward: Φ(s') - Φ(s).
 
-    Φ(s) = black-hole potential (tanh outer + gaussian inner).
-    Only rewards PROGRESS toward target, not staying at target.
-    - Holding at good position → Φ unchanged → reward = 0
-    - Moving closer → Φ increases → reward > 0
-    - Last mm worth most (gaussian steepest near center)
+    Φ(s) = 1 / (dist_3d + eps).  True gravitational potential.
+    - Holding → reward = 0 (no progress)
+    - Moving closer → reward > 0, exponentially increasing
+    - Last mm worth 10x more than 3mm→2mm (real black hole)
+    - eps prevents division by zero
 
-    Target position for cube1 = (cube2_x, cube2_y, cube2_z + target_z_offset).
-    No gripper gate — gripper is backbone's job, it auto-opens when close enough.
+    Target = (cube2_x, cube2_y, cube2_z + target_z_offset).
+    No gripper gate — backbone auto-opens when close enough.
     """
     c1: RigidObject = env.scene[cube_1_cfg.name]
     c2: RigidObject = env.scene[cube_2_cfg.name]
@@ -278,19 +275,17 @@ def black_hole_attraction(
     p1 = c1.data.root_pos_w[:, :3]
     p2 = c2.data.root_pos_w[:, :3]
 
-    # Current potential
-    xy_dist = torch.norm(p1[:, :2] - p2[:, :2], dim=1)
-    z_err = p1[:, 2] - (p2[:, 2] + target_z_offset)
+    # Target position: cube2 xy, cube2 z + offset
+    target = p2.clone()
+    target[:, 2] = target[:, 2] + target_z_offset
 
-    xy_coarse = 1.0 - torch.tanh(xy_dist / sigma_xy_coarse)
-    xy_fine = torch.exp(-xy_dist.pow(2) / (2.0 * sigma_xy_fine ** 2))
-    z_fine = torch.exp(-z_err.pow(2) / (2.0 * sigma_z_fine ** 2))
+    # 3D distance to target
+    dist_3d = torch.norm(p1 - target, dim=1)
 
-    potential = xy_coarse + inner_weight * xy_fine * z_fine
+    # Inverse-distance potential: closer = higher Φ
+    potential = 1.0 / (dist_3d + eps)
 
     # Init prev_potential buffer on first call
-    num_envs = env.num_envs
-    device = p1.device
     if not hasattr(env, '_prev_potential'):
         env._prev_potential = potential.clone()
 
