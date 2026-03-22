@@ -483,9 +483,9 @@ class GraphDiTRLTrainer:
         if "cube_1_pos" in s and "cube_2_pos" in s:
             c1 = obs[env_idx, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
             c2 = obs[env_idx, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
-            z_diff_a = torch.abs((c1[2] - c2[2]) - 0.003)
+            z_diff_a = torch.abs((c1[2] - c2[2]) - 0.012)
             xy_dist_a = torch.norm(c1[:2] - c2[:2])
-            z_diff_b = torch.abs((c2[2] - c1[2]) - 0.003)
+            z_diff_b = torch.abs((c2[2] - c1[2]) - 0.012)
             xy_dist_b = torch.norm(c2[:2] - c1[:2])
             position_ok = bool(
                 (z_diff_a < 0.003 and xy_dist_a < 0.009) or
@@ -493,11 +493,12 @@ class GraphDiTRLTrainer:
             )
             if not position_ok:
                 return False
-            # Gripper check: right gripper (last joint) must be open > 0.1
+            # Gripper check: right gripper must be open
+            # obs space: -0.36=closed, >-0.1=open
             if "right_joint_pos" in s:
                 right_joints = obs[env_idx, s["right_joint_pos"][0]:s["right_joint_pos"][1]]
                 right_gripper = right_joints[-1]  # gripper is last joint
-                if float(right_gripper) <= 0.1:
+                if float(right_gripper) <= -0.1:
                     return False
             return True
         # Table setting check
