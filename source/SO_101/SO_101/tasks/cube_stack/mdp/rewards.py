@@ -261,18 +261,16 @@ def black_hole_attraction(
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
 ) -> torch.Tensor:
-    """Black-hole funnel reward: pull cube1 onto cube2.
+    """Potential-based black-hole reward: reward = Φ(s') - Φ(s).
+
+    Φ(s) = black-hole potential (tanh outer + gaussian inner).
+    Only rewards PROGRESS toward target, not staying at target.
+    - Holding at good position → Φ unchanged → reward = 0
+    - Moving closer → Φ increases → reward > 0
+    - Last mm worth most (gaussian steepest near center)
 
     Target position for cube1 = (cube2_x, cube2_y, cube2_z + target_z_offset).
     No gripper gate — gripper is backbone's job, it auto-opens when close enough.
-
-    Two layers:
-    - Outer funnel (tanh): coarse XY attraction, smooth gradient everywhere.
-      Range ~[0, 1]. Ensures critic has signal even when cubes are far apart.
-    - Inner well (gaussian): sharp 3D peak at exact target. Exponentially increasing
-      reward as cube1 approaches landing position.
-
-    Total reward range: [0, 1 + inner_weight] ≈ [0, 6.0]
     """
     c1: RigidObject = env.scene[cube_1_cfg.name]
     c2: RigidObject = env.scene[cube_2_cfg.name]
@@ -280,6 +278,7 @@ def black_hole_attraction(
     p1 = c1.data.root_pos_w[:, :3]
     p2 = c2.data.root_pos_w[:, :3]
 
+    # Current potential
     xy_dist = torch.norm(p1[:, :2] - p2[:, :2], dim=1)
     z_err = p1[:, 2] - (p2[:, 2] + target_z_offset)
 
@@ -287,4 +286,23 @@ def black_hole_attraction(
     xy_fine = torch.exp(-xy_dist.pow(2) / (2.0 * sigma_xy_fine ** 2))
     z_fine = torch.exp(-z_err.pow(2) / (2.0 * sigma_z_fine ** 2))
 
-    return xy_coarse + inner_weight * xy_fine * z_fine
+    potential = xy_coarse + inner_weight * xy_fine * z_fine
+
+    # Init prev_potential buffer on first call
+    num_envs = env.num_envs
+    device = p1.device
+    if not hasattr(env, '_prev_potential'):
+        env._prev_potential = potential.clone()
+
+    # Reward = progress (Φ(s') - Φ(s))
+    reward = potential - env._prev_potential
+
+    # Update buffer
+    env._prev_potential = potential.clone()
+
+    # Reset on new episode
+    new_episode = (env.episode_length_buf <= 1)
+    env._prev_potential[new_episode] = potential[new_episode]
+    reward[new_episode] = 0.0
+
+    return reward
