@@ -890,7 +890,7 @@ class GraphDiTRLTrainer:
                 # Only train critic + gripper override distillation
                 loss_to_backward = (
                     self.cfg.cV * 0.5 * losses["loss_critic_bar_raw"]
-                    + losses.get("loss_gripper_distill", torch.tensor(0.0, device=obs.device))
+                    + losses.get("loss_gripper_distill", torch.tensor(0.0, device=losses["loss_critic_bar_raw"].device))
                 )
                 loss_to_backward.backward()
             else:
