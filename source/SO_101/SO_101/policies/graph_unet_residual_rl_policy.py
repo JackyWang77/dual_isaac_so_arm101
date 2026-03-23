@@ -1486,10 +1486,14 @@ class GraphUnetResidualRLPolicy(nn.Module):
             delta = delta * self.residual_action_mask
 
         # Hard clamp: project delta onto L2 ball of radius max_delta_norm
+        # Only constrain arm joints; gripper dims are FREE (can output full ±1)
         _max_dn = self.cfg.max_delta_norm
         if _max_dn > 0:
-            _dn = delta.norm(dim=-1, keepdim=True)  # [B, 1]
-            delta = torch.where(_dn > _max_dn, delta * _max_dn / (_dn + 1e-8), delta)
+            delta_arm = delta[:, self.joint_indices]  # [B, 10] arm joints only
+            _dn = delta_arm.norm(dim=-1, keepdim=True)  # [B, 1]
+            delta_arm = torch.where(_dn > _max_dn, delta_arm * _max_dn / (_dn + 1e-8), delta_arm)
+            delta[:, self.joint_indices] = delta_arm
+            # gripper dims (self.gripper_indices) keep original delta — no L2 constraint
 
         # Per-channel alpha: adaptive (state-dependent) or scalar
         obs_actor = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)

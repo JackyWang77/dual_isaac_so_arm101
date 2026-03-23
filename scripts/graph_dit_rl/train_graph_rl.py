@@ -601,6 +601,22 @@ class GraphDiTRLTrainer:
                     zero_residual=zero_residual,
                 )
 
+                # Zone gate: only apply delta within activation_radius of target
+                # Outside zone → revert to pure backbone (delta=0)
+                obs_struct = getattr(self.cfg, "obs_structure", None)
+                if obs_struct is not None and "cube_1_pos" in obs_struct and "cube_2_pos" in obs_struct:
+                    s1 = obs_struct["cube_1_pos"][0]
+                    s2 = obs_struct["cube_2_pos"][0]
+                    c1 = obs[:, s1:s1+3]
+                    c2 = obs[:, s2:s2+3]
+                    target = c2.clone()
+                    target[:, 2] = target[:, 2] + 0.012  # target_z_offset
+                    dist_3d = torch.norm(c1 - target, dim=1)
+                    outside_zone = (dist_3d > 0.02)  # activation_radius = 2cm
+                    a_base = info.get("a_base")
+                    if a_base is not None and outside_zone.any():
+                        action[outside_zone] = a_base[outside_zone]
+
                 if hasattr(self.env, 'action_space'):
                     if hasattr(self.env.action_space, 'low') and hasattr(self.env.action_space, 'high'):
                         action = torch.clamp(
