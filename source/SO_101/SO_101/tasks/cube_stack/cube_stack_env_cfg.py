@@ -409,27 +409,37 @@ class CubeStackEnvCfg(ManagerBasedRLEnvCfg):
 # =========================================================
 @configclass
 class CubeStackRLRewardsCfg:
-    """Black-hole reward for RL fine-tuning on top of a pretrained BC policy.
+    """Rewards for residual RL with GripperOverrideNet.
 
-    Core insight: gripper is backbone's job (auto-opens when cube1 is ~1mm above cube2).
-    RL only needs to improve cube1 placement precision.
-    Single main reward: pull cube1 to (cube2_xy, cube2_z + offset) like a black hole.
-    No gripper rewards, no curriculum needed — one dense signal (+ tiny lift shaping).
+    - Pick: EE-cube distance (helps RL not disrupt pick)
+    - Stack: inverse-distance potential black hole (positioning)
+    - Gripper: dense opening reward when aligned (trains override net)
     """
 
-    # === Shaping rewards (tiny, help critic distinguish pick phase) ===
+    # === Pick phase rewards ===
     cube1_is_lifted = RewTerm(
         func=mdp.object_is_lifted,
-        params={"minimal_height": 0.04, "object_cfg": SceneEntityCfg("cube_1")},
+        params={"minimal_height": 0.03, "object_cfg": SceneEntityCfg("cube_1")},
         weight=0.5,
     )
     cube2_is_lifted = RewTerm(
         func=mdp.object_is_lifted,
-        params={"minimal_height": 0.04, "object_cfg": SceneEntityCfg("cube_2")},
+        params={"minimal_height": 0.03, "object_cfg": SceneEntityCfg("cube_2")},
         weight=0.5,
     )
+    # EE-to-cube distance: reward arm approaching cube
+    pick_reach = RewTerm(
+        func=mdp.closer_arm_reaches_object,
+        params={
+            "std": 0.05,
+            "object_cfg": SceneEntityCfg("cube_1"),
+            "ee_right_cfg": SceneEntityCfg("ee_right"),
+            "ee_left_cfg": SceneEntityCfg("ee_left"),
+        },
+        weight=1.0,
+    )
 
-    # === Main reward: black hole attraction (replaces align / release / success_bonus) ===
+    # === Stack phase: black hole attraction ===
     black_hole = RewTerm(
         func=mdp.black_hole_attraction,
         params={
@@ -440,6 +450,20 @@ class CubeStackRLRewardsCfg:
             "cube_2_cfg": SceneEntityCfg("cube_2"),
         },
         weight=20.0,
+    )
+
+    # === Gripper reward: dense opening when aligned ===
+    gripper_open = RewTerm(
+        func=mdp.gripper_open_reward,
+        params={
+            "xy_threshold": 0.02,
+            "z_min": 0.005,
+            "jaw_max": 0.4,
+            "cube_1_cfg": SceneEntityCfg("cube_1"),
+            "cube_2_cfg": SceneEntityCfg("cube_2"),
+            "right_arm_cfg": SceneEntityCfg("right_arm"),
+        },
+        weight=50.0,
     )
 
     # Smooth control penalties
