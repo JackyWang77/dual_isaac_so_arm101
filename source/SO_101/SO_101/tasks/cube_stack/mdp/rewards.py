@@ -305,3 +305,37 @@ def black_hole_attraction(
     reward[new_episode] = 0.0
 
     return reward
+
+
+def gripper_open_reward(
+    env: ManagerBasedRLEnv,
+    xy_threshold: float = 0.02,
+    z_min: float = 0.005,
+    jaw_max: float = 0.4,
+    cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
+    cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
+    right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
+) -> torch.Tensor:
+    """Dense reward for RIGHT gripper opening when cubes are aligned.
+
+    Gate: cube1 above cube2 (z_diff > z_min) AND xy close (< xy_threshold).
+    Reward: normalized gripper opening degree [0, 1].
+    Trains GripperOverrideNet to learn correct release timing.
+    """
+    c1: RigidObject = env.scene[cube_1_cfg.name]
+    c2: RigidObject = env.scene[cube_2_cfg.name]
+    right_arm = env.scene[right_arm_cfg.name]
+
+    p1 = c1.data.root_pos_w[:, :3]
+    p2 = c2.data.root_pos_w[:, :3]
+
+    # Alignment gate
+    xy_dist = torch.norm(p1[:, :2] - p2[:, :2], dim=1)
+    z_diff = p1[:, 2] - p2[:, 2]
+    aligned = ((xy_dist < xy_threshold) & (z_diff > z_min)).float()
+
+    # Gripper opening: joint_pos[-1] range [0.0002, 0.4], higher = more open
+    gripper_pos = right_arm.data.joint_pos[:, -1]
+    gripper_open_norm = torch.clamp(gripper_pos / jaw_max, 0.0, 1.0)
+
+    return aligned * gripper_open_norm

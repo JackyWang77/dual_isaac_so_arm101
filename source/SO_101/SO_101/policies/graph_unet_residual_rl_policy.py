@@ -456,6 +456,58 @@ class ResidualGaussianActor(nn.Module):
         return Normal(mu, std)
 
 
+class GripperOverrideNet(nn.Module):
+    """Binary override network: decides WHEN to flip backbone's gripper decision.
+
+    Core idea: gripper is a TIMING problem, not position. Backbone knows HOW to
+    open/close, but sometimes gets the timing wrong. This network learns:
+    "given current state + gripper history, should I override backbone's gripper?"
+
+    Output: probability p ∈ [0,1] of overriding backbone's gripper action.
+    - p < threshold → keep backbone gripper (default behavior)
+    - p >= threshold → FLIP backbone gripper (open↔close)
+
+    Training:
+    - Warmup: BCE(p, 0) → learn to never override (backbone is usually right)
+    - RL: Bernoulli log_prob → AWR optimizes override timing
+    """
+    def __init__(
+        self,
+        obs_dim: int,
+        gripper_history_len: int = 10,
+        hidden: tuple = (64, 32),
+        act: str = "silu",
+        num_grippers: int = 2,
+    ):
+        super().__init__()
+        self.num_grippers = num_grippers
+        self.gripper_history_len = gripper_history_len
+        # Input: obs + gripper_history (K steps) + a_base_gripper (current backbone prediction)
+        in_dim = obs_dim + gripper_history_len * num_grippers + num_grippers
+        self.net = mlp(in_dim, hidden, num_grippers, act=act)
+        # Init bias to -3.0 → sigmoid(-3) ≈ 0.05 → rarely override at start
+        nn.init.zeros_(self.net[-1].weight)
+        nn.init.constant_(self.net[-1].bias, -3.0)
+
+    def forward(self, obs: torch.Tensor, gripper_history: torch.Tensor,
+                a_base_gripper: torch.Tensor) -> torch.Tensor:
+        """Returns override probability p ∈ [0,1] for each gripper."""
+        # gripper_history: [B, history_len * num_grippers] (flattened)
+        # a_base_gripper: [B, num_grippers]
+        x = torch.cat([obs, gripper_history, a_base_gripper], dim=-1)
+        logit = self.net(x)
+        return torch.sigmoid(logit)  # [B, num_grippers]
+
+    def log_prob(self, p: torch.Tensor, override: torch.Tensor) -> torch.Tensor:
+        """Bernoulli log probability.
+        p: [B, num_grippers], override: [B, num_grippers] (0 or 1)
+        Returns: [B] (summed over grippers)
+        """
+        p = torch.clamp(p, 1e-6, 1.0 - 1e-6)
+        lp = override * torch.log(p) + (1.0 - override) * torch.log(1.0 - p)
+        return lp.sum(dim=-1)  # [B]
+
+
 class DeepValueCritic(nn.Module):
     def __init__(
         self,
@@ -837,6 +889,28 @@ class GraphUnetResidualRLPolicy(nn.Module):
             # Without this, random initialization can cause large deltas that break base policy
             nn.init.zeros_(self.actor.mu.weight)
             nn.init.zeros_(self.actor.mu.bias)
+
+        # ============================================================
+        # Gripper Override Network
+        # ============================================================
+        self.gripper_history_len = 10
+        num_grippers = 2 if cfg.action_dim == 12 else 1
+        # Override net input: same actor obs + z_bar
+        gripper_override_obs_dim = get_obs_dim_for_mode(cfg.actor_obs_mode) + cfg.z_dim
+        self.gripper_override_net = GripperOverrideNet(
+            obs_dim=gripper_override_obs_dim,
+            gripper_history_len=self.gripper_history_len,
+            hidden=(64, 32),
+            act=cfg.activation,
+            num_grippers=num_grippers,
+        )
+        # Gripper history ring buffer: [num_envs, history_len, num_grippers]
+        # Lazy-initialized in act() when we know num_envs
+        self._gripper_history: Optional[torch.Tensor] = None
+        self._gripper_history_idx: int = 0
+        self._gripper_override_threshold: float = 0.5  # p >= 0.5 → override
+        self._gripper_exploration_boost: float = 0.3  # extra exploration when aligned
+        print(f"[GraphUnetResidualRLPolicy] GripperOverrideNet: obs_dim={gripper_override_obs_dim}, history_len={self.gripper_history_len}, grippers={num_grippers}")
 
     # -----------------------------
     # Normalization stats setter
@@ -1423,27 +1497,66 @@ class GraphUnetResidualRLPolicy(nn.Module):
         else:
             a_base = a_base_norm_full
 
+        # ============================================================
+        # Gripper history buffer: lazy init + update
+        # ============================================================
+        num_grippers = len(self.gripper_indices)
+        if self._gripper_history is None or self._gripper_history.shape[0] != B:
+            self._gripper_history = torch.zeros(
+                B, self.gripper_history_len, num_grippers,
+                device=obs.device, dtype=obs.dtype,
+            )
+            self._gripper_history_idx = 0
+        # Get current gripper joint positions from obs
+        s = self.cfg.obs_structure
+        if s is not None and "right_joint_pos" in s:
+            right_gripper = obs[:, s["right_joint_pos"][1] - 1:s["right_joint_pos"][1]]  # last joint
+            if "left_joint_pos" in s and num_grippers == 2:
+                left_gripper = obs[:, s["left_joint_pos"][1] - 1:s["left_joint_pos"][1]]
+                current_gripper_pos = torch.cat([left_gripper, right_gripper], dim=-1)  # [B, 2]
+            else:
+                current_gripper_pos = right_gripper  # [B, 1]
+        else:
+            current_gripper_pos = torch.zeros(B, num_grippers, device=obs.device)
+        # Update ring buffer
+        idx = self._gripper_history_idx % self.gripper_history_len
+        self._gripper_history[:B, idx, :] = current_gripper_pos
+        self._gripper_history_idx += 1
+        # Flatten history for override net input: [B, history_len * num_grippers]
+        gripper_hist_flat = self._gripper_history[:B].reshape(B, -1)
+
         # Early exit: critic warmup - use pure backbone (alpha=0), no residual
         if zero_residual:
             z_layers = self._get_z_layers_fast(obs)
             z_bar, _ = self.aggregate_latent(z_layers)
             obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
             if getattr(self.cfg, "use_counterfactual_q", False):
-                # Q(s,a) mode: a_total = a_base when zero_residual → Q(s,a_total) = Q(s,a_base)
                 v_bar = self.critic.forward_bar(z_bar, obs_critic, a_base_norm_full.detach())
-                q_base = v_bar  # Same action → A_res = 0 (correct for warmup)
+                q_base = v_bar
             else:
                 v_bar = self.critic.forward_bar(z_bar, obs_critic)
                 q_base = None
             delta = torch.zeros(B, act_dim, device=a_base.device, dtype=a_base.dtype)
             K = self.cfg.num_layers
             gate_w = torch.ones(B, K, device=z_bar.device, dtype=z_bar.dtype) / K
+
+            # Gripper override: compute for distill training, but DON'T override action
+            obs_actor_warmup = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
+            override_obs = torch.cat([obs_actor_warmup, z_bar], dim=-1)
+            a_base_gripper = a_base[:, self.gripper_indices]  # [B, num_grippers]
+            override_p = self.gripper_override_net(override_obs, gripper_hist_flat, a_base_gripper)
+            # Target: never override during warmup → target = 0
+            gripper_override_target = torch.zeros_like(override_p)
+
             info = {
                 "obs": obs, "obs_norm": obs_norm, "a_base": a_base, "a_base_norm": a_base_norm,
                 "delta": delta, "delta_norm": delta, "log_prob": torch.zeros(B, device=a_base.device),
                 "entropy": torch.zeros(B, device=a_base.device), "z_layers": z_layers, "z_bar": z_bar,
                 "gate_w": gate_w, "v_bar": v_bar, "alpha": torch.tensor(0.0, device=a_base.device),
                 "q_base": q_base,
+                "gripper_override_p": override_p.detach(),
+                "gripper_override_target": gripper_override_target,
+                "gripper_hist_flat": gripper_hist_flat.detach(),
             }
             if self.history_buffer is not None:
                 action_for_history = a_base_norm_full
@@ -1502,14 +1615,40 @@ class GraphUnetResidualRLPolicy(nn.Module):
         a = a_base + alpha_vec * delta  # [B, act_dim]
         alpha = alpha_mean  # for info
 
+        # ============================================================
+        # Gripper Override: decide whether to flip backbone's gripper
+        # ============================================================
+        a_base_gripper = a_base[:, self.gripper_indices]  # [B, num_grippers]
+        override_obs = torch.cat([obs_actor, z_bar], dim=-1)
+        override_p = self.gripper_override_net(override_obs, gripper_hist_flat, a_base_gripper)
+
+        # State-dependent exploration: boost override probability when cubes are aligned
+        # Use obs to estimate cube distance (approximate from obs structure)
+        if not deterministic:
+            s = self.cfg.obs_structure
+            if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
+                c1_pos = obs[:, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
+                c2_pos = obs[:, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
+                cube_dist = torch.norm(c1_pos[:, :2] - c2_pos[:, :2], dim=-1)  # XY distance
+                aligned = (cube_dist < 0.02).float().unsqueeze(-1)  # [B, 1]
+            else:
+                aligned = torch.zeros(B, 1, device=obs.device)
+            # Boost: when aligned, add exploration_boost to p
+            p_boosted = override_p + aligned * self._gripper_exploration_boost
+            p_boosted = torch.clamp(p_boosted, 0.0, 1.0)
+            # Sample from Bernoulli
+            override_action = torch.bernoulli(p_boosted)  # [B, num_grippers], 0 or 1
+        else:
+            override_action = (override_p >= self._gripper_override_threshold).float()
+
+        # Apply override: flip gripper action where override=1
+        for i, gi in enumerate(self.gripper_indices):
+            flip_mask = override_action[:, i].bool()
+            a[flip_mask, gi] = -a[flip_mask, gi]  # Flip: open↔close
+
         # 7. Update history buffer (AFTER computing action)
         if self.history_buffer is not None:
-            # Use normalized action for history (matches training data format)
-            # Graph-DiT outputs 5D, but history buffer expects 6D (with gripper)
-            # We need to pad with 0 for gripper, or use the final action 'a' which is 6D
-            # Actually, we should store the final action 'a' (6D) after normalization
-            # But for now, let's pad a_base_norm to 6D if needed
-            action_for_history = a_base_norm_full  # [B, action_dim] - full normalized action
+            action_for_history = a_base_norm_full
             self.history_buffer.update(
                 ee_node=ee_node,
                 obj_node=obj_node,
@@ -1517,9 +1656,13 @@ class GraphUnetResidualRLPolicy(nn.Module):
                 joint_states=joint_states,
             )
 
-        # Log prob / entropy over full 6D (Actor outputs 6D)
-        log_prob = dist.log_prob(delta_norm).sum(dim=-1)
-        entropy = dist.entropy().sum(dim=-1)
+        # Log prob: arm (continuous) + gripper override (Bernoulli)
+        log_prob_arm = dist.log_prob(delta_norm).sum(dim=-1)
+        log_prob_gripper = self.gripper_override_net.log_prob(
+            override_p if deterministic else p_boosted, override_action
+        )
+        log_prob = log_prob_arm + log_prob_gripper
+        entropy = dist.entropy().sum(dim=-1)  # Arm entropy only (Bernoulli entropy is implicit)
         # Critic: select obs based on critic_obs_mode
         obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
         if getattr(self.cfg, "use_counterfactual_q", False):
@@ -1551,6 +1694,9 @@ class GraphUnetResidualRLPolicy(nn.Module):
             "v_bar": v_bar,
             "q_base": q_base,  # Q(s, a_base) for counterfactual; None when V(s) mode
             "alpha": alpha.detach(),
+            "gripper_override_p": override_p.detach(),
+            "gripper_override_action": override_action.detach(),
+            "gripper_hist_flat": gripper_hist_flat.detach(),
         }
         return a, info
 
@@ -1624,10 +1770,41 @@ class GraphUnetResidualRLPolicy(nn.Module):
         else:
             delta_norm = delta
         delta_norm = torch.clamp(delta_norm, -1.0, 1.0)
-        log_prob = dist.log_prob(delta_norm).sum(dim=-1)
+        log_prob_arm = dist.log_prob(delta_norm).sum(dim=-1)
         entropy = dist.entropy().sum(dim=-1)
         loss_delta_reg = (delta_norm ** 2).mean()
         alpha = alpha_mean  # for return dict
+
+        # ============================================================
+        # Gripper Override: recompute log_prob for training
+        # ============================================================
+        a_base_gripper = a_base[:, self.gripper_indices]  # [B, num_grippers]
+        override_obs = torch.cat([obs_actor, z_bar_new], dim=-1)
+        gripper_hist_flat = batch.get("gripper_hist_flat")
+        if gripper_hist_flat is None:
+            # Fallback: zeros (should not happen if buffer is set up correctly)
+            num_grippers = len(self.gripper_indices)
+            gripper_hist_flat = torch.zeros(
+                B_loss, self.gripper_history_len * num_grippers, device=obs.device
+            )
+        override_p = self.gripper_override_net(override_obs, gripper_hist_flat, a_base_gripper)
+        # Get stored override actions from batch
+        override_action = batch.get("gripper_override_action")
+        if override_action is not None:
+            log_prob_gripper = self.gripper_override_net.log_prob(override_p, override_action)
+        else:
+            log_prob_gripper = torch.zeros(B_loss, device=obs.device)
+        # Combined log_prob: arm (continuous) + gripper (Bernoulli)
+        log_prob = log_prob_arm + log_prob_gripper
+
+        # Gripper override BCE loss (for warmup distillation)
+        gripper_override_target = batch.get("gripper_override_target")
+        if gripper_override_target is not None:
+            loss_gripper_distill = F.binary_cross_entropy(
+                override_p, gripper_override_target, reduction='mean'
+            )
+        else:
+            loss_gripper_distill = torch.tensor(0.0, device=obs.device)
 
         # AWR weights: use counterfactual advantage when Q(s,a) mode
         if getattr(self.cfg, "use_counterfactual_q", False) and "q_base" in batch:
@@ -1747,6 +1924,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             + loss_ent_dual          # SAC-style entropy dual variable
             + loss_delta_dual        # SAC-style delta_reg dual variable
             + loss_beta_dual         # SAC-style beta dual variable
+            + loss_gripper_distill   # Gripper override BCE distillation
         )
 
         # Report adaptive coefficients
@@ -1769,6 +1947,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             "c_ent": c_ent_val,
             "beta": beta_val_report,
             "eff_ratio": eff_ratio.detach(),
+            "loss_gripper_distill": loss_gripper_distill.detach(),
         }
     
     # -----------------------------
