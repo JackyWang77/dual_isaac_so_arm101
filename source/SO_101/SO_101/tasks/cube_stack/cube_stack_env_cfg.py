@@ -435,6 +435,7 @@ class CubeStackRLRewardsCfg:
         params={
             "target_z_offset": 0.012,
             "eps": 0.0005,
+            "activation_radius": 0.02,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
         },

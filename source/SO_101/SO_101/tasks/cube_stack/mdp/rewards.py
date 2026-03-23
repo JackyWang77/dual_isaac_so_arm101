@@ -255,6 +255,7 @@ def black_hole_attraction(
     env: ManagerBasedRLEnv,
     target_z_offset: float = 0.012,
     eps: float = 0.0005,
+    activation_radius: float = 0.02,
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
 ) -> torch.Tensor:
@@ -289,8 +290,11 @@ def black_hole_attraction(
     if not hasattr(env, '_prev_potential'):
         env._prev_potential = potential.clone()
 
-    # Reward = progress (Φ(s') - Φ(s))
-    reward = potential - env._prev_potential
+    # Only activate within activation_radius of target
+    active = (dist_3d < activation_radius).float()
+
+    # Reward = progress (Φ(s') - Φ(s)), gated by activation radius
+    reward = (potential - env._prev_potential) * active
 
     # Update buffer
     env._prev_potential = potential.clone()
