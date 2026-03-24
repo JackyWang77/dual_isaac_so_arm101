@@ -1947,7 +1947,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             "c_ent": c_ent_val,
             "beta": beta_val_report,
             "eff_ratio": eff_ratio.detach(),
-            "loss_gripper_distill": loss_gripper_distill.detach(),
+            "loss_gripper_distill": loss_gripper_distill,
         }
     
     # -----------------------------
