@@ -314,7 +314,7 @@ def black_hole_attraction(
 def gripper_open_reward(
     env: ManagerBasedRLEnv,
     xy_threshold: float = 0.006,
-    z_max: float = 0.014,
+    z_max: float = 0.02,
     gripper_open_thresh: float = 0.1,
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
