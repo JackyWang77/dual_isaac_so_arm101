@@ -207,10 +207,10 @@ def gripper_release_when_stacked(
 
 def stack_success_bonus(
     env: ManagerBasedRLEnv,
-    expected_height: float = 0.018,
+    expected_height: float = 0.012,
     eps_z: float = 0.005,
     eps_xy: float = 0.012,
-    gripper_open_thresh: float = -0.1,
+    gripper_open_thresh: float = 0.1,
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
@@ -345,7 +345,21 @@ def gripper_open_reward(
     aligned = (xy_dist < xy_threshold) & (z_diff > 0) & (z_diff < z_max)
 
     # Gripper binary: open or not
-    gripper_open = (right_arm.data.joint_pos[:, -1] > gripper_open_thresh)
+    gripper_pos = right_arm.data.joint_pos[:, -1]
+    gripper_open = (gripper_pos > gripper_open_thresh)
+
+    # Debug: print stats every 1000 steps
+    if not hasattr(env, '_gripper_dbg_cnt'):
+        env._gripper_dbg_cnt = 0
+    env._gripper_dbg_cnt += 1
+    if env._gripper_dbg_cnt % 1000 == 0:
+        # Stats for envs with z_diff > 0 (cube1 above cube2)
+        above = z_diff > 0
+        if above.any():
+            print(f"  [gripper_open_dbg] xy_min={xy_dist[above].min():.4f} z_diff_min={z_diff[above].min():.4f} "
+                  f"z_diff_max={z_diff[above].max():.4f} gripper_min={gripper_pos[above].min():.4f} "
+                  f"gripper_max={gripper_pos[above].max():.4f} aligned={aligned.sum().item()} "
+                  f"g_open={gripper_open.sum().item()}")
 
     # One-shot: fire once per episode
     fire_now = aligned & gripper_open & (~env._gripper_open_fired)
