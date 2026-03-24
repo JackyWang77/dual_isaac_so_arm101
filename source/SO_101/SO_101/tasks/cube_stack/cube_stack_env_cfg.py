@@ -428,11 +428,21 @@ class CubeStackRLRewardsCfg:
         weight=0.5,
     )
     # EE-to-cube distance: reward arm approaching cube
-    pick_reach = RewTerm(
+    pick_reach_cube1 = RewTerm(
         func=mdp.closer_arm_reaches_object,
         params={
             "std": 0.05,
             "object_cfg": SceneEntityCfg("cube_1"),
+            "ee_right_cfg": SceneEntityCfg("ee_right"),
+            "ee_left_cfg": SceneEntityCfg("ee_left"),
+        },
+        weight=1.0,
+    )
+    pick_reach_cube2 = RewTerm(
+        func=mdp.closer_arm_reaches_object,
+        params={
+            "std": 0.05,
+            "object_cfg": SceneEntityCfg("cube_2"),
             "ee_right_cfg": SceneEntityCfg("ee_right"),
             "ee_left_cfg": SceneEntityCfg("ee_left"),
         },
