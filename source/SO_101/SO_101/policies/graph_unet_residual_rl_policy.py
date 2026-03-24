@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple, Union, List
 
+import math
 import numpy as np
 import torch
 import torch.nn as nn
@@ -909,8 +910,11 @@ class GraphUnetResidualRLPolicy(nn.Module):
         self._gripper_history: Optional[torch.Tensor] = None
         self._gripper_history_idx: int = 0
         self._gripper_override_threshold: float = 0.5  # p >= 0.5 → override
-        self._gripper_exploration_boost: float = 0.1  # extra exploration when aligned
-        print(f"[GraphUnetResidualRLPolicy] GripperOverrideNet: obs_dim={gripper_override_obs_dim}, history_len={self.gripper_history_len}, grippers={num_grippers}")
+        # Adaptive gripper exploration: SAC-style dual variable
+        # log_boost is learnable; H_target = 0.15 (corresponds to ~5% override rate)
+        self.log_gripper_boost = nn.Parameter(torch.tensor(math.log(0.1)))  # init boost=0.1
+        self._gripper_H_target: float = 0.15  # target Bernoulli entropy
+        print(f"[GraphUnetResidualRLPolicy] GripperOverrideNet: obs_dim={gripper_override_obs_dim}, history_len={self.gripper_history_len}, grippers={num_grippers}, H_target={self._gripper_H_target}")
 
     # -----------------------------
     # Normalization stats setter
@@ -1633,9 +1637,10 @@ class GraphUnetResidualRLPolicy(nn.Module):
                 aligned = (cube_dist < 0.02).float().unsqueeze(-1)  # [B, 1]
             else:
                 aligned = torch.zeros(B, 1, device=obs.device)
-            # Boost: when aligned, add exploration_boost to p
-            p_boosted = override_p + aligned * self._gripper_exploration_boost
-            p_boosted = torch.clamp(p_boosted, 0.0, 1.0)
+            # Adaptive boost: learnable exploration magnitude
+            boost = self.log_gripper_boost.exp()
+            p_boosted = override_p + aligned * boost
+            p_boosted = torch.clamp(p_boosted, 1e-6, 1.0 - 1e-6)
             # Sample from Bernoulli
             override_action = torch.bernoulli(p_boosted)  # [B, num_grippers], 0 or 1
         else:
@@ -1914,6 +1919,21 @@ class GraphUnetResidualRLPolicy(nn.Module):
         else:
             loss_beta_dual = torch.tensor(0.0, device=obs.device)
 
+        # ===== Gripper boost dual variable =====
+        # SAC-style: adaptive exploration boost for gripper override
+        # Compute Bernoulli entropy of p_boosted (only for aligned states if available)
+        if override_p is not None and self.log_gripper_boost is not None:
+            boost = self.log_gripper_boost.exp()
+            # Approximate p_boosted (we don't have aligned info here, use override_p + boost as proxy)
+            p_for_ent = torch.clamp(override_p + boost, 1e-6, 1.0 - 1e-6)
+            H_gripper = -(p_for_ent * torch.log(p_for_ent) + (1 - p_for_ent) * torch.log(1 - p_for_ent))
+            H_gripper_mean = H_gripper.mean()
+            # Dual: H < target → increase boost; H > target → decrease boost
+            loss_gripper_boost_dual = self.log_gripper_boost.exp() * (H_gripper_mean.detach() - self._gripper_H_target)
+        else:
+            loss_gripper_boost_dual = torch.tensor(0.0, device=obs.device)
+            H_gripper_mean = torch.tensor(0.0, device=obs.device)
+
         # Total
         loss_total = (
             loss_actor
@@ -1925,6 +1945,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             + loss_delta_dual        # SAC-style delta_reg dual variable
             + loss_beta_dual         # SAC-style beta dual variable
             + loss_gripper_distill   # Gripper override BCE distillation
+            + loss_gripper_boost_dual  # SAC-style gripper exploration dual
         )
 
         # Report adaptive coefficients
@@ -1948,6 +1969,8 @@ class GraphUnetResidualRLPolicy(nn.Module):
             "beta": beta_val_report,
             "eff_ratio": eff_ratio.detach(),
             "loss_gripper_distill": loss_gripper_distill,
+            "gripper_boost": self.log_gripper_boost.exp().detach() if self.log_gripper_boost is not None else torch.tensor(0.0),
+            "gripper_H": H_gripper_mean.detach(),
         }
     
     # -----------------------------

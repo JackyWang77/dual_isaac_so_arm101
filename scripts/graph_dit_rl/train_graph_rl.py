@@ -1264,7 +1264,7 @@ class GraphDiTRLTrainer:
             f"Δ={delta:.3f} | "
             f"α={alpha:.2f} β={beta_v:.3f} | "
             f"cΔ={c_dreg:.1f} cH={c_ent_v:.4f} eff={eff_r:.2f} | "
-            f"L={loss:.3f} gD={update_stats.get('gripper_distill', 0):.4f}"
+            f"L={loss:.3f} gD={update_stats.get('gripper_distill', 0):.4f} gB={update_stats.get('gripper_boost', 0.1):.3f} gH={update_stats.get('gripper_H', 0):.3f}"
         )
 
     def _save_best(self, iteration: int):
