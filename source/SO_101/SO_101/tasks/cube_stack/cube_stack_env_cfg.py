@@ -449,7 +449,7 @@ class CubeStackRLRewardsCfg:
         weight=1.0,
     )
 
-    # === Stack phase: black hole attraction ===
+    # === Stack phase: black hole attraction (ratio: 5) ===
     black_hole = RewTerm(
         func=mdp.black_hole_attraction,
         params={
@@ -459,21 +459,36 @@ class CubeStackRLRewardsCfg:
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
         },
-        weight=20.0,
+        weight=10.0,
     )
 
-    # === Gripper reward: dense opening when aligned ===
+    # === Gripper open: one-shot when aligned+open (ratio: 2.5) ===
     gripper_open = RewTerm(
         func=mdp.gripper_open_reward,
         params={
-            "xy_threshold": 0.02,
-            "z_min": 0.005,
-            "jaw_max": 0.4,
+            "xy_threshold": 0.006,
+            "z_max": 0.014,
+            "gripper_open_thresh": 0.1,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
-        weight=50.0,
+        weight=125.0,  # 2.5 / dt(0.02) = 125
+    )
+
+    # === Success bonus: one-shot (ratio: 10) ===
+    success_bonus = RewTerm(
+        func=mdp.stack_success_bonus,
+        params={
+            "expected_height": 0.012,
+            "eps_z": 0.003,
+            "eps_xy": 0.006,
+            "gripper_open_thresh": 0.1,
+            "cube_1_cfg": SceneEntityCfg("cube_1"),
+            "cube_2_cfg": SceneEntityCfg("cube_2"),
+            "right_arm_cfg": SceneEntityCfg("right_arm"),
+        },
+        weight=500.0,  # 10 / dt(0.02) = 500
     )
 
     # Smooth control penalties

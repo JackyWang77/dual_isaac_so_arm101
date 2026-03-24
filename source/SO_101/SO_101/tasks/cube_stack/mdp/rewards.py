@@ -309,33 +309,46 @@ def black_hole_attraction(
 
 def gripper_open_reward(
     env: ManagerBasedRLEnv,
-    xy_threshold: float = 0.02,
-    z_min: float = 0.005,
-    jaw_max: float = 0.4,
+    xy_threshold: float = 0.006,
+    z_max: float = 0.014,
+    gripper_open_thresh: float = 0.1,
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
 ) -> torch.Tensor:
-    """Dense reward for RIGHT gripper opening when cubes are aligned.
+    """One-shot reward for gripper opening when cubes are aligned and close to stacked.
 
-    Gate: cube1 above cube2 (z_diff > z_min) AND xy close (< xy_threshold).
-    Reward: normalized gripper opening degree [0, 1].
-    Trains GripperOverrideNet to learn correct release timing.
+    Gate: xy_dist < 6mm AND z_diff < 14mm (cube nearly placed).
+    Binary: gripper open or not. One-shot (fires once per episode).
+    Earlier opening → more cumulative reward (but practically 1 step before reset).
     """
     c1: RigidObject = env.scene[cube_1_cfg.name]
     c2: RigidObject = env.scene[cube_2_cfg.name]
     right_arm = env.scene[right_arm_cfg.name]
 
+    num_envs = env.num_envs
+    device = c1.data.root_pos_w.device
+
+    if not hasattr(env, '_gripper_open_fired'):
+        env._gripper_open_fired = torch.zeros(num_envs, dtype=torch.bool, device=device)
+
     p1 = c1.data.root_pos_w[:, :3]
     p2 = c2.data.root_pos_w[:, :3]
 
-    # Alignment gate
+    # Alignment gate: xy close AND z close (nearly stacked)
     xy_dist = torch.norm(p1[:, :2] - p2[:, :2], dim=1)
     z_diff = p1[:, 2] - p2[:, 2]
-    aligned = ((xy_dist < xy_threshold) & (z_diff > z_min)).float()
+    aligned = (xy_dist < xy_threshold) & (z_diff > 0) & (z_diff < z_max)
 
-    # Gripper opening: joint_pos[-1] range [0.0002, 0.4], higher = more open
-    gripper_pos = right_arm.data.joint_pos[:, -1]
-    gripper_open_norm = torch.clamp(gripper_pos / jaw_max, 0.0, 1.0)
+    # Gripper binary: open or not
+    gripper_open = (right_arm.data.joint_pos[:, -1] > gripper_open_thresh)
 
-    return aligned * gripper_open_norm
+    # One-shot: fire once per episode
+    fire_now = aligned & gripper_open & (~env._gripper_open_fired)
+    env._gripper_open_fired = env._gripper_open_fired | (aligned & gripper_open)
+
+    # Reset on new episode
+    new_episode = (env.episode_length_buf <= 1)
+    env._gripper_open_fired[new_episode] = False
+
+    return fire_now.float()
