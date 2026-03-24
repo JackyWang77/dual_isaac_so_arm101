@@ -72,8 +72,8 @@ parser.add_argument("--use_adaptive_delta_reg", action="store_true", default=Tru
     help="SAC-style learnable delta_reg: auto-adjusts to keep ||δ|| near target (default: True)")
 parser.add_argument("--no_adaptive_delta_reg", action="store_false", dest="use_adaptive_delta_reg",
     help="Use fixed c_delta_reg instead of adaptive")
-parser.add_argument("--target_delta_norm", type=float, default=0.15,
-    help="Target ||δ|| for adaptive delta_reg (default: 0.15)")
+parser.add_argument("--target_delta_norm", type=float, default=0.05,
+    help="Target ||δ|| for adaptive delta_reg (default: 0.05)")
 parser.add_argument("--c_delta_reg_init", type=float, default=5.0,
     help="Initial c_delta_reg for adaptive mode (log-space learnable)")
 parser.add_argument("--use_auto_entropy", action="store_true", default=True,
