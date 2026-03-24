@@ -236,8 +236,10 @@ def stack_success_bonus(
     z_diff_2on1 = p2[:, 2] - p1[:, 2]
     xy_dist = torch.norm(p1[:, :2] - p2[:, :2], dim=1)
 
-    ok_1on2 = (torch.abs(z_diff_1on2 - expected_height) < eps_z) & (xy_dist < eps_xy)
-    ok_2on1 = (torch.abs(z_diff_2on1 - expected_height) < eps_z) & (xy_dist < eps_xy)
+    # Only upper bound on z_diff: 0 is perfect, just needs to be < max_z
+    max_z = expected_height + eps_z
+    ok_1on2 = (z_diff_1on2 >= 0) & (z_diff_1on2 < max_z) & (xy_dist < eps_xy)
+    ok_2on1 = (z_diff_2on1 >= 0) & (z_diff_2on1 < max_z) & (xy_dist < eps_xy)
     stacked = ok_1on2 | ok_2on1
 
     right_open = (right_arm.data.joint_pos[:, -1] > gripper_open_thresh)
