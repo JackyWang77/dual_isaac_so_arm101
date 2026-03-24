@@ -469,7 +469,7 @@ class CubeStackRLRewardsCfg:
         func=mdp.gripper_open_reward,
         params={
             "xy_threshold": 0.006,
-            "z_max": 0.014,
+            "z_max": 0.02,
             "gripper_open_thresh": 0.1,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
