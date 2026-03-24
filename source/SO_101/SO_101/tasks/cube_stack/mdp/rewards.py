@@ -348,21 +348,29 @@ def gripper_open_reward(
     gripper_pos = right_arm.data.joint_pos[:, -1]
     gripper_open = (gripper_pos > gripper_open_thresh)
 
-    # Debug: print stats every 1000 steps
+    # Debug: cumulative stats
     if not hasattr(env, '_gripper_dbg_cnt'):
         env._gripper_dbg_cnt = 0
+        env._aligned_total = 0
+        env._fire_total = 0
+        env._xy_min_when_above = 999.0
+        env._zdiff_min_when_xy_close = 999.0
     env._gripper_dbg_cnt += 1
-    if env._gripper_dbg_cnt % 100 == 0:
-        # Stats for envs with z_diff > 0 (cube1 above cube2)
-        above = z_diff > 0
-        if above.any():
-            print(f"  [gripper_open_dbg] xy_min={xy_dist[above].min():.4f} z_diff_min={z_diff[above].min():.4f} "
-                  f"z_diff_max={z_diff[above].max():.4f} gripper_min={gripper_pos[above].min():.4f} "
-                  f"gripper_max={gripper_pos[above].max():.4f} aligned={aligned.sum().item()} "
-                  f"g_open={gripper_open.sum().item()}")
+    env._aligned_total += aligned.sum().item()
+    above = z_diff > 0
+    if above.any():
+        env._xy_min_when_above = min(env._xy_min_when_above, xy_dist[above].min().item())
+        xy_close = (xy_dist < xy_threshold) & above
+        if xy_close.any():
+            env._zdiff_min_when_xy_close = min(env._zdiff_min_when_xy_close, z_diff[xy_close].min().item())
+    if env._gripper_dbg_cnt % 300 == 0:
+        print(f"  [gripper_dbg] steps={env._gripper_dbg_cnt} aligned_total={env._aligned_total} "
+              f"fire_total={env._fire_total} xy_min_above={env._xy_min_when_above:.4f} "
+              f"zdiff_when_xy_close={env._zdiff_min_when_xy_close:.4f}")
 
     # One-shot: fire once per episode
     fire_now = aligned & gripper_open & (~env._gripper_open_fired)
+    env._fire_total += fire_now.sum().item()
     env._gripper_open_fired = env._gripper_open_fired | (aligned & gripper_open)
 
     # Reset on new episode
