@@ -342,7 +342,7 @@ def gripper_open_reward(
     # Alignment gate: xy close AND z close (nearly stacked)
     xy_dist = torch.norm(p1[:, :2] - p2[:, :2], dim=1)
     z_diff = p1[:, 2] - p2[:, 2]
-    aligned = (xy_dist < xy_threshold) & (z_diff > 0) & (z_diff < z_max)
+    aligned = (xy_dist < xy_threshold) & (z_diff < z_max)
 
     # Gripper binary: open or not
     gripper_pos = right_arm.data.joint_pos[:, -1]
