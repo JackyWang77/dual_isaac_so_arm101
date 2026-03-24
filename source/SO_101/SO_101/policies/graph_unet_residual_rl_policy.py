@@ -911,9 +911,9 @@ class GraphUnetResidualRLPolicy(nn.Module):
         self._gripper_history_idx: int = 0
         self._gripper_override_threshold: float = 0.5  # p >= 0.5 → override
         # Adaptive gripper exploration: SAC-style dual variable
-        # log_boost is learnable; H_target = 0.15 (corresponds to ~5% override rate)
-        self.log_gripper_boost = nn.Parameter(torch.tensor(math.log(0.1)))  # init boost=0.1
-        self._gripper_H_target: float = 0.15  # target Bernoulli entropy
+        # log_boost is learnable; H_target = 0.056 (corresponds to ~1% override rate)
+        self.log_gripper_boost = nn.Parameter(torch.tensor(math.log(0.01)))  # init boost=0.01
+        self._gripper_H_target: float = 0.056  # target Bernoulli entropy
         print(f"[GraphUnetResidualRLPolicy] GripperOverrideNet: obs_dim={gripper_override_obs_dim}, history_len={self.gripper_history_len}, grippers={num_grippers}, H_target={self._gripper_H_target}")
 
     # -----------------------------
