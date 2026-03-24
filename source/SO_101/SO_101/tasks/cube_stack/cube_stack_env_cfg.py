@@ -477,17 +477,17 @@ class CubeStackRLRewardsCfg:
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
-        weight=500000.0,  # 10000 / dt(0.02) = 500000
+        weight=5000.0,  # 100 / dt(0.02) = 5000 → display ~100
     )
 
-    # === Time penalty: faster = better ===
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1.0)
+    # Smooth control penalties
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-4)
     joint_vel_right = RewTerm(
-        func=mdp.joint_vel_l2, weight=-1.0,
+        func=mdp.joint_vel_l2, weight=-1e-4,
         params={"asset_cfg": SceneEntityCfg("right_arm")},
     )
     joint_vel_left = RewTerm(
-        func=mdp.joint_vel_l2, weight=-1.0,
+        func=mdp.joint_vel_l2, weight=-1e-4,
         params={"asset_cfg": SceneEntityCfg("left_arm")},
     )
 
