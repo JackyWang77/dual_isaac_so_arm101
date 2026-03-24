@@ -409,14 +409,16 @@ class CubeStackEnvCfg(ManagerBasedRLEnvCfg):
 # =========================================================
 @configclass
 class CubeStackRLRewardsCfg:
-    """Rewards for residual RL with GripperOverrideNet.
+    """Success-driven rewards for residual RL.
 
-    - Pick: EE-cube distance (helps RL not disrupt pick)
-    - Stack: inverse-distance potential black hole (positioning)
-    - Gripper: dense opening reward when aligned (trains override net)
+    Core philosophy: reward OUTCOME not PROCESS.
+    - success_bonus dominates (10000) → only thing that matters
+    - black_hole is tiny (weight=1) → weak alignment hint, unhackable
+    - time_penalty → faster success = more reward
+    - No gripper reward → success already requires gripper open
     """
 
-    # === Pick phase rewards ===
+    # === Tiny shaping (won't dominate, just helps critic) ===
     cube1_is_lifted = RewTerm(
         func=mdp.object_is_lifted,
         params={"minimal_height": 0.03, "object_cfg": SceneEntityCfg("cube_1")},
@@ -427,7 +429,6 @@ class CubeStackRLRewardsCfg:
         params={"minimal_height": 0.03, "object_cfg": SceneEntityCfg("cube_2")},
         weight=0.5,
     )
-    # EE-to-cube distance: reward arm approaching cube
     pick_reach_cube1 = RewTerm(
         func=mdp.closer_arm_reaches_object,
         params={
@@ -449,7 +450,7 @@ class CubeStackRLRewardsCfg:
         weight=1.0,
     )
 
-    # === Stack phase: black hole attraction (ratio: 5) ===
+    # === Weak black hole (just a hint, can't be hacked) ===
     black_hole = RewTerm(
         func=mdp.black_hole_attraction,
         params={
@@ -461,24 +462,10 @@ class CubeStackRLRewardsCfg:
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
-        weight=10.0,
+        weight=1.0,
     )
 
-    # === Gripper open: one-shot when aligned+open (ratio: 2.5) ===
-    gripper_open = RewTerm(
-        func=mdp.gripper_open_reward,
-        params={
-            "xy_threshold": 0.006,
-            "z_max": 0.02,
-            "gripper_open_thresh": 0.1,
-            "cube_1_cfg": SceneEntityCfg("cube_1"),
-            "cube_2_cfg": SceneEntityCfg("cube_2"),
-            "right_arm_cfg": SceneEntityCfg("right_arm"),
-        },
-        weight=500.0,  # 10 / dt(0.02) = 500 → display ~10
-    )
-
-    # === Success bonus: one-shot ===
+    # === THE reward: success bonus (dominates everything) ===
     success_bonus = RewTerm(
         func=mdp.stack_success_bonus,
         params={
@@ -490,17 +477,17 @@ class CubeStackRLRewardsCfg:
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
-        weight=2000.0,  # 40 / dt(0.02) = 2000 → display ~40
+        weight=500000.0,  # 10000 / dt(0.02) = 500000
     )
 
-    # Smooth control penalties
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1e-4)
+    # === Time penalty: faster = better ===
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-1.0)
     joint_vel_right = RewTerm(
-        func=mdp.joint_vel_l2, weight=-1e-4,
+        func=mdp.joint_vel_l2, weight=-1.0,
         params={"asset_cfg": SceneEntityCfg("right_arm")},
     )
     joint_vel_left = RewTerm(
-        func=mdp.joint_vel_l2, weight=-1e-4,
+        func=mdp.joint_vel_l2, weight=-1.0,
         params={"asset_cfg": SceneEntityCfg("left_arm")},
     )
 
