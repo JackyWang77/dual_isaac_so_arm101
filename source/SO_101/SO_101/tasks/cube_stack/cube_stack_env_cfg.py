@@ -475,10 +475,10 @@ class CubeStackRLRewardsCfg:
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
-        weight=125.0,  # 2.5 / dt(0.02) = 125
+        weight=500.0,  # 10 / dt(0.02) = 500 → display ~10
     )
 
-    # === Success bonus: one-shot (ratio: 10) ===
+    # === Success bonus: one-shot ===
     success_bonus = RewTerm(
         func=mdp.stack_success_bonus,
         params={
@@ -490,7 +490,7 @@ class CubeStackRLRewardsCfg:
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
-        weight=500.0,  # 10 / dt(0.02) = 500
+        weight=2000.0,  # 40 / dt(0.02) = 2000 → display ~40
     )
 
     # Smooth control penalties
