@@ -352,7 +352,7 @@ def gripper_open_reward(
     if not hasattr(env, '_gripper_dbg_cnt'):
         env._gripper_dbg_cnt = 0
     env._gripper_dbg_cnt += 1
-    if env._gripper_dbg_cnt % 1000 == 0:
+    if env._gripper_dbg_cnt % 100 == 0:
         # Stats for envs with z_diff > 0 (cube1 above cube2)
         above = z_diff > 0
         if above.any():
