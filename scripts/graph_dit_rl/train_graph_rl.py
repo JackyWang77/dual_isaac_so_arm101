@@ -824,7 +824,7 @@ class GraphDiTRLTrainer:
             mean_per_term = stacked.mean(dim=0)
             parts = []
             for name, val in zip(_reward_term_names, mean_per_term):
-                parts.append(f"{name}={val.item():.1f}")
+                parts.append(f"{name}={val.item():.2f}")
             print(f"  [Rew breakdown] {' | '.join(parts)}")
 
         stats = {}
