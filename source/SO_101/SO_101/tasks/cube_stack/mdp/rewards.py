@@ -370,6 +370,8 @@ def gripper_open_reward(
 
     # One-shot: fire once per episode
     fire_now = aligned & gripper_open & (~env._gripper_open_fired)
+    if fire_now.any():
+        print(f"  [FIRE!] count={fire_now.sum().item()} step={env.episode_length_buf[fire_now].tolist()[:3]}")
     env._fire_total += fire_now.sum().item()
     env._gripper_open_fired = env._gripper_open_fired | (aligned & gripper_open)
 
