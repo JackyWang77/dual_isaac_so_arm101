@@ -483,8 +483,8 @@ class CubeStackRLRewardsCfg:
         func=mdp.stack_success_bonus,
         params={
             "expected_height": 0.012,
-            "eps_z": 0.003,
-            "eps_xy": 0.006,
+            "eps_z": 0.008,
+            "eps_xy": 0.01,
             "gripper_open_thresh": 0.1,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
