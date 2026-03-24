@@ -456,8 +456,10 @@ class CubeStackRLRewardsCfg:
             "target_z_offset": 0.012,
             "eps": 0.0005,
             "activation_radius": 0.02,
+            "gripper_closed_thresh": 0.1,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
+            "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
         weight=10.0,
     )

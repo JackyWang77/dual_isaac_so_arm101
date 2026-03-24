@@ -256,8 +256,10 @@ def black_hole_attraction(
     target_z_offset: float = 0.012,
     eps: float = 0.0005,
     activation_radius: float = 0.02,
+    gripper_closed_thresh: float = 0.1,
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
+    right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
 ) -> torch.Tensor:
     """Potential-based inverse-distance black-hole reward: Φ(s') - Φ(s).
 
@@ -266,12 +268,13 @@ def black_hole_attraction(
     - Moving closer → reward > 0, exponentially increasing
     - Last mm worth 10x more than 3mm→2mm (real black hole)
     - eps prevents division by zero
+    - Gripper must be closed: stops after release to avoid penalizing cube drift
 
     Target = (cube2_x, cube2_y, cube2_z + target_z_offset).
-    No gripper gate — backbone auto-opens when close enough.
     """
     c1: RigidObject = env.scene[cube_1_cfg.name]
     c2: RigidObject = env.scene[cube_2_cfg.name]
+    right_arm = env.scene[right_arm_cfg.name]
 
     p1 = c1.data.root_pos_w[:, :3]
     p2 = c2.data.root_pos_w[:, :3]
@@ -290,11 +293,12 @@ def black_hole_attraction(
     if not hasattr(env, '_prev_potential'):
         env._prev_potential = potential.clone()
 
-    # Only activate within activation_radius of target
+    # Only activate within activation_radius AND gripper closed
     active = (dist_3d < activation_radius).float()
+    gripper_closed = (right_arm.data.joint_pos[:, -1] < gripper_closed_thresh).float()
 
-    # Reward = progress (Φ(s') - Φ(s)), gated by activation radius
-    reward = (potential - env._prev_potential) * active
+    # Reward = progress (Φ(s') - Φ(s)), gated by radius + gripper
+    reward = (potential - env._prev_potential) * active * gripper_closed
 
     # Update buffer
     env._prev_potential = potential.clone()
