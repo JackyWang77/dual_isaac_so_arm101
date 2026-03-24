@@ -477,7 +477,7 @@ class CubeStackRLRewardsCfg:
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
-        weight=5000.0,  # 100 / dt(0.02) = 5000 → display ~100
+        weight=25000.0,  # display ~40, 5-6x larger than black_hole
     )
 
     # Smooth control penalties
