@@ -909,7 +909,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
         self._gripper_history: Optional[torch.Tensor] = None
         self._gripper_history_idx: int = 0
         self._gripper_override_threshold: float = 0.5  # p >= 0.5 → override
-        self._gripper_exploration_boost: float = 0.3  # extra exploration when aligned
+        self._gripper_exploration_boost: float = 0.1  # extra exploration when aligned
         print(f"[GraphUnetResidualRLPolicy] GripperOverrideNet: obs_dim={gripper_override_obs_dim}, history_len={self.gripper_history_len}, grippers={num_grippers}")
 
     # -----------------------------
