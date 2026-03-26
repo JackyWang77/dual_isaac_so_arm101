@@ -868,17 +868,42 @@ class GraphDiTRLTrainer:
                         is_success = self._check_success_from_info(env_info, i, obs_before_step=obs)
                         n_terminated += 1
 
-                    # Debug: log first 30 episode outcomes
+                    # Debug: log first 50 episode outcomes with full diagnostics
                     if not hasattr(self, "_ep_debug_count"):
                         self._ep_debug_count = 0
-                    if self._ep_debug_count < 30:
+                    if self._ep_debug_count < 50:
                         self._ep_debug_count += 1
                         led = self._term_mgr._last_episode_dones
                         fired = [self._term_names[j] for j in range(len(self._term_names))
                                  if bool(led[i, j].item())]
-                        print(f"  [EP] env={i} terminated={is_terminated} truncated={is_truncated} "
-                              f"success={is_success} fired={fired} "
-                              f"len={ep_lengths[i].item():.0f} rew={ep_rewards[i].item():.1f}")
+                        # Diagnose WHY success didn't fire using PRE-STEP obs (terminal state)
+                        # NOTE: post-step scene data is RESET state, useless. Use obs (pre-step).
+                        _diag = ""
+                        try:
+                            s = getattr(self.cfg, "obs_structure", None)
+                            if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
+                                c1 = obs[i, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
+                                c2 = obs[i, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
+                                z_diff_ab = (c1[2] - c2[2]).item()
+                                z_diff_ba = (c2[2] - c1[2]).item()
+                                xy_dist = torch.norm(c1[:2] - c2[:2]).item()
+                                z_ok = abs(z_diff_ab - 0.012) < 0.003 or abs(z_diff_ba - 0.012) < 0.003
+                                xy_ok = xy_dist < 0.006
+                                _diag = (f" | z_diff={z_diff_ab*1000:.1f}mm xy={xy_dist*1000:.1f}mm "
+                                         f"[z={'OK' if z_ok else 'FAIL'} xy={'OK' if xy_ok else 'FAIL'}]")
+                            # Gripper: read from obs if available, else from scene (post-reset, less useful)
+                            if s is not None and "right_joint_pos" in s:
+                                rj = obs[i, s["right_joint_pos"][0]:s["right_joint_pos"][1]]
+                                lj = obs[i, s["left_joint_pos"][0]:s["left_joint_pos"][1]]
+                                r_grip = rj[-1].item()  # last joint = gripper
+                                l_grip = lj[-1].item()
+                                grip_ok = r_grip > 0.1 and l_grip > 0.1
+                                _diag += f" R_grip={r_grip:.3f} L_grip={l_grip:.3f} [grip={'OK' if grip_ok else 'FAIL'}]"
+                        except Exception as e:
+                            _diag = f" | diag_err={e}"
+                        print(f"  [EP] env={i} T={is_terminated} Tr={is_truncated} "
+                              f"S={is_success} fired={fired} "
+                              f"len={ep_lengths[i].item():.0f} rew={ep_rewards[i].item():.1f}{_diag}")
                     if is_success:
                         n_success += 1
                     rollout_successes.append(float(is_success))
