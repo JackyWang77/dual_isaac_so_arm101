@@ -218,26 +218,23 @@ def stack_success_bonus(
     expected_height: float = 0.018,
     eps_z: float = 0.003,
     eps_xy: float = 0.009,
-    gripper_open_thresh: float = 0.1,
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
-    right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
+    gripper_open_thresh: float = 0.1,  # kept for config compat, not used
+    right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),  # kept for config compat, not used
 ) -> torch.Tensor:
-    """Large one-time bonus when stack success + right gripper open.
+    """Large one-time bonus when cubes are stacked (no gripper check).
 
-    Only checks right arm (which places cube_1).
+    RL cannot control gripper (alpha_vec=0), so gripper gate is removed.
     """
     c1: RigidObject = env.scene[cube_1_cfg.name]
     c2: RigidObject = env.scene[cube_2_cfg.name]
-    right_arm = env.scene[right_arm_cfg.name]
 
     num_envs = env.num_envs
     device = c1.data.root_pos_w.device
 
     if not hasattr(env, '_success_fired'):
         env._success_fired = torch.zeros(num_envs, dtype=torch.bool, device=device)
-    if not hasattr(env, '_success_bonus_debug_count'):
-        env._success_bonus_debug_count = 0
 
     p1 = c1.data.root_pos_w[:, :3]
     p2 = c2.data.root_pos_w[:, :3]
@@ -250,23 +247,10 @@ def stack_success_bonus(
     ok_2on1 = (torch.abs(z_diff_2on1 - expected_height) < eps_z) & (xy_dist < eps_xy)
     stacked = ok_1on2 | ok_2on1
 
-    jaw_pos = right_arm.data.joint_pos[:, -1]
-    right_open = (jaw_pos > gripper_open_thresh)
-
-    success_now = stacked & right_open & (~env._success_fired)
-    env._success_fired = env._success_fired | (stacked & right_open)
+    success_now = stacked & (~env._success_fired)
+    env._success_fired = env._success_fired | stacked
 
     new_episode = (env.episode_length_buf <= 1)
     env._success_fired[new_episode] = False
-
-    # Debug: print only first 5 times when stacked but no bonus (diagnose gripper issue)
-    n_stacked = stacked.sum().item()
-    n_bonus = success_now.sum().item()
-    if n_stacked > 0 and n_bonus == 0 and env._success_bonus_debug_count < 5:
-        env._success_bonus_debug_count += 1
-        sample_idx = stacked.nonzero(as_tuple=False)[0].item()
-        print(f"  [SUCCESS_BONUS] stacked={n_stacked} but bonus=0! "
-              f"sample env={sample_idx}: jaw={jaw_pos[sample_idx].item():.3f}(need>{gripper_open_thresh}) "
-              f"already_fired={env._success_fired[sample_idx].item()}")
 
     return success_now.float()
