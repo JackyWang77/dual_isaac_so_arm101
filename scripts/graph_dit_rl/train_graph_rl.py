@@ -372,6 +372,24 @@ class GraphDiTRLTrainer:
         self.best_sr_require_consistent = best_sr_require_consistent
         self.critic_warmup_iters = critic_warmup_iters
 
+        # Success detection: set up termination manager refs ONCE (matching play.py)
+        self._term_mgr = _base.termination_manager
+        self._term_names = list(self._term_mgr._term_names)
+        self._success_term_idx = None
+        for _sname in ("success", "stack_success"):
+            if _sname in self._term_names:
+                self._success_term_idx = self._term_names.index(_sname)
+                break
+        self._drop_term_indices = []
+        for _dname in ("object_dropping", "cube_1_dropping", "cube_2_dropping",
+                        "fork_dropping", "knife_dropping"):
+            if _dname in self._term_names:
+                self._drop_term_indices.append(self._term_names.index(_dname))
+        print(f"[Trainer] Termination terms: {self._term_names}")
+        print(f"[Trainer] Success term idx: {self._success_term_idx} "
+              f"({self._term_names[self._success_term_idx] if self._success_term_idx is not None else 'NONE'})")
+        print(f"[Trainer] Drop term indices: {[(i, self._term_names[i]) for i in self._drop_term_indices]}")
+
         # Expert Intervention (Jacobian correction + DAgger)
         self.use_expert_intervention = getattr(cfg, 'use_expert_intervention', False)
         self.expert_ratio = getattr(cfg, 'expert_intervention_ratio', 1.0)
@@ -528,48 +546,44 @@ class GraphDiTRLTrainer:
 
         return expert_delta, intervene_mask
 
-    def _check_success_from_info(self, env_info, env_idx: int, obs_before_step: torch.Tensor = None) -> bool:
-        """Check success with multi-level fallback (matching play.py).
-        
-        Level 1: termination_manager._last_episode_dones (per-env signal)
-        Level 2: position-based check using env's DoneTerm thresholds (eps_z=0.003, eps_xy=0.009)
+    def _get_success_flags(self) -> torch.Tensor | None:
+        """Per-env success flags from termination manager's _last_episode_dones.
+
+        Exact same logic as play.py _get_success_flags() — vectorized, no try/except.
+        Returns bool tensor [num_envs] or None if no success term exists.
         """
-        # Level 1: termination manager signal (same as play.py _get_success_flags)
-        try:
-            base = self.env.unwrapped if hasattr(self.env, "unwrapped") else self.env
-            tm = base.termination_manager
-            names = list(tm._term_names)
-            led = tm._last_episode_dones
-            success_found = False
-            for sname in ("success", "stack_success"):
-                if sname in names:
-                    idx = names.index(sname)
-                    if bool(led[env_idx, idx].item()):
-                        success_found = True
-                        break
-            if success_found:
-                # Also check no dropping (matching play.py)
-                for dname in ("cube_1_dropping", "cube_2_dropping", "object_dropping",
-                              "fork_dropping", "knife_dropping"):
-                    if dname in names:
-                        didx = names.index(dname)
-                        if bool(led[env_idx, didx].item()):
-                            success_found = False
-                            break
-            if success_found:
+        if self._success_term_idx is None:
+            return None
+        led = self._term_mgr._last_episode_dones  # [num_envs, num_terms]
+        success_mask = led[:, self._success_term_idx].bool()
+        for di in self._drop_term_indices:
+            drop_mask = led[:, di].bool()
+            success_mask = success_mask & (~drop_mask)
+        return success_mask
+
+    def _check_success_from_info(self, env_info, env_idx: int, obs_before_step: torch.Tensor = None) -> bool:
+        """Check success using termination manager signal (matching play.py exactly).
+
+        Primary: _last_episode_dones vectorized check (same as play.py _get_success_flags)
+        Fallback: position-based check from pre-step obs
+        """
+        # Primary: termination manager signal (play.py approach — no silent exception!)
+        success_flags = self._get_success_flags()
+        if success_flags is not None:
+            is_success = bool(success_flags[env_idx].item())
+            if is_success:
                 return True
             # Diagnostic: print which terms fired (limited count)
             if not hasattr(self, "_l1_diag_count"):
                 self._l1_diag_count = 0
             if self._l1_diag_count < 10:
                 self._l1_diag_count += 1
-                fired = [names[j] for j in range(len(names)) if bool(led[env_idx, j].item())]
-                print(f"  [L1 diag] env {env_idx}: terms={names}, fired={fired}")
-        except Exception:
-            pass
+                led = self._term_mgr._last_episode_dones
+                fired = [self._term_names[j] for j in range(len(self._term_names))
+                         if bool(led[env_idx, j].item())]
+                print(f"  [SR diag] env {env_idx}: fired={fired}, success_idx={self._success_term_idx}")
 
-        # Level 2: position-based check using env's actual DoneTerm thresholds
-        # (env success uses eps_z=0.003, eps_xy=0.009, NOT the stricter play.py obs constants)
+        # Fallback: position-based check from pre-step obs (cubes stacked but term didn't fire)
         if obs_before_step is not None:
             s = getattr(self.cfg, "obs_structure", None)
             if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
@@ -831,45 +845,44 @@ class GraphDiTRLTrainer:
                 n_terminated = 0
                 n_truncated = 0
                 n_success = 0
+                # Vectorized success check (matching play.py _get_success_flags)
+                success_flags = self._get_success_flags()
                 for i in done_envs.tolist():
                     self.episode_rewards.append(ep_rewards[i].item())
                     self.episode_lengths.append(ep_lengths[i].item())
                     is_truncated = bool(truncated[i].item() if hasattr(truncated[i], "item") else truncated[i])
                     is_terminated = bool(terminated[i].item() if hasattr(terminated[i], "item") else terminated[i])
-                    # CRITICAL: terminated (success) takes priority over truncated (timeout)
-                    # Both can be True in the same step if success fires at max_episode_length
-                    if is_terminated:
+
+                    # Matching play.py: truncated=failure, terminated=check signal
+                    if is_truncated and not is_terminated:
+                        is_success = False
+                        n_truncated += 1
+                    elif success_flags is not None:
+                        is_success = bool(success_flags[i].item())
+                        if is_terminated:
+                            n_terminated += 1
+                        else:
+                            n_truncated += 1
+                    else:
+                        # No success term in env — fallback to position check
                         is_success = self._check_success_from_info(env_info, i, obs_before_step=obs)
                         n_terminated += 1
-                    elif is_truncated:
-                        # Timeout: also check termination manager first (cube may have
-                        # stacked right at timeout), then fallback to position check
-                        is_success = self._check_success_from_info(env_info, i, obs_before_step=obs)
-                        n_truncated += 1
-                    else:
-                        is_success = False
-                    # Debug: log first 20 episode outcomes
+
+                    # Debug: log first 30 episode outcomes
                     if not hasattr(self, "_ep_debug_count"):
                         self._ep_debug_count = 0
-                    if self._ep_debug_count < 20:
+                    if self._ep_debug_count < 30:
                         self._ep_debug_count += 1
+                        led = self._term_mgr._last_episode_dones
+                        fired = [self._term_names[j] for j in range(len(self._term_names))
+                                 if bool(led[i, j].item())]
                         print(f"  [EP] env={i} terminated={is_terminated} truncated={is_truncated} "
-                              f"success={is_success} len={ep_lengths[i].item():.0f} rew={ep_rewards[i].item():.1f}")
-                        # Check termination manager state
-                        try:
-                            _base = self.env.unwrapped if hasattr(self.env, "unwrapped") else self.env
-                            _tm = _base.termination_manager
-                            _names = list(_tm._term_names)
-                            _led = _tm._last_episode_dones
-                            _fired = [_names[j] for j in range(len(_names)) if bool(_led[i, j].item())]
-                            print(f"         tm._last_episode_dones fired={_fired}")
-                        except Exception as e:
-                            print(f"         tm debug error: {e}")
+                              f"success={is_success} fired={fired} "
+                              f"len={ep_lengths[i].item():.0f} rew={ep_rewards[i].item():.1f}")
                     if is_success:
                         n_success += 1
                     rollout_successes.append(float(is_success))
                     self.episode_successes.append(float(is_success))
-                pass
 
                 # Record per-term episode rewards
                 if _reward_term_accum is not None:
