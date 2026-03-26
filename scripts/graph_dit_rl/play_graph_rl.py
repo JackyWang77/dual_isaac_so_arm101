@@ -59,13 +59,13 @@ def _check_position_success(obs: torch.Tensor, env_idx: int, cfg) -> bool:
     if "cube_1_pos" in s and "cube_2_pos" in s:
         c1 = obs[env_idx, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
         c2 = obs[env_idx, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
-        z_diff_a = torch.abs((c1[2] - c2[2]) - 0.012)
+        z_diff_a = torch.abs((c1[2] - c2[2]) - 0.018)
         xy_dist_a = torch.norm(c1[:2] - c2[:2])
-        z_diff_b = torch.abs((c2[2] - c1[2]) - 0.012)
+        z_diff_b = torch.abs((c2[2] - c1[2]) - 0.018)
         xy_dist_b = torch.norm(c2[:2] - c1[:2])
         stacked = bool(
-            (z_diff_a < 0.003 and xy_dist_a < 0.006) or
-            (z_diff_b < 0.003 and xy_dist_b < 0.006)
+            (z_diff_a < 0.003 and xy_dist_a < 0.009) or
+            (z_diff_b < 0.003 and xy_dist_b < 0.009)
         )
         if not stacked:
             return False
@@ -126,12 +126,12 @@ def _check_success_from_info(env, env_info, env_idx: int, obs_before_step: torch
         if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
             c1 = obs_before_step[env_idx, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
             c2 = obs_before_step[env_idx, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
-            z_diff_a = torch.abs((c1[2] - c2[2]) - 0.012)
+            z_diff_a = torch.abs((c1[2] - c2[2]) - 0.018)
             xy_dist_a = torch.norm(c1[:2] - c2[:2])
-            z_diff_b = torch.abs((c2[2] - c1[2]) - 0.012)
+            z_diff_b = torch.abs((c2[2] - c1[2]) - 0.018)
             xy_dist_b = torch.norm(c2[:2] - c1[:2])
-            stack_ok = (z_diff_a < 0.003 and xy_dist_a < 0.006) or \
-                       (z_diff_b < 0.003 and xy_dist_b < 0.006)
+            stack_ok = (z_diff_a < 0.003 and xy_dist_a < 0.009) or \
+                       (z_diff_b < 0.003 and xy_dist_b < 0.009)
             if stack_ok:
                 return True
     return False
