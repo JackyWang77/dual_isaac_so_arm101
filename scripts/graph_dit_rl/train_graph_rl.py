@@ -52,13 +52,8 @@ parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradie
 parser.add_argument("--c_delta_reg", type=float, default=2.0, help="Delta (residual) regularization weight; higher = smoother, RL 'don't move unless reward'")
 parser.add_argument("--c_ent", type=float, default=0.01, help="Entropy coefficient; encourages exploration")
 parser.add_argument("--beta", type=float, default=1.0, help="AWR beta: w=exp(adv/beta); higher=softer weighting, lower=sharper on high-adv samples")
-parser.add_argument("--alpha_init", type=float, default=0.10, help="Residual alpha init: a=base+alpha*delta; arm uses clamped(0,0.5), gripper=1.0")
-parser.add_argument("--alpha_max", type=float, default=0.08, help="Max alpha for scalar mode; lower = more conservative actor")
 parser.add_argument("--max_delta_norm", type=float, default=0.0, help="Hard clamp on ||delta||_2; 0=disabled. Projects delta to L2 ball.")
 parser.add_argument("--expectile_tau", type=float, default=0.7, help="Expectile τ for value loss (IQL-style); τ=0.7 → optimistic; 0.5=MSE")
-parser.add_argument("--use_adaptive_alpha", action="store_true", default=True, help="Use state-dependent alpha_net (default: True)")
-parser.add_argument("--no_adaptive_alpha", action="store_false", dest="use_adaptive_alpha", help="Use scalar alpha instead")
-parser.add_argument("--debug_alpha", action="store_true", help="Print alpha/delta stats in act() to diagnose 0%% SR")
 parser.add_argument("--no_adaptive_entropy", action="store_true", help="Use fixed cEnt instead of Adaptive Entropy")
 parser.add_argument("--c_ent_bad", type=float, default=0.02, help="High entropy weight for adv<0 (failed steps)")
 parser.add_argument("--c_ent_good", type=float, default=0.005, help="Low entropy weight for adv>0 (success steps)")
@@ -97,6 +92,14 @@ parser.add_argument("--target_eff_ratio", type=float, default=0.4,
 parser.add_argument("--beta_init", type=float, default=0.3,
     help="Initial AWR beta for adaptive mode (log-space learnable)")
 
+# Expert Intervention (Jacobian correction + DAgger)
+parser.add_argument("--use_expert_intervention", action="store_true", default=False,
+    help="Enable expert Jacobian intervention during rollout (DAgger-style)")
+parser.add_argument("--expert_intervention_ratio", type=float, default=1.0,
+    help="Initial expert intervention probability [0,1]; decays per iteration")
+parser.add_argument("--expert_intervention_decay", type=float, default=0.95,
+    help="Per-iteration decay rate for expert intervention ratio")
+
 # AppLauncher
 AppLauncher.add_app_launcher_args(parser)
 args, hydra_args = parser.parse_known_args()
@@ -112,7 +115,7 @@ import os
 import re
 import json
 import time
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import gymnasium as gym
 import numpy as np
@@ -369,6 +372,12 @@ class GraphDiTRLTrainer:
         self.best_sr_require_consistent = best_sr_require_consistent
         self.critic_warmup_iters = critic_warmup_iters
 
+        # Expert Intervention (Jacobian correction + DAgger)
+        self.use_expert_intervention = getattr(cfg, 'use_expert_intervention', False)
+        self.expert_ratio = getattr(cfg, 'expert_intervention_ratio', 1.0)
+        self.expert_decay = getattr(cfg, 'expert_intervention_decay', 0.95)
+        self._expert_initialized = False
+
         # Initialize env buffers
         policy.init_env_buffers(self.num_envs)
         
@@ -412,6 +421,100 @@ class GraphDiTRLTrainer:
         print(f"[Trainer] Success: using env termination signals (Episode_Termination/success)")
         print(f"[Trainer] truncated=timeout=failure, terminated+success_signal=success")
         print(f"[Trainer] Best-model: SR_{self.best_sr_window}ep window, consistent_check={self.best_sr_require_consistent}")
+
+    def _init_expert_intervention(self):
+        """Initialize Jacobian infrastructure for expert correction (lazy, called on first rollout)."""
+        base = self.env.unwrapped if hasattr(self.env, "unwrapped") else self.env
+        self._right_arm = base.scene["right_arm"]
+        # EE is last body in kinematic chain
+        # Jacobian: [N, num_bodies, 6, num_joints]
+        # We want last body (-1), xyz rows (:3), arm joint cols (:5)
+        self._expert_initialized = True
+        if self.use_expert_intervention:
+            print(f"[Trainer] Expert intervention initialized (ratio={self.expert_ratio:.2f}, decay={self.expert_decay})")
+
+    def _compute_expert_delta(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute expert delta via Jacobian pseudoinverse when xy misalignment detected.
+
+        Returns:
+            expert_delta: [B, action_dim] expert correction (0 where no intervention)
+            intervene_mask: [B] bool, True for envs where expert intervened
+        """
+        B = obs.shape[0]
+        act_dim = self.cfg.action_dim
+        expert_delta = torch.zeros(B, act_dim, device=self.device)
+        intervene_mask = torch.zeros(B, dtype=torch.bool, device=self.device)
+
+        s = self.cfg.obs_structure
+        if s is None or "cube_1_pos" not in s or "cube_2_pos" not in s:
+            return expert_delta, intervene_mask
+        if "right_ee_position" not in s:
+            return expert_delta, intervene_mask
+
+        # Extract cube positions (local frame, from obs)
+        c1 = obs[:, s["cube_1_pos"][0]:s["cube_1_pos"][1]]  # [B, 3]
+        c2 = obs[:, s["cube_2_pos"][0]:s["cube_2_pos"][1]]  # [B, 3]
+        r_ee = obs[:, s["right_ee_position"][0]:s["right_ee_position"][1]]  # [B, 3]
+
+        # Determine target (lower z = on table) and held cube (higher z = being moved)
+        # cube edge = 12mm, table z ~ 0. Stacked center z_diff = 12mm
+        c1_z = c1[:, 2]
+        c2_z = c2[:, 2]
+
+        # Target = lower cube, held = higher cube
+        target_xy = torch.where((c1_z < c2_z).unsqueeze(-1), c1[:, :2], c2[:, :2])
+        held_z = torch.max(c1_z, c2_z)
+
+        # Only intervene when:
+        # 1. Held cube is above table (z > 15mm = being carried)
+        # 2. EE is near stacking zone (z < 40mm, approaching)
+        # 3. xy error > 3mm
+        ee_z = r_ee[:, 2]
+        in_stacking_zone = (held_z > 0.015) & (ee_z < 0.04) & (ee_z > 0.01)
+
+        # Right EE xy vs target cube xy
+        held_xy = torch.where((c1_z < c2_z).unsqueeze(-1), c2[:, :2], c1[:, :2])
+        xy_error = held_xy - target_xy  # [B, 2] - how far held cube is from target
+        xy_error_norm = xy_error.norm(dim=-1)
+
+        needs_correction = in_stacking_zone & (xy_error_norm > 0.003)  # 3mm threshold
+
+        if not needs_correction.any():
+            return expert_delta, intervene_mask
+
+        # Get Jacobian from physics
+        try:
+            jac = self._right_arm.root_physx_view.get_jacobians()  # [N, num_bodies, 6, num_joints]
+            # Last body (EE), xyz position rows, first 5 arm joints
+            J_xyz = jac[:, -1, :3, :5]  # [B, 3, 5]
+
+            # Desired EE correction: move to reduce xy_error
+            dx = torch.zeros(B, 3, device=self.device)
+            dx[:, 0] = -xy_error[:, 0]  # correct x
+            dx[:, 1] = -xy_error[:, 1]  # correct y
+            # z = 0 (don't change height)
+
+            # Pseudoinverse: dq = J_pinv @ dx
+            J_pinv = torch.linalg.pinv(J_xyz)  # [B, 5, 3]
+            dq = torch.bmm(J_pinv, dx.unsqueeze(-1)).squeeze(-1)  # [B, 5]
+
+            # Conservative gain (avoid overshooting) + clamp
+            dq = dq * 0.5
+            dq = torch.clamp(dq, -0.1, 0.1)
+
+            # Place into right arm joint slots
+            # Backbone order: [left_6, right_6], right arm joints = indices 6:11
+            if act_dim == 12:
+                expert_delta[needs_correction, 6:11] = dq[needs_correction]
+            else:
+                expert_delta[needs_correction, 0:5] = dq[needs_correction]
+
+            intervene_mask = needs_correction
+
+        except Exception as e:
+            print(f"[Expert] Jacobian error: {e}")
+
+        return expert_delta, intervene_mask
 
     def _check_success_from_info(self, env_info, env_idx: int, obs_before_step: torch.Tensor = None) -> bool:
         """Check success with multi-level fallback (matching play.py).
@@ -535,6 +638,9 @@ class GraphDiTRLTrainer:
         )
         self.buffer.reset()
 
+        if self.use_expert_intervention and not self._expert_initialized:
+            self._init_expert_intervention()
+
         raw_obs, _ = self.env.reset()
         obs = self._process_obs(raw_obs)
         subtask_cond = self._extract_subtask_condition(raw_obs, obs)
@@ -616,6 +722,23 @@ class GraphDiTRLTrainer:
                     # Log joint delta norms (exclude grippers)
                     joint_delta = torch.cat([delta[:, :5], delta[:, 6:11]], dim=-1) if self._is_dual_arm else delta[:, :5]
                     delta_norms_all.append(torch.norm(joint_delta, dim=-1).mean().item())
+
+                # --- Expert Intervention (Jacobian correction + DAgger) ---
+                if self.use_expert_intervention and self._expert_initialized and not zero_residual:
+                    B = obs.shape[0]
+                    expert_delta, intervene_mask = self._compute_expert_delta(obs)
+                    # Stochastic DAgger: only intervene with probability expert_ratio
+                    dagger_coin = torch.rand(B, device=self.device) < self.expert_ratio
+                    intervene_mask = intervene_mask & dagger_coin
+
+                    if intervene_mask.any():
+                        # Expert delta goes through same path: a = a_base + alpha * expert_delta
+                        alpha_vec, _ = self.policy._compute_alpha_vec(B, self.device)
+                        a_base = info["a_base"]
+                        expert_action = a_base + alpha_vec * expert_delta
+                        action[intervene_mask] = expert_action[intervene_mask]
+                        # Update info so buffer stores expert's delta
+                        info["delta"][intervene_mask] = expert_delta[intervene_mask]
 
                 action_dim = action.shape[-1]
                 action_for_sim = action.clone()
@@ -822,6 +945,9 @@ class GraphDiTRLTrainer:
             stats["delta_norm_mean"] = 0.0
             stats["delta_norm_max"] = 0.0
 
+        if self.use_expert_intervention:
+            stats["expert_ratio"] = self.expert_ratio
+
         return stats
 
     def update(self, iteration: int = 0) -> Dict[str, float]:
@@ -942,6 +1068,11 @@ class GraphDiTRLTrainer:
             # Update
             update_stats = self.update(iteration=iteration)
             update_stats["lr"] = current_lr
+
+            # DAgger: decay expert intervention ratio
+            if self.use_expert_intervention and iteration > 0:
+                self.expert_ratio *= self.expert_decay
+                self.expert_ratio = max(self.expert_ratio, 0.0)
 
             # Log
             self._log(iteration, rollout_stats, update_stats)
@@ -1203,6 +1334,7 @@ class GraphDiTRLTrainer:
         _scalar("main/c_ent", update_stats.get("c_ent", 0), step)
         _scalar("main/beta", update_stats.get("beta", 0), step)
         _scalar("main/eff_ratio", update_stats.get("eff_ratio", 0), step)
+        _scalar("main/expert_ratio", rollout_stats.get("expert_ratio", 0), step)
 
         sr = rollout_stats.get("success_rate", 0) * 100
         sr_100 = rollout_stats.get("success_rate_100", 0) * 100
@@ -1245,6 +1377,7 @@ class GraphDiTRLTrainer:
             f"α={alpha:.2f} β={beta_v:.3f} | "
             f"cΔ={c_dreg:.1f} cH={c_ent_v:.4f} eff={eff_r:.2f} | "
             f"L={loss:.3f}"
+            + (f" | Exp={rollout_stats.get('expert_ratio', 0):.2f}" if self.use_expert_intervention else "")
         )
 
     def _save_best(self, iteration: int):
@@ -1413,13 +1546,12 @@ def main():
         c_delta_reg=args.c_delta_reg,
         cEnt=args.c_ent,
         beta=args.beta,
-        alpha_init=args.alpha_init,
-        alpha_max=getattr(args, "alpha_max", 0.08),
         max_delta_norm=getattr(args, "max_delta_norm", 0.0),
         use_expectile_value=True,
         expectile_tau=args.expectile_tau,
-        use_adaptive_alpha=args.use_adaptive_alpha,
-        debug_alpha=getattr(args, "debug_alpha", False),
+        use_expert_intervention=getattr(args, "use_expert_intervention", False),
+        expert_intervention_ratio=getattr(args, "expert_intervention_ratio", 1.0),
+        expert_intervention_decay=getattr(args, "expert_intervention_decay", 0.95),
         use_adaptive_entropy=not getattr(args, "no_adaptive_entropy", False),
         c_ent_bad=args.c_ent_bad,
         c_ent_good=args.c_ent_good,
@@ -1463,6 +1595,11 @@ def main():
     else:
         beta_mode = f"Fixed beta={policy_cfg.beta}"
     print(f"[Main] AWR Beta: {beta_mode}")
+    # Expert intervention mode
+    if getattr(policy_cfg, "use_expert_intervention", False):
+        print(f"[Main] Expert Intervention: ENABLED (ratio={policy_cfg.expert_intervention_ratio}, decay={policy_cfg.expert_intervention_decay})")
+    else:
+        print(f"[Main] Expert Intervention: disabled")
     if policy_cfg.use_counterfactual_q:
         print(f"[Main] Q(s,a) counterfactual baseline ENABLED (log_tau={policy_cfg.counterfactual_log_tau})")
     else:

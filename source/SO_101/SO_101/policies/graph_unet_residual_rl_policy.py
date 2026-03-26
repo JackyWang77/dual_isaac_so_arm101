@@ -295,11 +295,10 @@ class GraphUnetResidualRLCfg:
     log_std_min: float = -3.0
     log_std_max: float = 1.0
 
-    # residual scaling
-    alpha_init: float = 0.10
-    alpha_max: float = 0.08  # max alpha for scalar mode; lower = more conservative actor
-    use_adaptive_alpha: bool = True  # True: alpha_net(z_bar,obs)->[B,6]; False: scalar alpha
-    alpha_hidden: Tuple[int, ...] = (64,)  # Hidden dims for adaptive alpha net
+    # ===== Expert Intervention (Jacobian correction + DAgger) =====
+    use_expert_intervention: bool = False
+    expert_intervention_ratio: float = 1.0  # initial ratio [0,1]
+    expert_intervention_decay: float = 0.95  # per-iteration decay
 
     # EMA smoothing for base_action (joints only, gripper excluded)
     ema_alpha: float = 1.0  # EMA weight: 1.0 = no smoothing (raw model output)
@@ -392,38 +391,6 @@ class LayerWiseGateNet(nn.Module):
         logits = self.net(x)
         w = torch.softmax(logits, dim=-1)
         return w
-
-
-class AdaptiveAlphaNet(nn.Module):
-    """State-dependent per-dim alpha: alpha_vec = f(z_bar, obs) -> [B, action_dim].
-    Arm joints: [0, 0.3]; Grippers: always 1.0.
-    Supports single arm (6D: joints 0-4, gripper 5) and
-    dual arm (12D: left joints 0-4, left gripper 5, right joints 6-10, right gripper 11)."""
-    def __init__(self, in_dim: int, hidden: Tuple[int, ...], act: str = "silu",
-                 alpha_init: float = 0.10, alpha_max: float = 0.4, action_dim: int = 6):
-        super().__init__()
-        self.action_dim = action_dim
-        self.alpha_max = alpha_max
-        # Gripper indices
-        if action_dim == 12:
-            self.gripper_indices = [5, 11]
-        else:
-            self.gripper_indices = [5]
-        self.net = mlp(in_dim, hidden, action_dim, act=act)
-        # Init last layer so initial output ~alpha_init/alpha_max for arm (sigmoid scale)
-        init_val = alpha_init / alpha_max
-        init_val = max(0.01, min(0.99, init_val))
-        logit_init = np.log(init_val / (1 - init_val))
-        nn.init.zeros_(self.net[-1].weight)
-        nn.init.constant_(self.net[-1].bias, logit_init)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: [B, z_dim + obs_dim]
-        raw = torch.sigmoid(self.net(x))  # [B, action_dim], range (0, 1)
-        alpha_vec = raw * self.alpha_max  # Arm joints: [0, alpha_max]
-        for gi in self.gripper_indices:
-            alpha_vec[:, gi] = 1.0  # Gripper: full override
-        return alpha_vec
 
 
 class ResidualGaussianActor(nn.Module):
@@ -714,23 +681,9 @@ class GraphUnetResidualRLPolicy(nn.Module):
             action_dim=critic_action_dim,
         )
 
-        # Residual scaling: scalar (legacy) or adaptive (state-dependent)
-        self.use_adaptive_alpha = getattr(cfg, "use_adaptive_alpha", False)
-        if self.use_adaptive_alpha:
-            alpha_in_dim = cfg.z_dim + actor_obs_dim
-            print(f"[GraphUnetResidualRLPolicy] AdaptiveAlphaNet: in_dim={alpha_in_dim} (z_dim={cfg.z_dim} + actor_obs_dim={actor_obs_dim}), action_dim={act_dim}")
-            self.alpha_net = AdaptiveAlphaNet(
-                alpha_in_dim,
-                getattr(cfg, "alpha_hidden", (64,)),
-                act=cfg.activation,
-                alpha_init=cfg.alpha_init,
-                alpha_max=cfg.alpha_max,
-                action_dim=act_dim,
-            )
-            self.alpha = None  # Unused when adaptive
-        else:
-            self.alpha = nn.Parameter(torch.tensor(cfg.alpha_init, dtype=torch.float32))
-            self.alpha_net = None
+        # Residual scaling: fixed alpha=1.0 for arm joints, 0.0 for grippers
+        # (backbone handles grippers, RL delta only corrects arm positioning)
+        self.alpha_net = None
 
         # ===== SAC-style adaptive delta regularization =====
         # Learnable log_c_delta_reg: gradient descent automatically adjusts penalty strength
@@ -827,13 +780,6 @@ class GraphUnetResidualRLPolicy(nn.Module):
         if cfg.orthogonal_init:
             orthogonal_init(self.actor, gain=np.sqrt(2))
             orthogonal_init(self.critic, gain=np.sqrt(2))
-            if self.alpha_net is not None:
-                # AlphaNet uses custom last-layer init; only init hidden layers
-                for m in self.alpha_net.net[:-1]:
-                    if isinstance(m, nn.Linear):
-                        nn.init.orthogonal_(m.weight, gain=0.5)
-                        if m.bias is not None:
-                            nn.init.zeros_(m.bias)
             # CRITICAL: Zero initialize Actor's mu layer (last layer)
             # This ensures initial delta ≈ 0, so action ≈ a_base at start of training
             # Without this, random initialization can cause large deltas that break base policy
@@ -873,30 +819,14 @@ class GraphUnetResidualRLPolicy(nn.Module):
             self.action_mean = _to_tensor(action_mean)
             self.action_std = _to_tensor(action_std)
 
-    def _compute_alpha_vec(
-        self, z_bar: torch.Tensor, obs_actor: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Compute alpha_vec [B, action_dim]. Returns (alpha_vec, alpha_mean_for_log)."""
+    def _compute_alpha_vec(self, B: int, device) -> Tuple[torch.Tensor, float]:
+        """Fixed alpha: 1.0 for arm joints, 0.0 for grippers.
+        Returns (alpha_vec [B, action_dim], alpha_mean_for_log)."""
         act_dim = self.cfg.action_dim
-        if act_dim == 12:
-            joint_indices = [0, 1, 2, 3, 4, 6, 7, 8, 9, 10]
-            gripper_indices = [5, 11]
-        else:
-            joint_indices = [0, 1, 2, 3, 4]
-            gripper_indices = [5]
-
-        if self.use_adaptive_alpha:
-            x = torch.cat([z_bar, obs_actor], dim=-1)
-            alpha_vec = self.alpha_net(x)
-            alpha_mean = alpha_vec[:, joint_indices].mean()  # Arm dims only for logging
-        else:
-            alpha_scalar = torch.clamp(self.alpha, 0.0, getattr(self.cfg, "alpha_max", 0.08))
-            B = z_bar.shape[0]
-            alpha_vec = torch.ones(B, act_dim, device=z_bar.device, dtype=z_bar.dtype) * alpha_scalar
-            for gi in gripper_indices:
-                alpha_vec[:, gi] = 1.0
-            alpha_mean = alpha_scalar
-        return alpha_vec, alpha_mean
+        alpha_vec = torch.ones(B, act_dim, device=device)
+        for gi in self.gripper_indices:
+            alpha_vec[:, gi] = 0.0  # Grippers: no RL delta, backbone handles them
+        return alpha_vec, 1.0
 
     # -----------------------------
     # Buffer management
@@ -1493,9 +1423,8 @@ class GraphUnetResidualRLPolicy(nn.Module):
             _dn = delta.norm(dim=-1, keepdim=True)  # [B, 1]
             delta = torch.where(_dn > _max_dn, delta * _max_dn / (_dn + 1e-8), delta)
 
-        # Per-channel alpha: adaptive (state-dependent) or scalar
-        obs_actor = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
-        alpha_vec, alpha_mean = self._compute_alpha_vec(z_bar, obs_actor)
+        # Per-channel alpha: fixed 1.0 for arm joints, 0.0 for grippers
+        alpha_vec, alpha_mean = self._compute_alpha_vec(B, a_base.device)
 
         a = a_base + alpha_vec * delta  # [B, act_dim]
         alpha = alpha_mean  # for info
@@ -1548,7 +1477,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             "gate_w": gate_w,  # [B, K]; placeholder when no gate (U-Net)
             "v_bar": v_bar,
             "q_base": q_base,  # Q(s, a_base) for counterfactual; None when V(s) mode
-            "alpha": alpha.detach(),
+            "alpha": torch.tensor(alpha, device=a_base.device),
         }
         return a, info
 
@@ -1610,8 +1539,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
         dist = self.actor.dist(x)
 
         # Recover delta in denormalized space (same alpha_vec as act())
-        obs_actor_loss = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
-        alpha_vec, alpha_mean = self._compute_alpha_vec(z_bar_new, obs_actor_loss)
+        alpha_vec, alpha_mean = self._compute_alpha_vec(B_loss, obs_norm.device)
         delta = (action - a_base) / (alpha_vec + 1e-8)
 
         if self.residual_action_mask is not None:
@@ -1762,7 +1690,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             "gate_entropy": gate_entropy.detach(),
             "entropy": entropy.mean().detach(),
             "loss_delta_reg": loss_delta_reg.detach(),
-            "alpha": alpha.detach(),
+            "alpha": torch.tensor(alpha),
             "c_delta_reg": c_delta_reg_val,
             "c_ent": c_ent_val,
             "beta": beta_val_report,
