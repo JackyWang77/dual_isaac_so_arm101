@@ -499,7 +499,8 @@ class GraphDiTRLTrainer:
         # Z diff between held cube and target cube
         z_diff = torch.abs(held_z - torch.min(c1_z, c2_z))  # held - base
 
-        needs_correction = in_stacking_zone & ((xy_error_norm > 0.003) | (z_diff > 0.005))
+        # Aim for perfect alignment (xy → 0)
+        needs_correction = in_stacking_zone & ((xy_error_norm > 0.0005) | (z_diff > 0.005))
 
         if not needs_correction.any():
             return expert_delta, intervene_mask
@@ -513,14 +514,14 @@ class GraphDiTRLTrainer:
             # Two-phase strategy to avoid friction when cubes touch:
             # Phase 1: XY not aligned → move XY, lift Z slightly above target
             # Phase 2: XY aligned → descend Z to stack
-            xy_aligned = xy_error_norm < 0.003  # 3mm threshold
+            xy_aligned = xy_error_norm < 0.002  # 2mm = aligned enough to descend
             hover_height = 0.025  # hover 25mm above base cube (cube=18mm + 7mm margin)
 
             max_ee_step = 0.001  # 1mm per step
             dx = torch.zeros(B, 3, device=self.device)
 
             # Phase 1: correct XY, maintain hover height
-            phase1 = ~xy_aligned
+            phase1 = needs_correction & (~xy_aligned)
             dx[phase1, 0] = -xy_error[phase1, 0]
             dx[phase1, 1] = -xy_error[phase1, 1]
             # If held cube is too low during XY correction, lift up
@@ -529,9 +530,11 @@ class GraphDiTRLTrainer:
             dx[phase1, 2] = torch.clamp(z_lift[phase1], min=0.0, max=0.002)
 
             # Phase 2: XY aligned, descend to stack (target z_diff = 0.018)
-            phase2 = xy_aligned
+            phase2 = needs_correction & xy_aligned
             target_stack_z = torch.min(c1_z, c2_z) + 0.018  # exact stacking height
             z_descend = target_stack_z - held_z  # negative = need to go down
+            dx[phase2, 0] = -xy_error[phase2, 0]  # keep correcting XY during descent
+            dx[phase2, 1] = -xy_error[phase2, 1]
             dx[phase2, 2] = torch.clamp(z_descend[phase2], min=-0.001, max=0.001)
 
             # Clamp EE displacement to max_ee_step (direction preserved, magnitude limited)
@@ -560,6 +563,22 @@ class GraphDiTRLTrainer:
                 expert_delta[needs_correction, 0:5] = dq[needs_correction]
 
             intervene_mask = needs_correction
+
+            # Debug: per-step summary (throttled)
+            if not hasattr(self, '_expert_debug_step'):
+                self._expert_debug_step = 0
+            self._expert_debug_step += 1
+            if self._expert_debug_step <= 200 and self._expert_debug_step % 10 == 0:
+                n_corr = needs_correction.sum().item()
+                n_p1 = phase1.sum().item()
+                n_p2 = phase2.sum().item()
+                si = needs_correction.nonzero(as_tuple=False)[0].item()
+                print(f"  [Expert] step={self._expert_debug_step} "
+                      f"correcting={n_corr}/{B} (P1_xy={n_p1} P2_descend={n_p2}) | "
+                      f"env={si}: xy_err={xy_error_norm[si].item()*1000:.1f}mm "
+                      f"z_diff={z_diff[si].item()*1000:.1f}mm "
+                      f"dx=[{dx[si,0].item()*1000:.2f},{dx[si,1].item()*1000:.2f},{dx[si,2].item()*1000:.2f}]mm "
+                      f"dq_norm={dq[si].norm().item():.4f}")
 
         except Exception as e:
             print(f"[Expert] Jacobian error: {e}")
@@ -709,6 +728,8 @@ class GraphDiTRLTrainer:
         delta_norms_all = []
         _alignment_steps = 0  # count steps where RL residual was active
         _total_env_steps = 0  # total env-steps for ratio
+        _n_expert_intervened = 0  # count expert intervention env-steps
+        self._expert_debug_step = 0  # reset per-iteration debug counter
 
         # Track per-term reward accumulation
         _reward_term_accum = None
@@ -808,6 +829,7 @@ class GraphDiTRLTrainer:
                         action[intervene_mask] = expert_action[intervene_mask]
                         # Update info so buffer stores expert's delta
                         info["delta"][intervene_mask] = expert_delta[intervene_mask]
+                        _n_expert_intervened += intervene_mask.sum().item()
 
                 action_dim = action.shape[-1]
                 action_for_sim = action.clone()
@@ -1026,10 +1048,12 @@ class GraphDiTRLTrainer:
 
         self.buffer.compute_returns(last_value, self.cfg.gamma, self.cfg.lam)
 
-        # Print alignment phase ratio
+        # Print alignment + expert summary
         if _total_env_steps > 0:
             align_ratio = _alignment_steps / _total_env_steps
-            print(f"  [Align] RL residual active {align_ratio*100:.1f}% of env-steps ({_alignment_steps}/{_total_env_steps})")
+            expert_ratio = _n_expert_intervened / _total_env_steps if _total_env_steps > 0 else 0
+            print(f"  [Align] RL residual active {align_ratio*100:.1f}% ({_alignment_steps}/{_total_env_steps}) | "
+                  f"Expert intervened {expert_ratio*100:.1f}% ({_n_expert_intervened}/{_total_env_steps})")
 
         # Print per-term episode reward breakdown
         if _reward_term_names and len(_reward_term_episodes) > 0:
