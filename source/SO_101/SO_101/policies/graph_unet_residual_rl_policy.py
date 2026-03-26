@@ -17,7 +17,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple, Union, List
 
-import math
 import numpy as np
 import torch
 import torch.nn as nn
@@ -296,6 +295,11 @@ class GraphUnetResidualRLCfg:
     log_std_min: float = -3.0
     log_std_max: float = 1.0
 
+    # ===== Expert Intervention (Jacobian correction + DAgger) =====
+    use_expert_intervention: bool = False
+    expert_intervention_ratio: float = 1.0  # initial ratio [0,1]
+    expert_intervention_decay: float = 0.95  # per-iteration decay
+
     # EMA smoothing for base_action (joints only, gripper excluded)
     ema_alpha: float = 1.0  # EMA weight: 1.0 = no smoothing (raw model output)
     joint_dim: int = 5  # Number of joint dimensions (gripper is excluded from EMA)
@@ -365,13 +369,6 @@ class GraphUnetResidualRLCfg:
     target_eff_ratio: float = 0.4  # Target effective sample ratio ∈ (0,1); 0.4 = use ~40% of batch
     beta_init: float = 0.3         # Initial β (log-space learnable)
 
-    # ===== Expert Intervention (Jacobian correction + DAgger) =====
-    # During rollout, when alignment is off, replace action with Jacobian-computed correction.
-    # DAgger schedule: intervention_ratio decays each iteration so actor learns to self-correct.
-    use_expert_intervention: bool = False
-    expert_intervention_ratio: float = 1.0   # Initial probability of expert intervening
-    expert_intervention_decay: float = 0.95  # Decay per iteration (0.95 → halves every ~14 iters)
-
 
 # =========================================================
 # Modules: Gate / Actor / Critic (unchanged)
@@ -394,8 +391,6 @@ class LayerWiseGateNet(nn.Module):
         logits = self.net(x)
         w = torch.softmax(logits, dim=-1)
         return w
-
-
 
 
 class ResidualGaussianActor(nn.Module):
@@ -686,9 +681,9 @@ class GraphUnetResidualRLPolicy(nn.Module):
             action_dim=critic_action_dim,
         )
 
-        # Alpha is fixed: 1.0 for arm joints, 0.0 for grippers.
-        # delta directly represents the physical correction (no scaling).
-        # max_delta_norm is the only hard constraint on correction magnitude.
+        # Residual scaling: fixed alpha=1.0 for arm joints, 0.0 for grippers
+        # (backbone handles grippers, RL delta only corrects arm positioning)
+        self.alpha_net = None
 
         # ===== SAC-style adaptive delta regularization =====
         # Learnable log_c_delta_reg: gradient descent automatically adjusts penalty strength
@@ -791,8 +786,6 @@ class GraphUnetResidualRLPolicy(nn.Module):
             nn.init.zeros_(self.actor.mu.weight)
             nn.init.zeros_(self.actor.mu.bias)
 
-
-
     # -----------------------------
     # Normalization stats setter
     # -----------------------------
@@ -826,22 +819,14 @@ class GraphUnetResidualRLPolicy(nn.Module):
             self.action_mean = _to_tensor(action_mean)
             self.action_std = _to_tensor(action_std)
 
-    def _compute_alpha_vec(
-        self, z_bar: torch.Tensor, obs_actor: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Compute alpha_vec [B, action_dim]. Returns (alpha_vec, alpha_mean_for_log).
-
-        Alpha is fixed at 1.0 for arm joints, 0.0 for grippers.
-        delta directly represents the physical correction (no scaling).
-        max_delta_norm is the only hard constraint on correction magnitude.
-        """
+    def _compute_alpha_vec(self, B: int, device) -> Tuple[torch.Tensor, float]:
+        """Fixed alpha: 1.0 for arm joints, 0.0 for grippers.
+        Returns (alpha_vec [B, action_dim], alpha_mean_for_log)."""
         act_dim = self.cfg.action_dim
-        B = z_bar.shape[0]
-        alpha_vec = torch.ones(B, act_dim, device=z_bar.device, dtype=z_bar.dtype)
+        alpha_vec = torch.ones(B, act_dim, device=device)
         for gi in self.gripper_indices:
-            alpha_vec[:, gi] = 0.0  # Gripper: no residual (backbone handles timing)
-        alpha_mean = torch.tensor(1.0, device=z_bar.device)
-        return alpha_vec, alpha_mean
+            alpha_vec[:, gi] = 0.0  # Grippers: no RL delta, backbone handles them
+        return alpha_vec, 1.0
 
     # -----------------------------
     # Buffer management
@@ -1376,15 +1361,15 @@ class GraphUnetResidualRLPolicy(nn.Module):
             z_bar, _ = self.aggregate_latent(z_layers)
             obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
             if getattr(self.cfg, "use_counterfactual_q", False):
+                # Q(s,a) mode: a_total = a_base when zero_residual → Q(s,a_total) = Q(s,a_base)
                 v_bar = self.critic.forward_bar(z_bar, obs_critic, a_base_norm_full.detach())
-                q_base = v_bar
+                q_base = v_bar  # Same action → A_res = 0 (correct for warmup)
             else:
                 v_bar = self.critic.forward_bar(z_bar, obs_critic)
                 q_base = None
             delta = torch.zeros(B, act_dim, device=a_base.device, dtype=a_base.dtype)
             K = self.cfg.num_layers
             gate_w = torch.ones(B, K, device=z_bar.device, dtype=z_bar.dtype) / K
-
             info = {
                 "obs": obs, "obs_norm": obs_norm, "a_base": a_base, "a_base_norm": a_base_norm,
                 "delta": delta, "delta_norm": delta, "log_prob": torch.zeros(B, device=a_base.device),
@@ -1433,26 +1418,25 @@ class GraphUnetResidualRLPolicy(nn.Module):
             delta = delta * self.residual_action_mask
 
         # Hard clamp: project delta onto L2 ball of radius max_delta_norm
-        # Only constrain arm joints; gripper dims are FREE (can output full ±1)
         _max_dn = self.cfg.max_delta_norm
         if _max_dn > 0:
-            delta_arm = delta[:, self.joint_indices]  # [B, 10] arm joints only
-            _dn = delta_arm.norm(dim=-1, keepdim=True)  # [B, 1]
-            delta_arm = torch.where(_dn > _max_dn, delta_arm * _max_dn / (_dn + 1e-8), delta_arm)
-            delta[:, self.joint_indices] = delta_arm
-            # gripper dims (self.gripper_indices) keep original delta — no L2 constraint
+            _dn = delta.norm(dim=-1, keepdim=True)  # [B, 1]
+            delta = torch.where(_dn > _max_dn, delta * _max_dn / (_dn + 1e-8), delta)
 
-        # Per-channel alpha: adaptive (state-dependent) or scalar
-        obs_actor = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
-        alpha_vec, alpha_mean = self._compute_alpha_vec(z_bar, obs_actor)
+        # Per-channel alpha: fixed 1.0 for arm joints, 0.0 for grippers
+        alpha_vec, alpha_mean = self._compute_alpha_vec(B, a_base.device)
 
         a = a_base + alpha_vec * delta  # [B, act_dim]
-
         alpha = alpha_mean  # for info
 
-        # Update history buffer (AFTER computing action)
+        # 7. Update history buffer (AFTER computing action)
         if self.history_buffer is not None:
-            action_for_history = a_base_norm_full
+            # Use normalized action for history (matches training data format)
+            # Graph-DiT outputs 5D, but history buffer expects 6D (with gripper)
+            # We need to pad with 0 for gripper, or use the final action 'a' which is 6D
+            # Actually, we should store the final action 'a' (6D) after normalization
+            # But for now, let's pad a_base_norm to 6D if needed
+            action_for_history = a_base_norm_full  # [B, action_dim] - full normalized action
             self.history_buffer.update(
                 ee_node=ee_node,
                 obj_node=obj_node,
@@ -1460,13 +1444,13 @@ class GraphUnetResidualRLPolicy(nn.Module):
                 joint_states=joint_states,
             )
 
-        # Log prob + entropy
+        # Log prob / entropy over full 6D (Actor outputs 6D)
         log_prob = dist.log_prob(delta_norm).sum(dim=-1)
         entropy = dist.entropy().sum(dim=-1)
-
-        # Critic
+        # Critic: select obs based on critic_obs_mode
         obs_critic = self._select_obs_for_rl(obs_norm, self.cfg.critic_obs_mode)
         if getattr(self.cfg, "use_counterfactual_q", False):
+            # Q(s,a) mode: compute Q(s, a_total) and Q(s, a_base) for counterfactual
             a_total_norm = (a.detach() - self.action_mean[:act_dim]) / (self.action_std[:act_dim] + 1e-8)
             q_total = self.critic.forward_bar(z_bar, obs_critic, a_total_norm)
             q_base = self.critic.forward_bar(z_bar, obs_critic, a_base_norm_full.detach())
@@ -1493,7 +1477,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             "gate_w": gate_w,  # [B, K]; placeholder when no gate (U-Net)
             "v_bar": v_bar,
             "q_base": q_base,  # Q(s, a_base) for counterfactual; None when V(s) mode
-            "alpha": alpha.detach(),
+            "alpha": torch.tensor(alpha, device=a_base.device),
         }
         return a, info
 
@@ -1555,8 +1539,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
         dist = self.actor.dist(x)
 
         # Recover delta in denormalized space (same alpha_vec as act())
-        obs_actor_loss = self._select_obs_for_rl(obs_norm, self.cfg.actor_obs_mode)
-        alpha_vec, alpha_mean = self._compute_alpha_vec(z_bar_new, obs_actor_loss)
+        alpha_vec, alpha_mean = self._compute_alpha_vec(B_loss, obs_norm.device)
         delta = (action - a_base) / (alpha_vec + 1e-8)
 
         if self.residual_action_mask is not None:
@@ -1567,11 +1550,10 @@ class GraphUnetResidualRLPolicy(nn.Module):
         else:
             delta_norm = delta
         delta_norm = torch.clamp(delta_norm, -1.0, 1.0)
-        log_prob_arm = dist.log_prob(delta_norm).sum(dim=-1)
+        log_prob = dist.log_prob(delta_norm).sum(dim=-1)
         entropy = dist.entropy().sum(dim=-1)
         loss_delta_reg = (delta_norm ** 2).mean()
         alpha = alpha_mean  # for return dict
-        log_prob = log_prob_arm
 
         # AWR weights: use counterfactual advantage when Q(s,a) mode
         if getattr(self.cfg, "use_counterfactual_q", False) and "q_base" in batch:
@@ -1603,7 +1585,6 @@ class GraphUnetResidualRLPolicy(nn.Module):
         w_adv = torch.exp(adv / beta_val)
         w_adv = torch.clamp(w_adv, 0.0, self.cfg.weight_clip_max)
         w_adv = w_adv / (w_adv.mean() + 1e-8)
-
         loss_actor = -(w_adv.detach() * log_prob).mean()
 
         # Critic: bar head only (no layer heads)
@@ -1709,7 +1690,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             "gate_entropy": gate_entropy.detach(),
             "entropy": entropy.mean().detach(),
             "loss_delta_reg": loss_delta_reg.detach(),
-            "alpha": alpha.detach(),
+            "alpha": torch.tensor(alpha),
             "c_delta_reg": c_delta_reg_val,
             "c_ent": c_ent_val,
             "beta": beta_val_report,

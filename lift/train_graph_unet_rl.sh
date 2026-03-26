@@ -12,15 +12,13 @@ NUM_EPOCHS="${6:-2}"
 C_DELTA_REG="${7:-2.0}"
 C_ENT="${8:-0.0}"
 BETA="${9:-1.0}"
-ALPHA_INIT="${10:-0.10}"
-EXPECTILE_TAU="${11:-0.5}"
-LR="${12:-5e-4}"
-SEED="${13:-42}"
-HEADLESS="${14:-true}"
+EXPECTILE_TAU="${10:-0.5}"
+LR="${11:-5e-4}"
+SEED="${12:-42}"
+HEADLESS="${13:-true}"
 
 TASK="${TASK:-SO-ARM101-Lift-Cube-v0}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-10}"
-USE_ADAPTIVE_ALPHA="${USE_ADAPTIVE_ALPHA:-false}"
 USE_ADAPTIVE_ENTROPY="${USE_ADAPTIVE_ENTROPY:-true}"
 C_ENT_BAD="${C_ENT_BAD:-0.005}"
 C_ENT_GOOD="${C_ENT_GOOD:-0.0001}"
@@ -37,8 +35,6 @@ HEADLESS_FLAG=""
 if [ "$HEADLESS" = "true" ] || [ "$HEADLESS" = "1" ]; then
     HEADLESS_FLAG="--headless"
 fi
-ADAPTIVE_ALPHA_FLAG=""
-[ "$USE_ADAPTIVE_ALPHA" = "false" ] && ADAPTIVE_ALPHA_FLAG="--no_adaptive_alpha"
 ADAPTIVE_ENTROPY_FLAG=""
 [ "$USE_ADAPTIVE_ENTROPY" = "false" ] && ADAPTIVE_ENTROPY_FLAG="--no_adaptive_entropy"
 
@@ -61,9 +57,7 @@ python scripts/graph_dit_rl/train_graph_rl.py \
     --c_ent_bad "$C_ENT_BAD" \
     --c_ent_good "$C_ENT_GOOD" \
     --beta "$BETA" \
-    --alpha_init "$ALPHA_INIT" \
     --expectile_tau "$EXPECTILE_TAU" \
-    $ADAPTIVE_ALPHA_FLAG \
     $ADAPTIVE_ENTROPY_FLAG \
     --lr "$LR" \
     --seed "$SEED" \

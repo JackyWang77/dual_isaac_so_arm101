@@ -7,28 +7,23 @@ set -e
 PRETRAINED_CHECKPOINT="${1:-}"
 RESUME_CHECKPOINT="${2:-}"
 NUM_ENVS="${3:-512}"
-MAX_ITERATIONS="${4:-30}"
-STEPS_PER_ENV="${5:-405}"
+MAX_ITERATIONS="${4:-50}"
+STEPS_PER_ENV="${5:-305}"
 MINI_BATCH_SIZE="${6:-512}"
 NUM_EPOCHS="${7:-3}"
 MAX_DELTA_NORM="${MAX_DELTA_NORM:-0.25}"
-EXPECTILE_TAU="${8:-0.5}"
-LR="${9:-1e-4}"
-SEED="${10:-42}"
-HEADLESS="${11:-true}"
+EXPECTILE_TAU="${9:-0.5}"
+LR="${10:-1e-4}"
+SEED="${11:-42}"
+HEADLESS="${12:-true}"
 
 TASK="${TASK:-SO-ARM101-Dual-Cube-Stack-RL-v0}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-10}"
-CRITIC_WARMUP_ITERS="${CRITIC_WARMUP_ITERS:-5}"
+CRITIC_WARMUP_ITERS="${CRITIC_WARMUP_ITERS:-10}"
 USE_COUNTERFACTUAL_Q="${USE_COUNTERFACTUAL_Q:-true}"
 COUNTERFACTUAL_LOG_TAU="${COUNTERFACTUAL_LOG_TAU:-0.5}"
 LOG_DIR="${LOG_DIR:-./logs/dual_arm_rl}"
 RUN_NAME="${RUN_NAME:-}"
-
-# Expert Intervention (Jacobian + DAgger)
-USE_EXPERT_INTERVENTION="${USE_EXPERT_INTERVENTION:-true}"
-EXPERT_INTERVENTION_RATIO="${EXPERT_INTERVENTION_RATIO:-1.0}"
-EXPERT_INTERVENTION_DECAY="${EXPERT_INTERVENTION_DECAY:-0.95}"
 
 # SAC-style adaptive parameters (all data-driven, no manual tuning needed)
 USE_ADAPTIVE_DELTA_REG="${USE_ADAPTIVE_DELTA_REG:-true}"
@@ -40,6 +35,11 @@ C_ENT_INIT="${C_ENT_INIT:-0.01}"
 USE_ADAPTIVE_BETA="${USE_ADAPTIVE_BETA:-true}"
 TARGET_EFF_RATIO="${TARGET_EFF_RATIO:-0.4}"
 BETA_INIT="${BETA_INIT:-2.0}"
+
+# Expert Intervention (Jacobian correction + DAgger schedule)
+USE_EXPERT_INTERVENTION="${USE_EXPERT_INTERVENTION:-true}"
+EXPERT_INTERVENTION_RATIO="${EXPERT_INTERVENTION_RATIO:-1.0}"
+EXPERT_INTERVENTION_DECAY="${EXPERT_INTERVENTION_DECAY:-0.95}"
 
 if [ -z "$PRETRAINED_CHECKPOINT" ] || [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
     echo "Usage: $0 <pretrained_checkpoint> [resume_checkpoint] [num_envs] [max_iter] ..."
@@ -87,8 +87,6 @@ if [ "$USE_ADAPTIVE_BETA" = "true" ]; then
 else
     ADAPTIVE_BETA_FLAG="--no_adaptive_beta"
 fi
-
-# Expert Intervention flags
 EXPERT_FLAG=""
 if [ "$USE_EXPERT_INTERVENTION" = "true" ]; then
     EXPERT_FLAG="--use_expert_intervention --expert_intervention_ratio $EXPERT_INTERVENTION_RATIO --expert_intervention_decay $EXPERT_INTERVENTION_DECAY"
@@ -105,8 +103,8 @@ echo "critic_warmup=$CRITIC_WARMUP_ITERS counterfactual_q=$USE_COUNTERFACTUAL_Q"
 echo "[Adaptive] delta_reg=$USE_ADAPTIVE_DELTA_REG (target_δ=$TARGET_DELTA_NORM c_init=$C_DELTA_REG_INIT)"
 echo "[Adaptive] entropy=$USE_AUTO_ENTROPY (target_H=$TARGET_ENTROPY c_init=$C_ENT_INIT)"
 echo "[Adaptive] beta=$USE_ADAPTIVE_BETA (target_eff=$TARGET_EFF_RATIO β_init=$BETA_INIT)"
-echo "[Expert] intervention=$USE_EXPERT_INTERVENTION (ratio=$EXPERT_INTERVENTION_RATIO decay=$EXPERT_INTERVENTION_DECAY)"
-echo "max_delta_norm=$MAX_DELTA_NORM"
+echo "[Fixed] alpha=1.0 (arm joints), max_delta_norm=$MAX_DELTA_NORM"
+echo "[Expert] intervention=$USE_EXPERT_INTERVENTION ratio=$EXPERT_INTERVENTION_RATIO decay=$EXPERT_INTERVENTION_DECAY"
 echo "Log: $LOG_DIR"
 echo "========================================"
 
