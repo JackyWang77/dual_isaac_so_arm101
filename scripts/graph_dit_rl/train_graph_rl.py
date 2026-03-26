@@ -822,8 +822,10 @@ class GraphDiTRLTrainer:
                         _reward_term_accum = torch.zeros(self.num_envs, len(_reward_term_names), device=self.device)
                         _reward_dt = unwrapped.step_dt  # sim.dt * decimation = 0.02
                     _reward_term_accum += rm._step_reward * _reward_dt
-            except Exception:
-                pass
+            except Exception as e:
+                if not hasattr(self, '_reward_accum_err_logged'):
+                    print(f"  [WARN] reward_term_accum error: {e}")
+                    self._reward_accum_err_logged = True
 
             if self.action_mean is not None and self.action_std is not None:
                 action_for_history = (action - self.action_mean) / (self.action_std + 1e-8)
@@ -868,16 +870,15 @@ class GraphDiTRLTrainer:
                         is_success = self._check_success_from_info(env_info, i, obs_before_step=obs)
                         n_terminated += 1
 
-                    # Debug: log first 50 episode outcomes with full diagnostics
+                    # Debug: log episode outcomes with full diagnostics
                     if not hasattr(self, "_ep_debug_count"):
                         self._ep_debug_count = 0
-                    if self._ep_debug_count < 50:
+                    _should_log = self._ep_debug_count < 50
+                    if _should_log:
                         self._ep_debug_count += 1
                         led = self._term_mgr._last_episode_dones
                         fired = [self._term_names[j] for j in range(len(self._term_names))
                                  if bool(led[i, j].item())]
-                        # Diagnose WHY success didn't fire using PRE-STEP obs (terminal state)
-                        # NOTE: post-step scene data is RESET state, useless. Use obs (pre-step).
                         _diag = ""
                         try:
                             s = getattr(self.cfg, "obs_structure", None)
@@ -889,24 +890,28 @@ class GraphDiTRLTrainer:
                                 xy_dist = torch.norm(c1[:2] - c2[:2]).item()
                                 z_ok = abs(z_diff_ab - 0.018) < 0.003 or abs(z_diff_ba - 0.018) < 0.003
                                 xy_ok = xy_dist < 0.009
-                                _diag = (f" | z_diff={z_diff_ab*1000:.1f}mm xy={xy_dist*1000:.1f}mm "
+                                _diag = (f" | z={z_diff_ab*1000:.1f}mm xy={xy_dist*1000:.1f}mm "
                                          f"[z={'OK' if z_ok else 'FAIL'} xy={'OK' if xy_ok else 'FAIL'}]")
-                            # Gripper: read from obs if available, else from scene (post-reset, less useful)
                             if s is not None and "right_joint_pos" in s:
                                 rj = obs[i, s["right_joint_pos"][0]:s["right_joint_pos"][1]]
                                 lj = obs[i, s["left_joint_pos"][0]:s["left_joint_pos"][1]]
-                                r_grip_rel = rj[-1].item()  # last joint = gripper (joint_pos_rel)
+                                r_grip_rel = rj[-1].item()
                                 l_grip_rel = lj[-1].item()
-                                # obs is joint_pos_rel = actual - default(0.4), convert to absolute
                                 r_grip_abs = r_grip_rel + 0.4
                                 l_grip_abs = l_grip_rel + 0.4
                                 grip_ok = r_grip_abs > 0.1 and l_grip_abs > 0.1
-                                _diag += f" R_grip={r_grip_abs:.3f}(rel={r_grip_rel:.3f}) L_grip={l_grip_abs:.3f}(rel={l_grip_rel:.3f}) [grip={'OK' if grip_ok else 'FAIL'}]"
+                                _diag += f" Rg={r_grip_abs:.3f} Lg={l_grip_abs:.3f} [grip={'OK' if grip_ok else 'FAIL'}]"
                         except Exception as e:
                             _diag = f" | diag_err={e}"
+                        # Per-episode reward breakdown for this env
+                        _rew_str = ""
+                        if _reward_term_accum is not None and _reward_term_names is not None:
+                            terms = _reward_term_accum[i]
+                            _rew_parts = [f"{n}={v.item():.2f}" for n, v in zip(_reward_term_names, terms) if abs(v.item()) > 0.001]
+                            _rew_str = f" | rew_terms=[{', '.join(_rew_parts)}]"
                         print(f"  [EP] env={i} T={is_terminated} Tr={is_truncated} "
                               f"S={is_success} fired={fired} "
-                              f"len={ep_lengths[i].item():.0f} rew={ep_rewards[i].item():.1f}{_diag}")
+                              f"len={ep_lengths[i].item():.0f} rew={ep_rewards[i].item():.1f}{_diag}{_rew_str}")
                     if is_success:
                         n_success += 1
                     rollout_successes.append(float(is_success))
