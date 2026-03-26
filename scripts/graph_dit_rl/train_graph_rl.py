@@ -507,6 +507,13 @@ class GraphDiTRLTrainer:
             # Safety clamp on joint delta
             dq = torch.clamp(dq, -0.05, 0.05)
 
+            # Pre-scale by 1/alpha so that after alpha*delta the correction is exact
+            # (alpha=0.4 for arm joints, so expert_delta = dq/0.4)
+            alpha_vec, _ = self.policy._compute_alpha_vec(B, self.device)
+            arm_alpha = alpha_vec[0, 6] if act_dim == 12 else alpha_vec[0, 0]  # arm joint alpha
+            if arm_alpha > 0:
+                dq = dq / arm_alpha
+
             # Place into right arm joint slots
             # Backbone order: [left_6, right_6], right arm joints = indices 6:11
             if act_dim == 12:
