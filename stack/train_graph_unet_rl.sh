@@ -11,22 +11,24 @@ MAX_ITERATIONS="${4:-30}"
 STEPS_PER_ENV="${5:-405}"
 MINI_BATCH_SIZE="${6:-512}"
 NUM_EPOCHS="${7:-3}"
-ALPHA_INIT="${8:-0.05}"
-ALPHA_MAX="${ALPHA_MAX:-0.4}"
 MAX_DELTA_NORM="${MAX_DELTA_NORM:-0.25}"
-EXPECTILE_TAU="${9:-0.5}"
-LR="${10:-1e-4}"
-SEED="${11:-42}"
-HEADLESS="${12:-true}"
+EXPECTILE_TAU="${8:-0.5}"
+LR="${9:-1e-4}"
+SEED="${10:-42}"
+HEADLESS="${11:-true}"
 
 TASK="${TASK:-SO-ARM101-Dual-Cube-Stack-RL-v0}"
 SAVE_INTERVAL="${SAVE_INTERVAL:-10}"
-USE_ADAPTIVE_ALPHA="${USE_ADAPTIVE_ALPHA:-false}"
 CRITIC_WARMUP_ITERS="${CRITIC_WARMUP_ITERS:-5}"
 USE_COUNTERFACTUAL_Q="${USE_COUNTERFACTUAL_Q:-true}"
 COUNTERFACTUAL_LOG_TAU="${COUNTERFACTUAL_LOG_TAU:-0.5}"
 LOG_DIR="${LOG_DIR:-./logs/dual_arm_rl}"
 RUN_NAME="${RUN_NAME:-}"
+
+# Expert Intervention (Jacobian + DAgger)
+USE_EXPERT_INTERVENTION="${USE_EXPERT_INTERVENTION:-true}"
+EXPERT_INTERVENTION_RATIO="${EXPERT_INTERVENTION_RATIO:-1.0}"
+EXPERT_INTERVENTION_DECAY="${EXPERT_INTERVENTION_DECAY:-0.95}"
 
 # SAC-style adaptive parameters (all data-driven, no manual tuning needed)
 USE_ADAPTIVE_DELTA_REG="${USE_ADAPTIVE_DELTA_REG:-true}"
@@ -63,8 +65,6 @@ HEADLESS_FLAG=""
 if [ "$HEADLESS" = "true" ] || [ "$HEADLESS" = "1" ]; then
     HEADLESS_FLAG="--headless"
 fi
-ADAPTIVE_ALPHA_FLAG=""
-[ "$USE_ADAPTIVE_ALPHA" = "false" ] && ADAPTIVE_ALPHA_FLAG="--no_adaptive_alpha"
 COUNTERFACTUAL_Q_FLAG=""
 [ "$USE_COUNTERFACTUAL_Q" = "true" ] && COUNTERFACTUAL_Q_FLAG="--use_counterfactual_q --counterfactual_log_tau $COUNTERFACTUAL_LOG_TAU"
 
@@ -88,6 +88,12 @@ else
     ADAPTIVE_BETA_FLAG="--no_adaptive_beta"
 fi
 
+# Expert Intervention flags
+EXPERT_FLAG=""
+if [ "$USE_EXPERT_INTERVENTION" = "true" ]; then
+    EXPERT_FLAG="--use_expert_intervention --expert_intervention_ratio $EXPERT_INTERVENTION_RATIO --expert_intervention_decay $EXPERT_INTERVENTION_DECAY"
+fi
+
 echo "========================================"
 echo "Training Dual Arm + Residual RL - Stack"
 echo "Pretrained: $PRETRAINED_CHECKPOINT"
@@ -99,7 +105,8 @@ echo "critic_warmup=$CRITIC_WARMUP_ITERS counterfactual_q=$USE_COUNTERFACTUAL_Q"
 echo "[Adaptive] delta_reg=$USE_ADAPTIVE_DELTA_REG (target_δ=$TARGET_DELTA_NORM c_init=$C_DELTA_REG_INIT)"
 echo "[Adaptive] entropy=$USE_AUTO_ENTROPY (target_H=$TARGET_ENTROPY c_init=$C_ENT_INIT)"
 echo "[Adaptive] beta=$USE_ADAPTIVE_BETA (target_eff=$TARGET_EFF_RATIO β_init=$BETA_INIT)"
-echo "[Adaptive] alpha=$USE_ADAPTIVE_ALPHA (α_init=$ALPHA_INIT α_max=$ALPHA_MAX max_δ=$MAX_DELTA_NORM)"
+echo "[Expert] intervention=$USE_EXPERT_INTERVENTION (ratio=$EXPERT_INTERVENTION_RATIO decay=$EXPERT_INTERVENTION_DECAY)"
+echo "max_delta_norm=$MAX_DELTA_NORM"
 echo "Log: $LOG_DIR"
 echo "========================================"
 
@@ -121,15 +128,13 @@ python scripts/graph_dit_rl/train_graph_rl.py \
     --c_delta_reg "$C_DELTA_REG_INIT" \
     --c_ent "$C_ENT_INIT" \
     --beta "$BETA_INIT" \
-    --alpha_init "$ALPHA_INIT" \
-    --alpha_max "$ALPHA_MAX" \
     --max_delta_norm "$MAX_DELTA_NORM" \
     --expectile_tau "$EXPECTILE_TAU" \
-    $ADAPTIVE_ALPHA_FLAG \
     $COUNTERFACTUAL_Q_FLAG \
     $ADAPTIVE_DELTA_REG_FLAG \
     $AUTO_ENTROPY_FLAG \
     $ADAPTIVE_BETA_FLAG \
+    $EXPERT_FLAG \
     --lr "$LR" \
     --seed "$SEED" \
     --critic_warmup_iters "$CRITIC_WARMUP_ITERS" \

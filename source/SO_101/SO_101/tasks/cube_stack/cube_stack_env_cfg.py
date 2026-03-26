@@ -337,37 +337,17 @@ class TerminationsCfg:
         func=mdp.root_height_below_minimum,
         params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("cube_2")},
     )
-    # Named "success" for record_demos.py auto-reset when all done (must release gripper)
     success = DoneTerm(
         func=mdp.two_cubes_stacked_aligned_gripper_released,
         params={
-            "expected_height": 0.018,
+            "expected_height": 0.012,
             "eps_z": 0.003,
-            "eps_xy": 0.009,
+            "eps_xy": 0.006,
             "gripper_open_threshold": 0.1,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
             "left_arm_cfg": SceneEntityCfg("left_arm"),
-        },
-    )
-    stack_success = DoneTerm(
-        func=mdp.two_cubes_stacked_at_target_released,
-        params={
-            "target_xy": TARGET_XY,
-            "expected_height": 0.018,
-            "eps_z": 0.003,
-            "eps_xy": 0.009,
-            "target_eps_xy": 0.2,
-            "gripper_open_threshold": 0.1,
-            "vel_threshold": 0.001,
-            "stable_steps_required": 1,
-            "cube_1_cfg": SceneEntityCfg("cube_1"),
-            "cube_2_cfg": SceneEntityCfg("cube_2"),
-            "right_arm_cfg": SceneEntityCfg("right_arm"),
-            "left_arm_cfg": SceneEntityCfg("left_arm"),
-            "ee_right_cfg": SceneEntityCfg("ee_right"),
-            "ee_left_cfg": SceneEntityCfg("ee_left"),
         },
     )
 
@@ -409,13 +389,12 @@ class CubeStackEnvCfg(ManagerBasedRLEnvCfg):
 # =========================================================
 @configclass
 class CubeStackRLRewardsCfg:
-    """Success-driven rewards for residual RL.
+    """Rewards for residual RL fine-tuning.
 
-    Core philosophy: reward OUTCOME not PROCESS.
-    - success_bonus dominates (10000) → only thing that matters
-    - black_hole is tiny (weight=1) → weak alignment hint, unhackable
-    - time_penalty → faster success = more reward
-    - No gripper reward → success already requires gripper open
+    Three-stage reward cascade:
+    - black_hole (dense): rewards approaching target while holding (gripper closed)
+    - gripper_open (one-shot, loose): rewards the DECISION to release when roughly aligned
+    - success_bonus (one-shot, strict): rewards the OUTCOME of successful stacking
     """
 
     # === Tiny shaping (won't dominate, just helps critic) ===
@@ -470,14 +449,14 @@ class CubeStackRLRewardsCfg:
         func=mdp.stack_success_bonus,
         params={
             "expected_height": 0.012,
-            "eps_z": 0.008,
-            "eps_xy": 0.01,
+            "eps_z": 0.003,
+            "eps_xy": 0.006,
             "gripper_open_thresh": 0.1,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
-        weight=25000.0,  # display ~40, 5-6x larger than black_hole
+        weight=25000.0,
     )
 
     # Smooth control penalties

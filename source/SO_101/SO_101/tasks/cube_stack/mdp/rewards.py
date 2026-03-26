@@ -208,8 +208,8 @@ def gripper_release_when_stacked(
 def stack_success_bonus(
     env: ManagerBasedRLEnv,
     expected_height: float = 0.012,
-    eps_z: float = 0.005,
-    eps_xy: float = 0.012,
+    eps_z: float = 0.003,
+    eps_xy: float = 0.006,
     gripper_open_thresh: float = 0.1,
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
@@ -217,6 +217,8 @@ def stack_success_bonus(
 ) -> torch.Tensor:
     """Large one-time bonus when stack success + right gripper open.
 
+    Same logic as termination: |z_diff - expected_height| < eps_z AND xy_dist < eps_xy.
+    Cube edge = 12mm → expected_height = 0.012 (center-to-center when touching).
     Only checks right arm (which places cube_1).
     """
     c1: RigidObject = env.scene[cube_1_cfg.name]
@@ -236,10 +238,8 @@ def stack_success_bonus(
     z_diff_2on1 = p2[:, 2] - p1[:, 2]
     xy_dist = torch.norm(p1[:, :2] - p2[:, :2], dim=1)
 
-    # Only upper bound on z_diff: 0 is perfect, just needs to be < max_z
-    max_z = expected_height + eps_z
-    ok_1on2 = (z_diff_1on2 >= 0) & (z_diff_1on2 < max_z) & (xy_dist < eps_xy)
-    ok_2on1 = (z_diff_2on1 >= 0) & (z_diff_2on1 < max_z) & (xy_dist < eps_xy)
+    ok_1on2 = (torch.abs(z_diff_1on2 - expected_height) < eps_z) & (xy_dist < eps_xy)
+    ok_2on1 = (torch.abs(z_diff_2on1 - expected_height) < eps_z) & (xy_dist < eps_xy)
     stacked = ok_1on2 | ok_2on1
 
     right_open = (right_arm.data.joint_pos[:, -1] > gripper_open_thresh)
@@ -315,18 +315,20 @@ def black_hole_attraction(
 
 def gripper_open_reward(
     env: ManagerBasedRLEnv,
-    xy_threshold: float = 0.006,
-    z_max: float = 0.02,
+    expected_height: float = 0.012,
+    eps_z: float = 0.004,
+    eps_xy: float = 0.006,
     gripper_open_thresh: float = 0.1,
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
 ) -> torch.Tensor:
-    """One-shot reward for gripper opening when cubes are aligned and close to stacked.
+    """One-shot reward for releasing gripper when cubes are approximately stacked.
 
-    Gate: xy_dist < 6mm AND z_diff < 14mm (cube nearly placed).
-    Binary: gripper open or not. One-shot (fires once per episode).
-    Earlier opening → more cumulative reward (but practically 1 step before reset).
+    Bridge reward between black_hole (dense, gripper closed) and success_bonus (strict).
+    Looser than success: rewards the DECISION to release, not the outcome.
+    Uses same |z_diff - expected_height| < eps_z logic as termination (both orders).
+    Cube edge = 12mm, so expected_height = 0.012 (center-to-center).
     """
     c1: RigidObject = env.scene[cube_1_cfg.name]
     c2: RigidObject = env.scene[cube_2_cfg.name]
@@ -341,15 +343,16 @@ def gripper_open_reward(
     p1 = c1.data.root_pos_w[:, :3]
     p2 = c2.data.root_pos_w[:, :3]
 
-    # Alignment gate: xy close AND z close (nearly stacked)
+    z_diff_1on2 = p1[:, 2] - p2[:, 2]
+    z_diff_2on1 = p2[:, 2] - p1[:, 2]
     xy_dist = torch.norm(p1[:, :2] - p2[:, :2], dim=1)
-    z_diff = p1[:, 2] - p2[:, 2]
-    aligned = (xy_dist < xy_threshold) & (z_diff < z_max)
 
-    # Gripper binary: open or not
-    gripper_pos = right_arm.data.joint_pos[:, -1]
-    gripper_open = (gripper_pos > gripper_open_thresh)
+    # Same logic as termination, but looser eps
+    ok_1on2 = (torch.abs(z_diff_1on2 - expected_height) < eps_z) & (xy_dist < eps_xy)
+    ok_2on1 = (torch.abs(z_diff_2on1 - expected_height) < eps_z) & (xy_dist < eps_xy)
+    aligned = ok_1on2 | ok_2on1
 
+    gripper_open = (right_arm.data.joint_pos[:, -1] > gripper_open_thresh)
 
     # One-shot: fire once per episode
     fire_now = aligned & gripper_open & (~env._gripper_open_fired)

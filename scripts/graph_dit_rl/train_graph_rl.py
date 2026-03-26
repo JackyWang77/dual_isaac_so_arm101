@@ -48,13 +48,8 @@ parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradie
 parser.add_argument("--c_delta_reg", type=float, default=2.0, help="Delta (residual) regularization weight; higher = smoother, RL 'don't move unless reward'")
 parser.add_argument("--c_ent", type=float, default=0.01, help="Entropy coefficient; encourages exploration")
 parser.add_argument("--beta", type=float, default=1.0, help="AWR beta: w=exp(adv/beta); higher=softer weighting, lower=sharper on high-adv samples")
-parser.add_argument("--alpha_init", type=float, default=0.10, help="Residual alpha init: a=base+alpha*delta; arm uses clamped(0,0.5), gripper=1.0")
-parser.add_argument("--alpha_max", type=float, default=0.08, help="Max alpha for scalar mode; lower = more conservative actor")
 parser.add_argument("--max_delta_norm", type=float, default=0.0, help="Hard clamp on ||delta||_2; 0=disabled. Projects delta to L2 ball.")
 parser.add_argument("--expectile_tau", type=float, default=0.7, help="Expectile τ for value loss (IQL-style); τ=0.7 → optimistic; 0.5=MSE")
-parser.add_argument("--use_adaptive_alpha", action="store_true", default=True, help="Use state-dependent alpha_net (default: True)")
-parser.add_argument("--no_adaptive_alpha", action="store_false", dest="use_adaptive_alpha", help="Use scalar alpha instead")
-parser.add_argument("--debug_alpha", action="store_true", help="Print alpha/delta stats in act() to diagnose 0%% SR")
 parser.add_argument("--no_adaptive_entropy", action="store_true", help="Use fixed cEnt instead of Adaptive Entropy")
 parser.add_argument("--c_ent_bad", type=float, default=0.02, help="High entropy weight for adv<0 (failed steps)")
 parser.add_argument("--c_ent_good", type=float, default=0.005, help="Low entropy weight for adv>0 (success steps)")
@@ -66,6 +61,14 @@ parser.add_argument("--use_counterfactual_q", action="store_true", default=False
     help="Use Q(s,a) critic with counterfactual advantage A_res = Q(s,a_total) - Q(s,a_base)")
 parser.add_argument("--counterfactual_log_tau", type=float, default=0.5,
     help="Log compression temperature for counterfactual advantage: sign(A)*log(1+|A|/tau)*tau")
+
+# Expert Intervention (Jacobian-based alignment correction + DAgger)
+parser.add_argument("--use_expert_intervention", action="store_true", default=False,
+    help="Enable Jacobian expert correction during alignment phase (DAgger-style)")
+parser.add_argument("--expert_intervention_ratio", type=float, default=1.0,
+    help="Initial probability of expert intervention when misaligned (1.0=always, decays over iters)")
+parser.add_argument("--expert_intervention_decay", type=float, default=0.95,
+    help="Multiply intervention_ratio by this each iteration (DAgger schedule; 0.95=halves every ~14 iters)")
 
 # SAC-style adaptive parameters (data-driven, no manual tuning)
 parser.add_argument("--use_adaptive_delta_reg", action="store_true", default=True,
@@ -174,11 +177,6 @@ class RolloutBuffer:
         # Q(s, a_base) for counterfactual advantage (only used when use_counterfactual_q=True)
         self.q_base = torch.zeros(T, N, device=device)
 
-        # Gripper override data
-        self.gripper_override_action = torch.zeros(T, N, 2, device=device)  # override decisions
-        self.gripper_override_target = torch.zeros(T, N, 2, device=device)  # BCE targets (warmup)
-        self.gripper_hist_flat = torch.zeros(T, N, 20, device=device)  # 10 steps * 2 grippers
-
         self._initialized = True
 
     def add(
@@ -216,18 +214,6 @@ class RolloutBuffer:
         if info.get("q_base") is not None:
             self.q_base[t] = info["q_base"].detach()
 
-        # Gripper override data
-        if info.get("gripper_override_action") is not None:
-            self.gripper_override_action[t] = info["gripper_override_action"]
-        if info.get("gripper_override_target") is not None:
-            self.gripper_override_target[t] = info["gripper_override_target"]
-        if info.get("gripper_hist_flat") is not None:
-            gh = info["gripper_hist_flat"]
-            if gh.shape[-1] <= self.gripper_hist_flat.shape[-1]:
-                self.gripper_hist_flat[t, :, :gh.shape[-1]] = gh
-            else:
-                self.gripper_hist_flat[t] = gh[:, :self.gripper_hist_flat.shape[-1]]
-
         self.ptr += 1
 
     def compute_returns(self, last_value: torch.Tensor, gamma: float, lam: float):
@@ -252,10 +238,6 @@ class RolloutBuffer:
         z_bar_flat = self.z_bar.reshape(total_samples, -1)
         values_flat = self.values.reshape(total_samples)
         q_base_flat = self.q_base.reshape(total_samples)  # Q(s, a_base) for counterfactual
-        gripper_override_action_flat = self.gripper_override_action.reshape(total_samples, -1)
-        gripper_override_target_flat = self.gripper_override_target.reshape(total_samples, -1)
-        gripper_hist_flat_flat = self.gripper_hist_flat.reshape(total_samples, -1)
-
         # Normalize advantages
         adv_flat = (adv_flat - adv_flat.mean()) / (adv_flat.std() + 1e-8)
 
@@ -286,9 +268,6 @@ class RolloutBuffer:
                     "values": values_flat[idx],
                     "q_total": values_flat[idx],  # values = Q(s, a_total) in Q mode
                     "q_base": q_base_flat[idx],   # Q(s, a_base) for counterfactual
-                    "gripper_override_action": gripper_override_action_flat[idx],
-                    "gripper_override_target": gripper_override_target_flat[idx],
-                    "gripper_hist_flat": gripper_hist_flat_flat[idx],
                 }
 
     def reset(self):
@@ -426,6 +405,120 @@ class GraphDiTRLTrainer:
         print(f"[Trainer] Success: using env termination signals (Episode_Termination/success)")
         print(f"[Trainer] truncated=timeout=failure, terminated+success_signal=success")
         print(f"[Trainer] Best-model: save when rollout SR (this iter) improves after critic warmup")
+
+        # ============================================================
+        # Expert Intervention (Jacobian-based alignment correction)
+        # ============================================================
+        self.use_expert_intervention = getattr(cfg, "use_expert_intervention", False)
+        self.expert_intervention_ratio = getattr(cfg, "expert_intervention_ratio", 1.0)
+        self.expert_intervention_decay = getattr(cfg, "expert_intervention_decay", 0.95)
+        self.expert_xy_threshold = 0.003  # intervene when xy_error > 3mm
+        self._expert_initialized = False
+        self._right_arm = None
+        self._right_jacobi_body_idx = None
+        self._right_arm_joint_indices = None
+        if self.use_expert_intervention:
+            self._init_expert_intervention()
+            print(f"[Trainer] Expert Intervention ENABLED: ratio={self.expert_intervention_ratio}, "
+                  f"decay={self.expert_intervention_decay}/iter, xy_thresh={self.expert_xy_threshold*1000:.0f}mm")
+
+    # ============================================================
+    # Expert Intervention: Jacobian-based alignment correction
+    # ============================================================
+    def _init_expert_intervention(self):
+        """Initialize Jacobian infrastructure for expert correction."""
+        try:
+            base = self.env.unwrapped if hasattr(self.env, "unwrapped") else self.env
+            self._right_arm = base.scene["right_arm"]
+            # Find EE body index for Jacobian (wrist_2_link)
+            body_ids, _ = self._right_arm.find_bodies("wrist_2_link")
+            self._right_jacobi_body_idx = body_ids[0] - 1
+            # Arm joint indices (first 5 joints, excluding gripper)
+            arm_joint_names = [
+                "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+                "wrist_pitch_joint", "wrist_roll_joint",
+            ]
+            self._right_arm_joint_indices = [
+                self._right_arm.joint_names.index(name) for name in arm_joint_names
+            ]
+            self._expert_initialized = True
+            print(f"[Expert] Jacobian body_idx={self._right_jacobi_body_idx}, "
+                  f"joint_indices={self._right_arm_joint_indices}")
+        except Exception as e:
+            print(f"[Expert] WARNING: Failed to initialize Jacobian: {e}")
+            self._expert_initialized = False
+
+    def _compute_expert_delta(self, obs: torch.Tensor) -> tuple:
+        """Compute expert Jacobian correction for misaligned cubes.
+
+        Returns:
+            expert_delta: [B, action_dim] joint-space correction (zeros where no intervention)
+            intervene_mask: [B] bool, True where expert intervened
+        """
+        B = obs.shape[0]
+        obs_struct = getattr(self.cfg, "obs_structure", None)
+        action_dim = self.cfg.action_dim
+        expert_delta = torch.zeros(B, action_dim, device=self.device)
+        intervene_mask = torch.zeros(B, dtype=torch.bool, device=self.device)
+
+        if not self._expert_initialized or obs_struct is None:
+            return expert_delta, intervene_mask
+        if "cube_1_pos" not in obs_struct or "cube_2_pos" not in obs_struct:
+            return expert_delta, intervene_mask
+
+        # Get cube positions from obs (local frame)
+        s1 = obs_struct["cube_1_pos"][0]
+        s2 = obs_struct["cube_2_pos"][0]
+        c1 = obs[:, s1:s1+3]  # [B, 3]
+        c2 = obs[:, s2:s2+3]  # [B, 3]
+
+        # XY error: how far cube1 is from being above cube2
+        xy_error = c1[:, :2] - c2[:, :2]  # [B, 2]
+        xy_dist = torch.norm(xy_error, dim=1)  # [B]
+
+        # Check zone: only intervene when in alignment phase
+        # (cube1 is close to cube2 in 3D, i.e., within activation zone)
+        target_z = c2[:, 2] + 0.012  # target: one cube height above base
+        dist_to_target = torch.sqrt(xy_dist**2 + (c1[:, 2] - target_z)**2)
+        in_zone = dist_to_target < 0.02  # within 2cm activation zone
+
+        # Misaligned: xy_error > threshold AND in zone
+        misaligned = (xy_dist > self.expert_xy_threshold) & in_zone
+
+        # DAgger: stochastic intervention based on current ratio
+        if self.expert_intervention_ratio < 1.0:
+            coin = torch.rand(B, device=self.device)
+            misaligned = misaligned & (coin < self.expert_intervention_ratio)
+
+        if not misaligned.any():
+            return expert_delta, intervene_mask
+
+        # Get Jacobian for all envs (batched)
+        try:
+            jac_all = self._right_arm.root_physx_view.get_jacobians()
+            # [N, num_bodies, 6, num_joints]
+            # Extract EE body, xyz rows (0:3), arm joints
+            jac_ee = jac_all[:, self._right_jacobi_body_idx, :3, :]  # [N, 3, num_joints]
+            jac_arm = jac_ee[:, :, self._right_arm_joint_indices]     # [N, 3, 5]
+        except Exception:
+            return expert_delta, intervene_mask
+
+        # Desired Cartesian correction: move EE to reduce xy_error
+        dx_desired = torch.zeros(B, 3, device=self.device)
+        dx_desired[:, :2] = -xy_error  # move in opposite direction of error
+
+        # Jacobian pseudoinverse → joint delta (only for misaligned envs)
+        for i in range(B):
+            if not misaligned[i]:
+                continue
+            J = jac_arm[i]  # [3, 5]
+            J_pinv = torch.linalg.pinv(J)  # [5, 3]
+            dq = J_pinv @ dx_desired[i]  # [5]
+            # Right arm joints are at indices 6:11 in the 12D action (left=0:6, right=6:12)
+            expert_delta[i, 6:11] = dq
+
+        intervene_mask = misaligned
+        return expert_delta, intervene_mask
 
     def _check_success_from_info(self, env_info, env_idx: int, obs_before_step: torch.Tensor = None) -> bool:
         """Check success with multi-level fallback (matching play.py).
@@ -640,6 +733,17 @@ class GraphDiTRLTrainer:
                     if a_base is not None and outside_zone.any():
                         action[outside_zone] = a_base[outside_zone]
 
+                # Expert Intervention: replace action with Jacobian correction
+                # where misaligned (DAgger-style, with decaying intervention ratio)
+                if self.use_expert_intervention and self._expert_initialized and not zero_residual:
+                    expert_delta, intervene_mask = self._compute_expert_delta(obs)
+                    if intervene_mask.any():
+                        a_base = info.get("a_base")
+                        if a_base is not None:
+                            # Expert action = backbone + expert correction
+                            expert_action = a_base + expert_delta
+                            action[intervene_mask] = expert_action[intervene_mask]
+
                 if hasattr(self.env, 'action_space'):
                     if hasattr(self.env.action_space, 'low') and hasattr(self.env.action_space, 'high'):
                         action = torch.clamp(
@@ -852,6 +956,9 @@ class GraphDiTRLTrainer:
             stats["delta_norm_mean"] = 0.0
             stats["delta_norm_max"] = 0.0
 
+        if self.use_expert_intervention:
+            stats["expert_ratio"] = self.expert_intervention_ratio
+
         return stats
 
     def update(self, iteration: int = 0) -> Dict[str, float]:
@@ -871,7 +978,6 @@ class GraphDiTRLTrainer:
         total_c_ent = 0.0
         total_beta = 0.0
         total_eff_ratio = 0.0
-        total_gripper_distill = 0.0
         num_updates = 0
         all_returns = []
         all_values = []
@@ -887,10 +993,9 @@ class GraphDiTRLTrainer:
 
             self.optimizer.zero_grad()
             if critic_warmup:
-                # Only train critic + gripper override distillation
+                # Only train critic (warmup phase)
                 loss_to_backward = (
                     self.cfg.cV * 0.5 * losses["loss_critic_bar_raw"]
-                    + losses.get("loss_gripper_distill", torch.tensor(0.0, device=losses["loss_critic_bar_raw"].device))
                 )
                 loss_to_backward.backward()
             else:
@@ -922,9 +1027,6 @@ class GraphDiTRLTrainer:
             eff_val = losses.get("eff_ratio")
             if eff_val is not None:
                 total_eff_ratio += eff_val.item() if hasattr(eff_val, "item") else float(eff_val)
-            gd_val = losses.get("loss_gripper_distill")
-            if gd_val is not None:
-                total_gripper_distill += gd_val.item() if hasattr(gd_val, "item") else float(gd_val)
             num_updates += 1
             all_returns.append(batch["returns"])
             all_values.append(batch["values"])
@@ -952,7 +1054,6 @@ class GraphDiTRLTrainer:
             "c_ent": total_c_ent / n if n > 0 else 0.0,
             "beta": total_beta / n if n > 0 else 0.0,
             "eff_ratio": total_eff_ratio / n if n > 0 else 0.0,
-            "gripper_distill": total_gripper_distill / n if n > 0 else 0.0,
         }
 
     def train(self, max_iterations: int, save_interval: int = 50, start_iteration: int = 1):
@@ -973,7 +1074,11 @@ class GraphDiTRLTrainer:
 
         start_iter = getattr(self, "_start_iteration", 1)
         for iteration in range(start_iter, max_iterations + 1):
-            # Curriculum disabled: black-hole reward is a single dense signal (no phase switch).
+            # DAgger decay: reduce expert intervention ratio each iteration
+            if self.use_expert_intervention and iteration > 1:
+                self.expert_intervention_ratio *= self.expert_intervention_decay
+                self.expert_intervention_ratio = max(self.expert_intervention_ratio, 0.0)
+
             current_lr = self.optimizer.param_groups[0]["lr"]
             # Collect
             rollout_stats = self.collect_rollout(iteration=iteration)
@@ -1264,7 +1369,8 @@ class GraphDiTRLTrainer:
             f"Δ={delta:.3f} | "
             f"α={alpha:.2f} β={beta_v:.3f} | "
             f"cΔ={c_dreg:.1f} cH={c_ent_v:.4f} eff={eff_r:.2f} | "
-            f"L={loss:.3f} gD={update_stats.get('gripper_distill', 0):.4f} gB={update_stats.get('gripper_boost', 0.1):.3f} gH={update_stats.get('gripper_H', 0):.3f}"
+            f"L={loss:.3f}"
+            + (f" EXP={rollout_stats.get('expert_ratio', 0):.2f}" if rollout_stats.get('expert_ratio', 0) > 0 else "")
         )
 
     def _save_best(self, iteration: int):
@@ -1433,13 +1539,9 @@ def main():
         c_delta_reg=args.c_delta_reg,
         cEnt=args.c_ent,
         beta=args.beta,
-        alpha_init=args.alpha_init,
-        alpha_max=getattr(args, "alpha_max", 0.08),
         max_delta_norm=getattr(args, "max_delta_norm", 0.0),
         use_expectile_value=True,
         expectile_tau=args.expectile_tau,
-        use_adaptive_alpha=args.use_adaptive_alpha,
-        debug_alpha=getattr(args, "debug_alpha", False),
         use_adaptive_entropy=not getattr(args, "no_adaptive_entropy", False),
         c_ent_bad=args.c_ent_bad,
         c_ent_good=args.c_ent_good,
@@ -1455,6 +1557,10 @@ def main():
         use_adaptive_beta=getattr(args, "use_adaptive_beta", True),
         target_eff_ratio=getattr(args, "target_eff_ratio", 0.4),
         beta_init=getattr(args, "beta_init", 0.3),
+        # Expert Intervention (Jacobian + DAgger)
+        use_expert_intervention=getattr(args, "use_expert_intervention", False),
+        expert_intervention_ratio=getattr(args, "expert_intervention_ratio", 1.0),
+        expert_intervention_decay=getattr(args, "expert_intervention_decay", 0.95),
     )
     print(f"[Main] residual_action_mask: {residual_action_mask.tolist()} (all 1s, no mask)")
     print(f"[Main] Residual RL obs_structure: {policy_cfg.obs_structure}")
@@ -1487,6 +1593,11 @@ def main():
         print(f"[Main] Q(s,a) counterfactual baseline ENABLED (log_tau={policy_cfg.counterfactual_log_tau})")
     else:
         print(f"[Main] V(s) baseline (standard)")
+    if policy_cfg.use_expert_intervention:
+        print(f"[Main] Expert Intervention ENABLED (DAgger): ratio={policy_cfg.expert_intervention_ratio}, "
+              f"decay={policy_cfg.expert_intervention_decay}/iter")
+    else:
+        print(f"[Main] Expert Intervention: disabled")
 
     # Create or load policy
     start_iteration = 1
