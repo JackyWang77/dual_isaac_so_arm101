@@ -496,7 +496,10 @@ class GraphDiTRLTrainer:
         xy_error = held_xy - target_xy  # [B, 2] - how far held cube is from target
         xy_error_norm = xy_error.norm(dim=-1)
 
-        needs_correction = in_stacking_zone & (xy_error_norm > 0.003)  # 3mm threshold
+        # Z diff between held cube and target cube
+        z_diff = torch.abs(held_z - torch.min(c1_z, c2_z))  # held - base
+
+        needs_correction = in_stacking_zone & ((xy_error_norm > 0.003) | (z_diff > 0.005))
 
         if not needs_correction.any():
             return expert_delta, intervene_mask
@@ -507,13 +510,29 @@ class GraphDiTRLTrainer:
             # Last body (EE), xyz position rows, first 5 arm joints
             J_xyz = jac[:, -1, :3, :5]  # [B, 3, 5]
 
-            # Desired EE correction: move to reduce xy_error
-            # Rate-limit: max 1mm EE displacement per step (consistent with backbone speed)
+            # Two-phase strategy to avoid friction when cubes touch:
+            # Phase 1: XY not aligned → move XY, lift Z slightly above target
+            # Phase 2: XY aligned → descend Z to stack
+            xy_aligned = xy_error_norm < 0.003  # 3mm threshold
+            hover_height = 0.025  # hover 25mm above base cube (cube=18mm + 7mm margin)
+
             max_ee_step = 0.001  # 1mm per step
             dx = torch.zeros(B, 3, device=self.device)
-            dx[:, 0] = -xy_error[:, 0]  # correct x
-            dx[:, 1] = -xy_error[:, 1]  # correct y
-            # z = 0 (don't change height)
+
+            # Phase 1: correct XY, maintain hover height
+            phase1 = ~xy_aligned
+            dx[phase1, 0] = -xy_error[phase1, 0]
+            dx[phase1, 1] = -xy_error[phase1, 1]
+            # If held cube is too low during XY correction, lift up
+            target_hover_z = torch.min(c1_z, c2_z) + hover_height
+            z_lift = target_hover_z - held_z  # positive = need to go up
+            dx[phase1, 2] = torch.clamp(z_lift[phase1], min=0.0, max=0.002)
+
+            # Phase 2: XY aligned, descend to stack (target z_diff = 0.018)
+            phase2 = xy_aligned
+            target_stack_z = torch.min(c1_z, c2_z) + 0.018  # exact stacking height
+            z_descend = target_stack_z - held_z  # negative = need to go down
+            dx[phase2, 2] = torch.clamp(z_descend[phase2], min=-0.001, max=0.001)
 
             # Clamp EE displacement to max_ee_step (direction preserved, magnitude limited)
             dx_norm = dx.norm(dim=-1, keepdim=True)  # [B, 1]
