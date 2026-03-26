@@ -589,12 +589,12 @@ class GraphDiTRLTrainer:
             if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
                 c1 = obs_before_step[env_idx, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
                 c2 = obs_before_step[env_idx, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
-                z_diff_a = torch.abs((c1[2] - c2[2]) - 0.012)
+                z_diff_a = torch.abs((c1[2] - c2[2]) - 0.018)
                 xy_dist_a = torch.norm(c1[:2] - c2[:2])
-                z_diff_b = torch.abs((c2[2] - c1[2]) - 0.012)
+                z_diff_b = torch.abs((c2[2] - c1[2]) - 0.018)
                 xy_dist_b = torch.norm(c2[:2] - c1[:2])
-                stack_ok = (z_diff_a < 0.003 and xy_dist_a < 0.006) or \
-                           (z_diff_b < 0.003 and xy_dist_b < 0.006)
+                stack_ok = (z_diff_a < 0.003 and xy_dist_a < 0.009) or \
+                           (z_diff_b < 0.003 and xy_dist_b < 0.009)
                 if stack_ok:
                     return True
 
@@ -613,13 +613,13 @@ class GraphDiTRLTrainer:
         if "cube_1_pos" in s and "cube_2_pos" in s:
             c1 = obs[env_idx, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
             c2 = obs[env_idx, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
-            z_diff_a = torch.abs((c1[2] - c2[2]) - 0.012)
+            z_diff_a = torch.abs((c1[2] - c2[2]) - 0.018)
             xy_dist_a = torch.norm(c1[:2] - c2[:2])
-            z_diff_b = torch.abs((c2[2] - c1[2]) - 0.012)
+            z_diff_b = torch.abs((c2[2] - c1[2]) - 0.018)
             xy_dist_b = torch.norm(c2[:2] - c1[:2])
             return bool(
                 (z_diff_a < 0.003 and xy_dist_a < 0.009) or
-                (z_diff_b < 0.003 and xy_dist_b < 0.006)
+                (z_diff_b < 0.003 and xy_dist_b < 0.009)
             )
         # Table setting check
         if "fork_pos" in s and "knife_pos" in s:
@@ -887,8 +887,8 @@ class GraphDiTRLTrainer:
                                 z_diff_ab = (c1[2] - c2[2]).item()
                                 z_diff_ba = (c2[2] - c1[2]).item()
                                 xy_dist = torch.norm(c1[:2] - c2[:2]).item()
-                                z_ok = abs(z_diff_ab - 0.012) < 0.003 or abs(z_diff_ba - 0.012) < 0.003
-                                xy_ok = xy_dist < 0.006
+                                z_ok = abs(z_diff_ab - 0.018) < 0.003 or abs(z_diff_ba - 0.018) < 0.003
+                                xy_ok = xy_dist < 0.009
                                 _diag = (f" | z_diff={z_diff_ab*1000:.1f}mm xy={xy_dist*1000:.1f}mm "
                                          f"[z={'OK' if z_ok else 'FAIL'} xy={'OK' if xy_ok else 'FAIL'}]")
                             # Gripper: read from obs if available, else from scene (post-reset, less useful)

@@ -109,7 +109,7 @@ def grasp_intent(
 def cube_stack_alignment(
     env: ManagerBasedRLEnv,
     std: float = 0.01,
-    target_height: float = 0.012,
+    target_height: float = 0.018,
     gripper_open_thresh: float = 0.1,
     cube_top_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_base_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
@@ -207,9 +207,9 @@ def gripper_release_when_stacked(
 
 def stack_success_bonus(
     env: ManagerBasedRLEnv,
-    expected_height: float = 0.012,
+    expected_height: float = 0.018,
     eps_z: float = 0.003,
-    eps_xy: float = 0.006,
+    eps_xy: float = 0.009,
     gripper_open_thresh: float = 0.1,
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),

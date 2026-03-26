@@ -40,9 +40,9 @@ PICK_TARGET_XY = (0.1623, -0.023)
 PICK_TARGET_Z = 0.006
 PICK_EPS_XY = 0.0603
 PICK_EPS_Z = 0.002
-STACK_EXPECTED_HEIGHT = 0.012
+STACK_EXPECTED_HEIGHT = 0.018
 STACK_EPS_Z = 0.003
-STACK_EPS_XY = 0.006
+STACK_EPS_XY = 0.009
 
 
 @configclass
@@ -341,9 +341,9 @@ class TerminationsCfg:
     success = DoneTerm(
         func=mdp.two_cubes_stacked_aligned_gripper_released,
         params={
-            "expected_height": 0.012,
+            "expected_height": 0.018,
             "eps_z": 0.003,
-            "eps_xy": 0.006,
+            "eps_xy": 0.009,
             "gripper_open_threshold": 0.1,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
@@ -355,9 +355,9 @@ class TerminationsCfg:
         func=mdp.two_cubes_stacked_at_target_released,
         params={
             "target_xy": TARGET_XY,
-            "expected_height": 0.012,
+            "expected_height": 0.018,
             "eps_z": 0.003,
-            "eps_xy": 0.006,
+            "eps_xy": 0.009,
             "target_eps_xy": 0.2,
             "gripper_open_threshold": 0.1,
             "vel_threshold": 0.001,
@@ -460,9 +460,9 @@ class CubeStackRLRewardsCfg:
     success_bonus = RewTerm(
         func=mdp.stack_success_bonus,
         params={
-            "expected_height": 0.012,
+            "expected_height": 0.018,
             "eps_z": 0.003,
-            "eps_xy": 0.006,
+            "eps_xy": 0.009,
             "gripper_open_thresh": 0.1,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
