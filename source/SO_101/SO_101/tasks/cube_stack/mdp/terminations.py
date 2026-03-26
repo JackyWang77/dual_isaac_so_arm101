@@ -131,17 +131,6 @@ def two_cubes_stacked_aligned_gripper_released(
     both_open = (r_jaw > gripper_open_threshold) & (l_jaw > gripper_open_threshold)
     result = stacked & both_open
 
-    # Debug: print once when stacked but grippers not open
-    if not hasattr(env, '_term_success_debug_count'):
-        env._term_success_debug_count = 0
-    n_stacked = stacked.sum().item()
-    n_result = result.sum().item()
-    if n_stacked > 0 and n_result == 0 and env._term_success_debug_count < 3:
-        env._term_success_debug_count += 1
-        si = stacked.nonzero(as_tuple=False)[0].item()
-        print(f"  [TERM_SUCCESS] stacked={n_stacked} but result=0: "
-              f"R_jaw={r_jaw[si].item():.3f} L_jaw={l_jaw[si].item():.3f} (need>{gripper_open_threshold})")
-
     return result
 
 

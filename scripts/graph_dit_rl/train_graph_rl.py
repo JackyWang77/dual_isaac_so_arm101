@@ -561,24 +561,8 @@ class GraphDiTRLTrainer:
 
             intervene_mask = needs_correction
 
-            # Debug: per-step summary (throttled)
-            if not hasattr(self, '_expert_debug_step'):
-                self._expert_debug_step = 0
-            self._expert_debug_step += 1
-            if self._expert_debug_step <= 200 and self._expert_debug_step % 10 == 0:
-                n_corr = needs_correction.sum().item()
-                n_p1 = phase1.sum().item()
-                n_p2 = phase2.sum().item()
-                si = needs_correction.nonzero(as_tuple=False)[0].item()
-                print(f"  [Expert] step={self._expert_debug_step} "
-                      f"correcting={n_corr}/{B} (P1_xy={n_p1} P2_descend={n_p2}) | "
-                      f"env={si}: xy_err={xy_error_norm[si].item()*1000:.1f}mm "
-                      f"z_diff={z_diff[si].item()*1000:.1f}mm "
-                      f"dx=[{dx[si,0].item()*1000:.2f},{dx[si,1].item()*1000:.2f},{dx[si,2].item()*1000:.2f}]mm "
-                      f"dq_norm={dq[si].norm().item():.4f}")
-
         except Exception as e:
-            print(f"[Expert] Jacobian error: {e}")
+            pass  # silently ignore expert errors
 
         return expert_delta, intervene_mask
 
@@ -726,7 +710,6 @@ class GraphDiTRLTrainer:
         _alignment_steps = 0  # count steps where RL residual was active
         _total_env_steps = 0  # total env-steps for ratio
         _n_expert_intervened = 0  # count expert intervention env-steps
-        self._expert_debug_step = 0  # reset per-iteration debug counter
 
         # Track per-term reward accumulation
         _reward_term_accum = None
@@ -978,9 +961,6 @@ class GraphDiTRLTrainer:
                             terms = _reward_term_accum[i]
                             _rew_parts = [f"{n}={v.item():.2f}" for n, v in zip(_reward_term_names, terms) if abs(v.item()) > 0.001]
                             _rew_str = f" | rew_terms=[{', '.join(_rew_parts)}]"
-                        print(f"  [EP] env={i} T={is_terminated} Tr={is_truncated} "
-                              f"S={is_success} fired={fired} "
-                              f"len={ep_lengths[i].item():.0f} rew={ep_rewards[i].item():.1f}{_diag}{_rew_str}")
                     if is_success:
                         n_success += 1
                     rollout_successes.append(float(is_success))
@@ -1052,21 +1032,7 @@ class GraphDiTRLTrainer:
 
         self.buffer.compute_returns(last_value, self.cfg.gamma, self.cfg.lam)
 
-        # Print alignment + expert summary
-        if _total_env_steps > 0:
-            align_ratio = _alignment_steps / _total_env_steps
-            expert_ratio = _n_expert_intervened / _total_env_steps if _total_env_steps > 0 else 0
-            print(f"  [Align] RL residual active {align_ratio*100:.1f}% ({_alignment_steps}/{_total_env_steps}) | "
-                  f"Expert intervened {expert_ratio*100:.1f}% ({_n_expert_intervened}/{_total_env_steps})")
 
-        # Print per-term episode reward breakdown
-        if _reward_term_names and len(_reward_term_episodes) > 0:
-            stacked = torch.stack(_reward_term_episodes[-100:])  # last 100 episodes
-            mean_per_term = stacked.mean(dim=0)
-            parts = []
-            for name, val in zip(_reward_term_names, mean_per_term):
-                parts.append(f"{name}={val.item():.1f}")
-            print(f"  [Rew breakdown] {' | '.join(parts)}")
 
         stats = {}
         if len(self.episode_rewards) > 0:
