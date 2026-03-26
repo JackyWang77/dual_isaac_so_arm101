@@ -366,7 +366,8 @@ class GraphDiTRLTrainer:
         self.total_steps = 0
         self.episode_rewards = []
         self.episode_lengths = []
-        self.episode_successes = []
+        self.episode_successes = []  # NOTE: biased by episode completion order (short=success first)
+        self.iter_success_rates = []  # Per-iteration SR (unbiased, one entry per rollout)
         self.best_sr = -1.0  # For best-model-by-SR saving
         self.best_sr_window = best_sr_window
         self.best_sr_require_consistent = best_sr_require_consistent
@@ -873,7 +874,7 @@ class GraphDiTRLTrainer:
                     # Debug: log episode outcomes with full diagnostics
                     if not hasattr(self, "_ep_debug_count"):
                         self._ep_debug_count = 0
-                    _should_log = self._ep_debug_count < 50
+                    _should_log = self._ep_debug_count < 10
                     if _should_log:
                         self._ep_debug_count += 1
                         led = self._term_mgr._last_episode_dones
@@ -1004,21 +1005,21 @@ class GraphDiTRLTrainer:
             stats["warning"] = "No episodes completed!"
 
         if len(rollout_successes) > 0:
-            stats["success_rate"] = np.mean(rollout_successes)
+            sr_this = np.mean(rollout_successes)
+            stats["success_rate"] = sr_this
             stats["num_episodes"] = len(rollout_successes)
+            self.iter_success_rates.append(sr_this)
         else:
             stats["success_rate"] = 0.0
             stats["num_episodes"] = 0
 
-        if len(self.episode_successes) > 0:
-            stats["success_rate_100"] = np.mean(self.episode_successes[-100:])
-            stats["success_rate_window"] = np.mean(self.episode_successes[-self.best_sr_window:])
-            # Debug: verify episode_successes matches rollout_successes
-            n_succ = sum(1 for x in self.episode_successes if x > 0.5)
-            n_total = len(self.episode_successes)
-            if iteration <= 3:
-                print(f"  [DEBUG] episode_successes: {n_total} total, {n_succ} success ({n_succ/n_total*100:.1f}%), "
-                      f"last10={self.episode_successes[-10:]}")
+        # Use per-iteration SR (unbiased) instead of per-episode list
+        # (per-episode list is biased: short=success episodes complete first,
+        #  so [-100:] always contains only timeout=failure episodes)
+        if len(self.iter_success_rates) > 0:
+            stats["success_rate_100"] = np.mean(self.iter_success_rates[-3:])  # ~1500 eps
+            n_window_iters = max(1, self.best_sr_window // max(1, len(rollout_successes)))
+            stats["success_rate_window"] = np.mean(self.iter_success_rates[-n_window_iters:]) if n_window_iters <= len(self.iter_success_rates) else np.mean(self.iter_success_rates)
         else:
             stats["success_rate_100"] = 0.0
             stats["success_rate_window"] = 0.0
