@@ -820,13 +820,13 @@ class GraphUnetResidualRLPolicy(nn.Module):
             self.action_std = _to_tensor(action_std)
 
     def _compute_alpha_vec(self, B: int, device) -> Tuple[torch.Tensor, float]:
-        """Fixed alpha: 1.0 for arm joints, 0.0 for grippers.
+        """Fixed alpha: 0.4 for arm joints, 0.0 for grippers.
         Returns (alpha_vec [B, action_dim], alpha_mean_for_log)."""
         act_dim = self.cfg.action_dim
-        alpha_vec = torch.ones(B, act_dim, device=device)
+        alpha_vec = torch.full((B, act_dim), 0.4, device=device)
         for gi in self.gripper_indices:
             alpha_vec[:, gi] = 0.0  # Grippers: no RL delta, backbone handles them
-        return alpha_vec, 1.0
+        return alpha_vec, 0.4
 
     # -----------------------------
     # Buffer management
