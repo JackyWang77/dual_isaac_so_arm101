@@ -489,18 +489,23 @@ class GraphDiTRLTrainer:
             J_xyz = jac[:, -1, :3, :5]  # [B, 3, 5]
 
             # Desired EE correction: move to reduce xy_error
+            # Rate-limit: max 1mm EE displacement per step (consistent with backbone speed)
+            max_ee_step = 0.001  # 1mm per step
             dx = torch.zeros(B, 3, device=self.device)
             dx[:, 0] = -xy_error[:, 0]  # correct x
             dx[:, 1] = -xy_error[:, 1]  # correct y
             # z = 0 (don't change height)
 
+            # Clamp EE displacement to max_ee_step (direction preserved, magnitude limited)
+            dx_norm = dx.norm(dim=-1, keepdim=True)  # [B, 1]
+            dx = torch.where(dx_norm > max_ee_step, dx * max_ee_step / (dx_norm + 1e-8), dx)
+
             # Pseudoinverse: dq = J_pinv @ dx
             J_pinv = torch.linalg.pinv(J_xyz)  # [B, 5, 3]
             dq = torch.bmm(J_pinv, dx.unsqueeze(-1)).squeeze(-1)  # [B, 5]
 
-            # Conservative gain (avoid overshooting) + clamp
-            dq = dq * 0.5
-            dq = torch.clamp(dq, -0.1, 0.1)
+            # Safety clamp on joint delta
+            dq = torch.clamp(dq, -0.05, 0.05)
 
             # Place into right arm joint slots
             # Backbone order: [left_6, right_6], right arm joints = indices 6:11
@@ -563,12 +568,12 @@ class GraphDiTRLTrainer:
             if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
                 c1 = obs_before_step[env_idx, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
                 c2 = obs_before_step[env_idx, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
-                z_diff_a = torch.abs((c1[2] - c2[2]) - 0.018)
+                z_diff_a = torch.abs((c1[2] - c2[2]) - 0.012)
                 xy_dist_a = torch.norm(c1[:2] - c2[:2])
-                z_diff_b = torch.abs((c2[2] - c1[2]) - 0.018)
+                z_diff_b = torch.abs((c2[2] - c1[2]) - 0.012)
                 xy_dist_b = torch.norm(c2[:2] - c1[:2])
-                stack_ok = (z_diff_a < 0.003 and xy_dist_a < 0.009) or \
-                           (z_diff_b < 0.003 and xy_dist_b < 0.009)
+                stack_ok = (z_diff_a < 0.003 and xy_dist_a < 0.006) or \
+                           (z_diff_b < 0.003 and xy_dist_b < 0.006)
                 if stack_ok:
                     return True
 
@@ -587,13 +592,13 @@ class GraphDiTRLTrainer:
         if "cube_1_pos" in s and "cube_2_pos" in s:
             c1 = obs[env_idx, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
             c2 = obs[env_idx, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
-            z_diff_a = torch.abs((c1[2] - c2[2]) - 0.018)
+            z_diff_a = torch.abs((c1[2] - c2[2]) - 0.012)
             xy_dist_a = torch.norm(c1[:2] - c2[:2])
-            z_diff_b = torch.abs((c2[2] - c1[2]) - 0.018)
+            z_diff_b = torch.abs((c2[2] - c1[2]) - 0.012)
             xy_dist_b = torch.norm(c2[:2] - c1[:2])
             return bool(
                 (z_diff_a < 0.003 and xy_dist_a < 0.009) or
-                (z_diff_b < 0.003 and xy_dist_b < 0.009)
+                (z_diff_b < 0.003 and xy_dist_b < 0.006)
             )
         # Table setting check
         if "fork_pos" in s and "knife_pos" in s:

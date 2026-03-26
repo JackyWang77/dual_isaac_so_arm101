@@ -87,9 +87,9 @@ def either_cube_placed_at_target(
 
 def two_cubes_stacked_aligned(
     env: ManagerBasedRLEnv,
-    expected_height: float = 0.018,
+    expected_height: float = 0.012,
     eps_z: float = 0.003,
-    eps_xy: float = 0.009,
+    eps_xy: float = 0.006,
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
 ) -> torch.Tensor:
@@ -111,10 +111,10 @@ def two_cubes_stacked_aligned(
 
 def two_cubes_stacked_aligned_gripper_released(
     env: ManagerBasedRLEnv,
-    expected_height: float = 0.018,
+    expected_height: float = 0.012,
     eps_z: float = 0.003,
-    eps_xy: float = 0.009,
-    gripper_open_threshold: float = -0.1,
+    eps_xy: float = 0.006,
+    gripper_open_threshold: float = 0.1,
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
@@ -168,11 +168,11 @@ def two_cubes_stacked_at_target(
 def two_cubes_stacked_at_target_released(
     env: ManagerBasedRLEnv,
     target_xy: tuple[float, float] = (0.117, -0.011),
-    expected_height: float = 0.018,
+    expected_height: float = 0.012,
     eps_z: float = 0.003,
-    eps_xy: float = 0.009,
+    eps_xy: float = 0.006,
     target_eps_xy: float = 0.2,
-    gripper_open_threshold: float = -0.1,
+    gripper_open_threshold: float = 0.1,
     vel_threshold: float = 0.001,
     stable_steps_required: int = 50,
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
