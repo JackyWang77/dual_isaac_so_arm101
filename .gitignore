@@ -71,3 +71,4 @@ attention_output/image/
 attention_output/obs_records.json
 attention_output/obs_with_attn_*.json
 attention_output/ep*_indices.json
+.claude/worktrees/
