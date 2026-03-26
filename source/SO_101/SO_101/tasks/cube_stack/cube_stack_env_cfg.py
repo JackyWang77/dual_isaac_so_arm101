@@ -337,16 +337,18 @@ class TerminationsCfg:
         func=mdp.root_height_below_minimum,
         params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("cube_2")},
     )
-    # Named "success" — stacked alignment only, no gripper check
-    # (RL cannot control gripper: alpha_vec=0 for grippers)
+    # Named "success" — stacked + both grippers open (must release before success)
     success = DoneTerm(
-        func=mdp.two_cubes_stacked_aligned,
+        func=mdp.two_cubes_stacked_aligned_gripper_released,
         params={
             "expected_height": 0.018,
             "eps_z": 0.003,
             "eps_xy": 0.009,
+            "gripper_open_threshold": 0.1,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
+            "right_arm_cfg": SceneEntityCfg("right_arm"),
+            "left_arm_cfg": SceneEntityCfg("left_arm"),
         },
     )
     stack_success = DoneTerm(
@@ -411,9 +413,9 @@ class CubeStackRLRewardsCfg:
 
     Design principles:
     - Low weight for already-learned skills (reach, grasp, lift) to prevent regression
-    - High weight for stack alignment precision (BC's main weakness)
-    - Explicit gripper release reward (BC sometimes "doesn't dare to let go")
+    - Stack alignment precision reward (BC's main weakness)
     - Large success bonus to create high-advantage samples for AWR
+    - NO gripper release reward (RL cannot control gripper: alpha_vec=0)
     """
 
     # === Dense shaping rewards (tiny weights, purely for critic V(s) learning) ===
