@@ -484,23 +484,20 @@ class GraphDiTRLTrainer:
         target_xy = torch.where((c1_z < c2_z).unsqueeze(-1), c1[:, :2], c2[:, :2])
         held_z = torch.max(c1_z, c2_z)
 
-        # Only intervene when:
-        # 1. Held cube is above table (z > 15mm = being carried)
-        # 2. EE is near stacking zone (z < 40mm, approaching)
-        # 3. xy error > 3mm
-        ee_z = r_ee[:, 2]
-        in_stacking_zone = (held_z > 0.015) & (ee_z < 0.04) & (ee_z > 0.01)
-
-        # Right EE xy vs target cube xy
+        # Held cube xy vs target (base) cube xy
         held_xy = torch.where((c1_z < c2_z).unsqueeze(-1), c2[:, :2], c1[:, :2])
-        xy_error = held_xy - target_xy  # [B, 2] - how far held cube is from target
+        xy_error = held_xy - target_xy  # [B, 2]
         xy_error_norm = xy_error.norm(dim=-1)
 
         # Z diff between held cube and target cube
-        z_diff = torch.abs(held_z - torch.min(c1_z, c2_z))  # held - base
+        z_diff = torch.abs(held_z - torch.min(c1_z, c2_z))
 
-        # Aim for perfect alignment (xy → 0)
-        needs_correction = in_stacking_zone & ((xy_error_norm > 0.0005) | (z_diff > 0.005))
+        # Only intervene when held cube is near target cube:
+        # - held cube above table (z > 15mm)
+        # - xy_error in [0.5mm, 10mm]: close enough to be in final alignment,
+        #   but not already perfect. >10mm = still transporting, let backbone handle.
+        near_target = (held_z > 0.015) & (xy_error_norm > 0.0005) & (xy_error_norm < 0.01)
+        needs_correction = near_target | ((held_z > 0.015) & (xy_error_norm < 0.01) & (z_diff > 0.005))
 
         if not needs_correction.any():
             return expert_delta, intervene_mask
