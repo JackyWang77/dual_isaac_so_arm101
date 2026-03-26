@@ -79,45 +79,61 @@ def _check_position_success(obs: torch.Tensor, env_idx: int, cfg) -> bool:
     return False
 
 
-def _check_success_from_info(env, env_info, env_idx: int, obs_before_step: torch.Tensor, cfg) -> bool:
-    """Check success from termination manager (matching train_graph_rl.py)."""
-    try:
-        base = env.unwrapped if hasattr(env, "unwrapped") else env
-        tm = base.termination_manager
-        names = list(tm._term_names)
-        led = tm._last_episode_dones
-        success_found = False
-        for sname in ("success", "stack_success"):
-            if sname in names:
-                idx = names.index(sname)
-                if bool(led[env_idx, idx].item()):
-                    success_found = True
-                    break
-        if success_found:
-            for dname in ("cube_1_dropping", "cube_2_dropping", "object_dropping",
-                          "fork_dropping", "knife_dropping"):
-                if dname in names:
-                    didx = names.index(dname)
-                    if bool(led[env_idx, didx].item()):
-                        success_found = False
-                        break
-        if success_found:
-            return True
-        if obs_before_step is not None:
-            s = getattr(cfg, "obs_structure", None)
-            if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
-                c1 = obs_before_step[env_idx, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
-                c2 = obs_before_step[env_idx, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
-                z_diff_a = torch.abs((c1[2] - c2[2]) - 0.018)
-                xy_dist_a = torch.norm(c1[:2] - c2[:2])
-                z_diff_b = torch.abs((c2[2] - c1[2]) - 0.018)
-                xy_dist_b = torch.norm(c2[:2] - c1[:2])
-                stack_ok = (z_diff_a < 0.003 and xy_dist_a < 0.009) or \
-                           (z_diff_b < 0.003 and xy_dist_b < 0.009)
-                if stack_ok:
-                    return True
-    except Exception:
-        pass
+def _setup_success_detection(env):
+    """Set up termination manager refs ONCE (matching play.py approach)."""
+    base = env.unwrapped if hasattr(env, "unwrapped") else env
+    tm = base.termination_manager
+    term_names = list(tm._term_names)
+    success_idx = None
+    for sname in ("success", "stack_success"):
+        if sname in term_names:
+            success_idx = term_names.index(sname)
+            break
+    drop_indices = []
+    for dname in ("object_dropping", "cube_1_dropping", "cube_2_dropping",
+                    "fork_dropping", "knife_dropping"):
+        if dname in term_names:
+            drop_indices.append(term_names.index(dname))
+    print(f"[Play] Termination terms: {term_names}")
+    print(f"[Play] Success term idx: {success_idx} ({term_names[success_idx] if success_idx is not None else 'NONE'})")
+    print(f"[Play] Drop term indices: {[(i, term_names[i]) for i in drop_indices]}")
+    return tm, term_names, success_idx, drop_indices
+
+
+def _get_success_flags(tm, success_idx, drop_indices):
+    """Per-env success flags from _last_episode_dones (matching play.py exactly)."""
+    if success_idx is None:
+        return None
+    led = tm._last_episode_dones
+    success_mask = led[:, success_idx].bool()
+    for di in drop_indices:
+        success_mask = success_mask & (~led[:, di].bool())
+    return success_mask
+
+
+def _check_success_from_info(env, env_info, env_idx: int, obs_before_step: torch.Tensor, cfg,
+                              tm=None, success_idx=None, drop_indices=None) -> bool:
+    """Check success from termination manager signal (matching play.py)."""
+    # Primary: vectorized termination manager signal
+    if tm is not None and success_idx is not None:
+        success_flags = _get_success_flags(tm, success_idx, drop_indices or [])
+        if success_flags is not None:
+            return bool(success_flags[env_idx].item())
+
+    # Fallback: position-based check from pre-step obs
+    if obs_before_step is not None:
+        s = getattr(cfg, "obs_structure", None)
+        if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
+            c1 = obs_before_step[env_idx, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
+            c2 = obs_before_step[env_idx, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
+            z_diff_a = torch.abs((c1[2] - c2[2]) - 0.012)
+            xy_dist_a = torch.norm(c1[:2] - c2[:2])
+            z_diff_b = torch.abs((c2[2] - c1[2]) - 0.012)
+            xy_dist_b = torch.norm(c2[:2] - c1[:2])
+            stack_ok = (z_diff_a < 0.003 and xy_dist_a < 0.006) or \
+                       (z_diff_b < 0.003 and xy_dist_b < 0.006)
+            if stack_ok:
+                return True
     return False
 
 
@@ -260,6 +276,8 @@ def play_graph_rl_policy(
     # env_origins for world→local conversion (matching train_graph_rl.py)
     _base = env.unwrapped if hasattr(env, "unwrapped") else env
     _env_origins = _base.scene.env_origins.clone().to(device=device, dtype=torch.float32)
+    # Success detection: set up termination manager refs ONCE (matching play.py)
+    _tm, _term_names, _success_idx, _drop_indices = _setup_success_detection(env)
     cfg = policy.cfg
     is_dual_arm = (cfg.action_dim == 12)
     robot_state_dim = 12 if is_dual_arm else 6
@@ -554,16 +572,26 @@ def play_graph_rl_policy(
                                     next_obs[env_id, _s:_e] = val
 
                 policy.reset_envs(done_envs)
+                # Vectorized success check (matching play.py)
+                success_flags = _get_success_flags(_tm, _success_idx, _drop_indices)
                 for i in done_envs.tolist():
                     is_truncated = bool(truncated[i].item() if truncated.dim() > 0 else truncated.item())
                     is_terminated = bool(terminated[i].item() if terminated.dim() > 0 else terminated.item())
-                    # terminated (success) takes priority over truncated (timeout)
-                    if is_terminated:
-                        is_success = _check_success_from_info(env, env_info, i, obs_before_step=obs, cfg=cfg)
-                    elif is_truncated:
-                        is_success = _check_success_from_info(env, env_info, i, obs_before_step=obs, cfg=cfg)
-                    else:
+                    # Matching play.py: truncated=failure, terminated=check signal
+                    if is_truncated and not is_terminated:
                         is_success = False
+                    elif success_flags is not None:
+                        is_success = bool(success_flags[i].item())
+                    else:
+                        is_success = _check_success_from_info(
+                            env, env_info, i, obs_before_step=obs, cfg=cfg,
+                            tm=_tm, success_idx=_success_idx, drop_indices=_drop_indices)
+                    # Debug: print fired terms
+                    led = _tm._last_episode_dones
+                    fired = [_term_names[j] for j in range(len(_term_names))
+                             if bool(led[i, j].item())]
+                    print(f"  [EP] env={i} T={is_terminated} Tr={is_truncated} "
+                          f"S={is_success} fired={fired}")
                     episode_success.append(is_success)
                     episode_rewards_list.append(episode_rewards[i].item())
                     # Record per-term reward for this episode
