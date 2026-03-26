@@ -337,18 +337,16 @@ class TerminationsCfg:
         func=mdp.root_height_below_minimum,
         params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("cube_2")},
     )
-    # Named "success" for record_demos.py auto-reset when all done (must release gripper)
+    # Named "success" — stacked alignment only, no gripper check
+    # (RL cannot control gripper: alpha_vec=0 for grippers)
     success = DoneTerm(
-        func=mdp.two_cubes_stacked_aligned_gripper_released,
+        func=mdp.two_cubes_stacked_aligned,
         params={
             "expected_height": 0.018,
             "eps_z": 0.003,
             "eps_xy": 0.009,
-            "gripper_open_threshold": 0.1,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
-            "right_arm_cfg": SceneEntityCfg("right_arm"),
-            "left_arm_cfg": SceneEntityCfg("left_arm"),
         },
     )
     stack_success = DoneTerm(
@@ -440,7 +438,7 @@ class CubeStackRLRewardsCfg:
             "cube_base_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
-        weight=60.0,
+        weight=10.0,
     )
 
     # Large success bonus (one-shot, right arm only)
