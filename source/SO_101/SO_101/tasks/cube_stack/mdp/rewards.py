@@ -198,17 +198,17 @@ def gripper_release_when_stacked(
     new_episode = (env.episode_length_buf <= 1)
     env._release_fired[new_episode] = False
 
-    # Debug (first 10 times)
+    # Debug (first 3 times only)
     if not hasattr(env, '_release_debug_count'):
         env._release_debug_count = 0
     n_stacked = is_stacked.sum().item()
     n_open = (is_stacked & right_open).sum().item()
     n_release = release_now.sum().item()
-    if n_stacked > 0 and env._release_debug_count < 10:
+    if n_stacked > 0 and n_open == 0 and env._release_debug_count < 3:
         env._release_debug_count += 1
         si = is_stacked.nonzero(as_tuple=False)[0].item()
-        print(f"  [GRIP_RELEASE] stacked={n_stacked} stacked&open={n_open} release_now={n_release} "
-              f"| sample env={si}: jaw={right_arm.data.joint_pos[si, -1].item():.3f} thresh={gripper_open_thresh}")
+        print(f"  [GRIP_RELEASE] stacked={n_stacked} but open=0: "
+              f"jaw={right_arm.data.joint_pos[si, -1].item():.3f} (need>{gripper_open_thresh})")
 
     return release_now.float()
 
@@ -259,23 +259,14 @@ def stack_success_bonus(
     new_episode = (env.episode_length_buf <= 1)
     env._success_fired[new_episode] = False
 
-    # Debug: print conditions when stacked but bonus not given (first 20 times)
+    # Debug: print only first 5 times when stacked but no bonus (diagnose gripper issue)
     n_stacked = stacked.sum().item()
-    n_right_open = (stacked & right_open).sum().item()
-    n_not_already = (stacked & right_open & (~env._success_fired | success_now)).sum().item()
     n_bonus = success_now.sum().item()
-    if n_stacked > 0 and env._success_bonus_debug_count < 20:
+    if n_stacked > 0 and n_bonus == 0 and env._success_bonus_debug_count < 5:
         env._success_bonus_debug_count += 1
-        # Show a sample env that is stacked
         sample_idx = stacked.nonzero(as_tuple=False)[0].item()
-        print(f"  [SUCCESS_BONUS] step={env.episode_length_buf[sample_idx].item()} "
-              f"stacked={n_stacked} right_open={n_right_open} bonus_given={n_bonus} "
-              f"| sample env={sample_idx}: jaw={jaw_pos[sample_idx].item():.3f} "
-              f"z1on2={z_diff_1on2[sample_idx].item()*1000:.1f}mm "
-              f"z2on1={z_diff_2on1[sample_idx].item()*1000:.1f}mm "
-              f"xy={xy_dist[sample_idx].item()*1000:.1f}mm "
+        print(f"  [SUCCESS_BONUS] stacked={n_stacked} but bonus=0! "
+              f"sample env={sample_idx}: jaw={jaw_pos[sample_idx].item():.3f}(need>{gripper_open_thresh}) "
               f"already_fired={env._success_fired[sample_idx].item()}")
-    if n_bonus > 0:
-        print(f"  [SUCCESS_BONUS] *** {n_bonus} envs got bonus this step! ***")
 
     return success_now.float()
