@@ -1008,6 +1008,12 @@ class GraphDiTRLTrainer:
         if len(self.episode_successes) > 0:
             stats["success_rate_100"] = np.mean(self.episode_successes[-100:])
             stats["success_rate_window"] = np.mean(self.episode_successes[-self.best_sr_window:])
+            # Debug: verify episode_successes matches rollout_successes
+            n_succ = sum(1 for x in self.episode_successes if x > 0.5)
+            n_total = len(self.episode_successes)
+            if iteration <= 3:
+                print(f"  [DEBUG] episode_successes: {n_total} total, {n_succ} success ({n_succ/n_total*100:.1f}%), "
+                      f"last10={self.episode_successes[-10:]}")
         else:
             stats["success_rate_100"] = 0.0
             stats["success_rate_window"] = 0.0

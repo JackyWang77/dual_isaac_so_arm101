@@ -449,6 +449,7 @@ class CubeStackRLRewardsCfg:
         params={
             "xy_threshold": 0.015,
             "z_tolerance": 0.01,
+            "gripper_open_thresh": 0.1,  # jaw_joint: 0=closed, 0.4=open; >0.1 = released
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
