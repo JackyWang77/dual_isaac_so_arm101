@@ -110,27 +110,25 @@ def cube_stack_alignment(
     env: ManagerBasedRLEnv,
     std: float = 0.01,
     target_height: float = 0.018,
-    gripper_open_thresh: float = 0.1,
     cube_top_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_base_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
-    right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
+    **kwargs,  # accept but ignore legacy params (right_arm_cfg, gripper_open_thresh)
 ) -> torch.Tensor:
-    """Alignment reward: right gripper open + cube2 above cube1 (z>0.018) + xy close.
+    """Alignment reward: cube_top above cube_base by target_height + xy close.
 
-    Not one-shot. Gated by conditions so no hack possible:
-    - Right hand must be open (released cube)
-    - Cube2 must be above cube1 by at least target_height
+    NO gripper gate — alignment should be rewarded regardless of gripper state.
+    Gripper release is handled by separate `gripper_release_when_stacked` reward.
+
+    - Cube_top must be above cube_base by at least target_height
     - Reward = 1 - tanh(xy_dist / std), closer = higher
-    Gripper joint: 0=open, -0.36=closed.
     """
     top: RigidObject = env.scene[cube_top_cfg.name]
     base: RigidObject = env.scene[cube_base_cfg.name]
-    right_arm = env.scene[right_arm_cfg.name]
 
     top_pos = top.data.root_pos_w[:, :3]
     base_pos = base.data.root_pos_w[:, :3]
 
-    # Height gate: cube2 center must be above cube1 center by >= target_height
+    # Height gate: cube_top center must be above cube_base center by >= target_height
     z_diff = top_pos[:, 2] - base_pos[:, 2]
     height_ok = (z_diff >= target_height).float()
 
@@ -138,10 +136,7 @@ def cube_stack_alignment(
     xy_dist = torch.norm(top_pos[:, :2] - base_pos[:, :2], dim=1)
     alignment_quality = 1 - torch.tanh(xy_dist / std)
 
-    # Right gripper must be open
-    right_open = (right_arm.data.joint_pos[:, -1] > gripper_open_thresh).float()
-
-    return alignment_quality * height_ok * right_open
+    return alignment_quality * height_ok
 
 
 def cube_near_target_xy(
@@ -168,7 +163,7 @@ def gripper_release_when_stacked(
     env: ManagerBasedRLEnv,
     xy_threshold: float = 0.015,
     z_tolerance: float = 0.01,
-    gripper_open_thresh: float = -0.1,
+    gripper_open_thresh: float = 0.1,
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
