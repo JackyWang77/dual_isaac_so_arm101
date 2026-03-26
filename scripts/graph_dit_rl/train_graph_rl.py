@@ -895,10 +895,13 @@ class GraphDiTRLTrainer:
                             if s is not None and "right_joint_pos" in s:
                                 rj = obs[i, s["right_joint_pos"][0]:s["right_joint_pos"][1]]
                                 lj = obs[i, s["left_joint_pos"][0]:s["left_joint_pos"][1]]
-                                r_grip = rj[-1].item()  # last joint = gripper
-                                l_grip = lj[-1].item()
-                                grip_ok = r_grip > 0.1 and l_grip > 0.1
-                                _diag += f" R_grip={r_grip:.3f} L_grip={l_grip:.3f} [grip={'OK' if grip_ok else 'FAIL'}]"
+                                r_grip_rel = rj[-1].item()  # last joint = gripper (joint_pos_rel)
+                                l_grip_rel = lj[-1].item()
+                                # obs is joint_pos_rel = actual - default(0.4), convert to absolute
+                                r_grip_abs = r_grip_rel + 0.4
+                                l_grip_abs = l_grip_rel + 0.4
+                                grip_ok = r_grip_abs > 0.1 and l_grip_abs > 0.1
+                                _diag += f" R_grip={r_grip_abs:.3f}(rel={r_grip_rel:.3f}) L_grip={l_grip_abs:.3f}(rel={l_grip_rel:.3f}) [grip={'OK' if grip_ok else 'FAIL'}]"
                         except Exception as e:
                             _diag = f" | diag_err={e}"
                         print(f"  [EP] env={i} T={is_terminated} Tr={is_truncated} "
