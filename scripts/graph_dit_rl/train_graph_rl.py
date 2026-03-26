@@ -688,6 +688,8 @@ class GraphDiTRLTrainer:
         ep_lengths = torch.zeros(self.num_envs, device=self.device)
         rollout_successes = []
         delta_norms_all = []
+        _alignment_steps = 0  # count steps where RL residual was active
+        _total_env_steps = 0  # total env-steps for ratio
 
         # Track per-term reward accumulation
         _reward_term_accum = None
@@ -735,6 +737,27 @@ class GraphDiTRLTrainer:
                     deterministic=False,
                     zero_residual=zero_residual,
                 )
+
+                # --- Alignment phase gating ---
+                # RL residual only active during final stacking alignment
+                # (one cube above the other AND close in XY).
+                # Outside this phase, use pure backbone (delta=0).
+                if not zero_residual and self._is_dual_arm:
+                    s = getattr(self.cfg, "obs_structure", None)
+                    if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
+                        c1 = obs[:, s["cube_1_pos"][0]:s["cube_1_pos"][1]]  # [B, 3]
+                        c2 = obs[:, s["cube_2_pos"][0]:s["cube_2_pos"][1]]  # [B, 3]
+                        z_diff = torch.abs(c1[:, 2] - c2[:, 2])
+                        xy_dist = torch.norm(c1[:, :2] - c2[:, :2], dim=1)
+                        in_alignment = (z_diff > 0.005) & (xy_dist < 0.04)
+                        _alignment_steps += in_alignment.sum().item()
+                        _total_env_steps += obs.shape[0]
+                        not_aligned = ~in_alignment
+                        if not_aligned.any():
+                            a_base = info["a_base"]
+                            action[not_aligned] = a_base[not_aligned]
+                            if info.get("delta") is not None:
+                                info["delta"][not_aligned] = 0.0
 
                 if hasattr(self.env, 'action_space'):
                     if hasattr(self.env.action_space, 'low') and hasattr(self.env.action_space, 'high'):
@@ -983,6 +1006,11 @@ class GraphDiTRLTrainer:
             last_value = last_info["v_bar"]
 
         self.buffer.compute_returns(last_value, self.cfg.gamma, self.cfg.lam)
+
+        # Print alignment phase ratio
+        if _total_env_steps > 0:
+            align_ratio = _alignment_steps / _total_env_steps
+            print(f"  [Align] RL residual active {align_ratio*100:.1f}% of env-steps ({_alignment_steps}/{_total_env_steps})")
 
         # Print per-term episode reward breakdown
         if _reward_term_names and len(_reward_term_episodes) > 0:
