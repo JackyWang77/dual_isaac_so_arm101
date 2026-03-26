@@ -1423,8 +1423,6 @@ class GraphDiTRLTrainer:
         _scalar("main/expert_ratio", rollout_stats.get("expert_ratio", 0), step)
 
         sr = rollout_stats.get("success_rate", 0) * 100
-        sr_100 = rollout_stats.get("success_rate_100", 0) * 100
-        sr_win = rollout_stats.get("success_rate_window", 0) * 100
         num_eps = rollout_stats.get("num_episodes", 0)
         reward = rollout_stats.get("ep_reward_mean", 0)
         ev = update_stats.get("explained_variance", -999)
@@ -1456,7 +1454,7 @@ class GraphDiTRLTrainer:
         eff_r = update_stats.get("eff_ratio", 0)
         print(
             f"{progress_str} "
-            f"SR={sr:5.1f}% (100:{sr_100:4.1f}% {self.best_sr_window}ep:{sr_win:4.1f}%) [{num_eps:2d}ep] | "
+            f"SR={sr:5.1f}% [{num_eps}ep] | "
             f"Rew={reward:6.1f} | "
             f"EV={ev:5.2f} | "
             f"Δ={delta:.3f} | "
