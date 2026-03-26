@@ -112,7 +112,8 @@ def cube_stack_alignment(
     target_height: float = 0.018,
     cube_top_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_base_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
-    **kwargs,  # accept but ignore legacy params (right_arm_cfg, gripper_open_thresh)
+    right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),  # kept for config compat, not used
+    gripper_open_thresh: float = 0.1,  # kept for config compat, not used
 ) -> torch.Tensor:
     """Alignment reward: cube_top above cube_base by target_height + xy close.
 
