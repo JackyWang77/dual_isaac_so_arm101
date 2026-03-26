@@ -1183,8 +1183,12 @@ class GraphDiTRLTrainer:
             update_stats = self.update(iteration=iteration)
             update_stats["lr"] = current_lr
 
-            # DAgger: decay expert intervention ratio
-            if self.use_expert_intervention and iteration > 0:
+            # DAgger: decay expert intervention ratio (only after warmup ends)
+            critic_warmup = (
+                self.critic_warmup_iters > 0
+                and iteration <= self.critic_warmup_iters
+            )
+            if self.use_expert_intervention and iteration > 0 and not critic_warmup:
                 self.expert_ratio *= self.expert_decay
                 self.expert_ratio = max(self.expert_ratio, 0.0)
 
