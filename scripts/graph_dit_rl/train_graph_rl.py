@@ -776,17 +776,24 @@ class GraphDiTRLTrainer:
                 )
 
                 # --- Alignment phase gating ---
-                # RL residual only active during final stacking alignment
-                # (one cube above the other AND close in XY).
+                # RL residual only active during final stacking alignment,
+                # same range as expert: held cube above ground, xy_error < 10mm.
                 # Outside this phase, use pure backbone (delta=0).
                 if not zero_residual and self._is_dual_arm:
                     s = getattr(self.cfg, "obs_structure", None)
                     if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
                         c1 = obs[:, s["cube_1_pos"][0]:s["cube_1_pos"][1]]  # [B, 3]
                         c2 = obs[:, s["cube_2_pos"][0]:s["cube_2_pos"][1]]  # [B, 3]
-                        z_diff = torch.abs(c1[:, 2] - c2[:, 2])
-                        xy_dist = torch.norm(c1[:, :2] - c2[:, :2], dim=1)
-                        in_alignment = (z_diff > 0.005) & (xy_dist < 0.04)
+                        c1_z, c2_z = c1[:, 2], c2[:, 2]
+                        # held cube = the higher one; target = the lower one
+                        held_xy = torch.where((c1_z < c2_z).unsqueeze(-1), c2[:, :2], c1[:, :2])
+                        held_z = torch.max(c1_z, c2_z)
+                        # target_xy = lower cube's XY (same as expert)
+                        target_xy = torch.where((c1_z < c2_z).unsqueeze(-1), c1[:, :2], c2[:, :2])
+                        xy_error_norm = (held_xy - target_xy).norm(dim=-1)
+                        z_diff = torch.abs(c1_z - c2_z)
+                        # Match expert range: held above ground, xy < 10mm, z_diff > 5mm
+                        in_alignment = (held_z > 0.015) & (xy_error_norm < 0.01) & (z_diff > 0.005)
                         _alignment_steps += in_alignment.sum().item()
                         _total_env_steps += obs.shape[0]
                         not_aligned = ~in_alignment
