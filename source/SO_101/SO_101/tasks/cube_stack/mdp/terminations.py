@@ -126,10 +126,24 @@ def two_cubes_stacked_aligned_gripper_released(
     )
     right_arm = env.scene[right_arm_cfg.name]
     left_arm = env.scene[left_arm_cfg.name]
-    both_open = (right_arm.data.joint_pos[:, -1] > gripper_open_threshold) & (
-        left_arm.data.joint_pos[:, -1] > gripper_open_threshold
-    )
-    return stacked & both_open
+    r_jaw = right_arm.data.joint_pos[:, -1]
+    l_jaw = left_arm.data.joint_pos[:, -1]
+    both_open = (r_jaw > gripper_open_threshold) & (l_jaw > gripper_open_threshold)
+    result = stacked & both_open
+
+    # Debug: print when stacked but grippers not open (first 20 times)
+    if not hasattr(env, '_term_success_debug_count'):
+        env._term_success_debug_count = 0
+    n_stacked = stacked.sum().item()
+    n_result = result.sum().item()
+    if n_stacked > 0 and env._term_success_debug_count < 20:
+        env._term_success_debug_count += 1
+        si = stacked.nonzero(as_tuple=False)[0].item()
+        print(f"  [TERM_SUCCESS] stacked={n_stacked} both_open={both_open[stacked].sum().item()} "
+              f"result={n_result} | sample env={si}: R_jaw={r_jaw[si].item():.3f} "
+              f"L_jaw={l_jaw[si].item():.3f} thresh={gripper_open_threshold}")
+
+    return result
 
 
 def two_cubes_stacked_at_target(
