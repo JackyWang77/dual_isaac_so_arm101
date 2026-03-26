@@ -829,14 +829,35 @@ class GraphDiTRLTrainer:
                     self.episode_lengths.append(ep_lengths[i].item())
                     is_truncated = bool(truncated[i].item() if hasattr(truncated[i], "item") else truncated[i])
                     is_terminated = bool(terminated[i].item() if hasattr(terminated[i], "item") else terminated[i])
-                    if is_truncated:
-                        # Timeout: still check if cubes are stacked (env success DoneTerm
-                        # requires gripper release which RL residual may interfere with)
-                        is_success = self._check_position_success(obs, i)
-                        n_truncated += 1
-                    else:
+                    # CRITICAL: terminated (success) takes priority over truncated (timeout)
+                    # Both can be True in the same step if success fires at max_episode_length
+                    if is_terminated:
                         is_success = self._check_success_from_info(env_info, i, obs_before_step=obs)
                         n_terminated += 1
+                    elif is_truncated:
+                        # Timeout: also check termination manager first (cube may have
+                        # stacked right at timeout), then fallback to position check
+                        is_success = self._check_success_from_info(env_info, i, obs_before_step=obs)
+                        n_truncated += 1
+                    else:
+                        is_success = False
+                    # Debug: log first 20 episode outcomes
+                    if not hasattr(self, "_ep_debug_count"):
+                        self._ep_debug_count = 0
+                    if self._ep_debug_count < 20:
+                        self._ep_debug_count += 1
+                        print(f"  [EP] env={i} terminated={is_terminated} truncated={is_truncated} "
+                              f"success={is_success} len={ep_lengths[i].item():.0f} rew={ep_rewards[i].item():.1f}")
+                        # Check termination manager state
+                        try:
+                            _base = self.env.unwrapped if hasattr(self.env, "unwrapped") else self.env
+                            _tm = _base.termination_manager
+                            _names = list(_tm._term_names)
+                            _led = _tm._last_episode_dones
+                            _fired = [_names[j] for j in range(len(_names)) if bool(_led[i, j].item())]
+                            print(f"         tm._last_episode_dones fired={_fired}")
+                        except Exception as e:
+                            print(f"         tm debug error: {e}")
                     if is_success:
                         n_success += 1
                     rollout_successes.append(float(is_success))

@@ -556,10 +556,14 @@ def play_graph_rl_policy(
                 policy.reset_envs(done_envs)
                 for i in done_envs.tolist():
                     is_truncated = bool(truncated[i].item() if truncated.dim() > 0 else truncated.item())
-                    if is_truncated:
-                        is_success = _check_position_success(obs, i, cfg)
-                    else:
+                    is_terminated = bool(terminated[i].item() if terminated.dim() > 0 else terminated.item())
+                    # terminated (success) takes priority over truncated (timeout)
+                    if is_terminated:
                         is_success = _check_success_from_info(env, env_info, i, obs_before_step=obs, cfg=cfg)
+                    elif is_truncated:
+                        is_success = _check_success_from_info(env, env_info, i, obs_before_step=obs, cfg=cfg)
+                    else:
+                        is_success = False
                     episode_success.append(is_success)
                     episode_rewards_list.append(episode_rewards[i].item())
                     # Record per-term reward for this episode
