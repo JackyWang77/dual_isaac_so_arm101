@@ -40,9 +40,9 @@ PICK_TARGET_XY = (0.1623, -0.023)
 PICK_TARGET_Z = 0.006
 PICK_EPS_XY = 0.0603
 PICK_EPS_Z = 0.002
-STACK_EXPECTED_HEIGHT = 0.018
-STACK_EPS_Z = 0.001
-STACK_EPS_XY = 0.0073
+STACK_EXPECTED_HEIGHT = 0.012
+STACK_EPS_Z = 0.003
+STACK_EPS_XY = 0.006
 
 
 @configclass
@@ -337,6 +337,7 @@ class TerminationsCfg:
         func=mdp.root_height_below_minimum,
         params={"minimum_height": -0.05, "asset_cfg": SceneEntityCfg("cube_2")},
     )
+    # Named "success" for record_demos.py auto-reset when all done (must release gripper)
     success = DoneTerm(
         func=mdp.two_cubes_stacked_aligned_gripper_released,
         params={
@@ -348,6 +349,25 @@ class TerminationsCfg:
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
             "left_arm_cfg": SceneEntityCfg("left_arm"),
+        },
+    )
+    stack_success = DoneTerm(
+        func=mdp.two_cubes_stacked_at_target_released,
+        params={
+            "target_xy": TARGET_XY,
+            "expected_height": 0.012,
+            "eps_z": 0.003,
+            "eps_xy": 0.006,
+            "target_eps_xy": 0.2,
+            "gripper_open_threshold": 0.1,
+            "vel_threshold": 0.001,
+            "stable_steps_required": 1,
+            "cube_1_cfg": SceneEntityCfg("cube_1"),
+            "cube_2_cfg": SceneEntityCfg("cube_2"),
+            "right_arm_cfg": SceneEntityCfg("right_arm"),
+            "left_arm_cfg": SceneEntityCfg("left_arm"),
+            "ee_right_cfg": SceneEntityCfg("ee_right"),
+            "ee_left_cfg": SceneEntityCfg("ee_left"),
         },
     )
 
@@ -365,8 +385,8 @@ class CubeStackEnvCfg(ManagerBasedRLEnvCfg):
 
     def __post_init__(self):
         self.decimation = 2
-        # step_dt = decimation * sim.dt = 0.02 → max_episode_length = episode_length_s / 0.02
-        self.episode_length_s = 8.0  # 400 env steps
+        # Demos: mean~239 steps (4.8s), max~395 (7.9s) at 50Hz; 8s covers p95+
+        self.episode_length_s = 6.0  # 300 steps at dt=0.02
         self.viewer.eye = (2.5, 2.5, 1.5)
         self.sim.dt = 0.01
         self.sim.render_interval = self.decimation
@@ -385,66 +405,58 @@ class CubeStackEnvCfg(ManagerBasedRLEnvCfg):
 # =========================================================
 # RL fine-tuning rewards (on top of BC pretrained policy)
 # BC already achieves ~94% pick, ~68% stack.
-# RL: black-hole funnel + tiny lift shaping (see CubeStackRLRewardsCfg docstring).
+# RL rewards focus on what BC is weak at: alignment + release.
 # =========================================================
 @configclass
 class CubeStackRLRewardsCfg:
-    """Rewards for residual RL fine-tuning.
+    """Rewards for RL fine-tuning on top of a pretrained BC policy.
 
-    Three-stage reward cascade:
-    - black_hole (dense): rewards approaching target while holding (gripper closed)
-    - gripper_open (one-shot, loose): rewards the DECISION to release when roughly aligned
-    - success_bonus (one-shot, strict): rewards the OUTCOME of successful stacking
+    Design principles:
+    - Low weight for already-learned skills (reach, grasp, lift) to prevent regression
+    - High weight for stack alignment precision (BC's main weakness)
+    - Explicit gripper release reward (BC sometimes "doesn't dare to let go")
+    - Large success bonus to create high-advantage samples for AWR
     """
 
-    # === Tiny shaping (won't dominate, just helps critic) ===
+    # === Dense shaping rewards (tiny weights, purely for critic V(s) learning) ===
+    # Pick phase: cube lifted above table
     cube1_is_lifted = RewTerm(
         func=mdp.object_is_lifted,
-        params={"minimal_height": 0.03, "object_cfg": SceneEntityCfg("cube_1")},
+        params={"minimal_height": 0.04, "object_cfg": SceneEntityCfg("cube_1")},
         weight=0.5,
     )
     cube2_is_lifted = RewTerm(
         func=mdp.object_is_lifted,
-        params={"minimal_height": 0.03, "object_cfg": SceneEntityCfg("cube_2")},
+        params={"minimal_height": 0.04, "object_cfg": SceneEntityCfg("cube_2")},
         weight=0.5,
     )
-    pick_reach_cube1 = RewTerm(
-        func=mdp.closer_arm_reaches_object,
+
+    # === Main RL rewards (stack phase) ===
+    # Stack alignment: cube_1 on top of cube_2 (right arm places cube_1)
+    stack_1_on_2 = RewTerm(
+        func=mdp.cube_stack_alignment,
         params={
-            "std": 0.05,
-            "object_cfg": SceneEntityCfg("cube_1"),
-            "ee_right_cfg": SceneEntityCfg("ee_right"),
-            "ee_left_cfg": SceneEntityCfg("ee_left"),
+            "cube_top_cfg": SceneEntityCfg("cube_1"),
+            "cube_base_cfg": SceneEntityCfg("cube_2"),
+            "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
-        weight=1.0,
-    )
-    pick_reach_cube2 = RewTerm(
-        func=mdp.closer_arm_reaches_object,
-        params={
-            "std": 0.05,
-            "object_cfg": SceneEntityCfg("cube_2"),
-            "ee_right_cfg": SceneEntityCfg("ee_right"),
-            "ee_left_cfg": SceneEntityCfg("ee_left"),
-        },
-        weight=1.0,
+        weight=60.0,
     )
 
-    # === Weak black hole (just a hint, can't be hacked) ===
-    black_hole = RewTerm(
-        func=mdp.black_hole_attraction,
+    # Gripper release when stacked (one-shot, right arm only)
+    gripper_release = RewTerm(
+        func=mdp.gripper_release_when_stacked,
         params={
-            "target_z_offset": 0.012,
-            "eps": 0.0005,
-            "activation_radius": 0.02,
-            "gripper_closed_thresh": 0.1,
+            "xy_threshold": 0.015,
+            "z_tolerance": 0.01,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
             "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
-        weight=10.0,
+        weight=250.0,
     )
 
-    # === THE reward: success bonus (dominates everything) ===
+    # Large success bonus (one-shot, right arm only)
     success_bonus = RewTerm(
         func=mdp.stack_success_bonus,
         params={

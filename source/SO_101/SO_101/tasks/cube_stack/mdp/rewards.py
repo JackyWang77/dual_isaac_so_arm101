@@ -109,8 +109,8 @@ def grasp_intent(
 def cube_stack_alignment(
     env: ManagerBasedRLEnv,
     std: float = 0.01,
-    target_height: float = 0.018,
-    gripper_open_thresh: float = -0.1,
+    target_height: float = 0.012,
+    gripper_open_thresh: float = 0.1,
     cube_top_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_base_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
@@ -217,8 +217,6 @@ def stack_success_bonus(
 ) -> torch.Tensor:
     """Large one-time bonus when stack success + right gripper open.
 
-    Same logic as termination: |z_diff - expected_height| < eps_z AND xy_dist < eps_xy.
-    Cube edge = 12mm → expected_height = 0.012 (center-to-center when touching).
     Only checks right arm (which places cube_1).
     """
     c1: RigidObject = env.scene[cube_1_cfg.name]
@@ -251,115 +249,3 @@ def stack_success_bonus(
     env._success_fired[new_episode] = False
 
     return success_now.float()
-
-
-def black_hole_attraction(
-    env: ManagerBasedRLEnv,
-    target_z_offset: float = 0.012,
-    eps: float = 0.0005,
-    activation_radius: float = 0.02,
-    gripper_closed_thresh: float = 0.1,
-    cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
-    cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
-    right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
-) -> torch.Tensor:
-    """Potential-based inverse-distance black-hole reward: Φ(s') - Φ(s).
-
-    Φ(s) = 1 / (dist_3d + eps).  True gravitational potential.
-    - Holding → reward = 0 (no progress)
-    - Moving closer → reward > 0, exponentially increasing
-    - Last mm worth 10x more than 3mm→2mm (real black hole)
-    - eps prevents division by zero
-    - Gripper must be closed: stops after release to avoid penalizing cube drift
-
-    Target = (cube2_x, cube2_y, cube2_z + target_z_offset).
-    """
-    c1: RigidObject = env.scene[cube_1_cfg.name]
-    c2: RigidObject = env.scene[cube_2_cfg.name]
-    right_arm = env.scene[right_arm_cfg.name]
-
-    p1 = c1.data.root_pos_w[:, :3]
-    p2 = c2.data.root_pos_w[:, :3]
-
-    # Target position: cube2 xy, cube2 z + offset
-    target = p2.clone()
-    target[:, 2] = target[:, 2] + target_z_offset
-
-    # 3D distance to target
-    dist_3d = torch.norm(p1 - target, dim=1)
-
-    # Inverse-distance potential: closer = higher Φ
-    potential = 1.0 / (dist_3d + eps)
-
-    # Init prev_potential buffer on first call
-    if not hasattr(env, '_prev_potential'):
-        env._prev_potential = potential.clone()
-
-    # Only activate within activation_radius AND gripper closed
-    active = (dist_3d < activation_radius).float()
-    gripper_closed = (right_arm.data.joint_pos[:, -1] < gripper_closed_thresh).float()
-
-    # Reward = progress (Φ(s') - Φ(s)), gated by radius + gripper
-    reward = (potential - env._prev_potential) * active * gripper_closed
-
-    # Update buffer
-    env._prev_potential = potential.clone()
-
-    # Reset on new episode
-    new_episode = (env.episode_length_buf <= 1)
-    env._prev_potential[new_episode] = potential[new_episode]
-    reward[new_episode] = 0.0
-
-    return reward
-
-
-def gripper_open_reward(
-    env: ManagerBasedRLEnv,
-    expected_height: float = 0.012,
-    eps_z: float = 0.004,
-    eps_xy: float = 0.006,
-    gripper_open_thresh: float = 0.1,
-    cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
-    cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
-    right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),
-) -> torch.Tensor:
-    """One-shot reward for releasing gripper when cubes are approximately stacked.
-
-    Bridge reward between black_hole (dense, gripper closed) and success_bonus (strict).
-    Looser than success: rewards the DECISION to release, not the outcome.
-    Uses same |z_diff - expected_height| < eps_z logic as termination (both orders).
-    Cube edge = 12mm, so expected_height = 0.012 (center-to-center).
-    """
-    c1: RigidObject = env.scene[cube_1_cfg.name]
-    c2: RigidObject = env.scene[cube_2_cfg.name]
-    right_arm = env.scene[right_arm_cfg.name]
-
-    num_envs = env.num_envs
-    device = c1.data.root_pos_w.device
-
-    if not hasattr(env, '_gripper_open_fired'):
-        env._gripper_open_fired = torch.zeros(num_envs, dtype=torch.bool, device=device)
-
-    p1 = c1.data.root_pos_w[:, :3]
-    p2 = c2.data.root_pos_w[:, :3]
-
-    z_diff_1on2 = p1[:, 2] - p2[:, 2]
-    z_diff_2on1 = p2[:, 2] - p1[:, 2]
-    xy_dist = torch.norm(p1[:, :2] - p2[:, :2], dim=1)
-
-    # Same logic as termination, but looser eps
-    ok_1on2 = (torch.abs(z_diff_1on2 - expected_height) < eps_z) & (xy_dist < eps_xy)
-    ok_2on1 = (torch.abs(z_diff_2on1 - expected_height) < eps_z) & (xy_dist < eps_xy)
-    aligned = ok_1on2 | ok_2on1
-
-    gripper_open = (right_arm.data.joint_pos[:, -1] > gripper_open_thresh)
-
-    # One-shot: fire once per episode
-    fire_now = aligned & gripper_open & (~env._gripper_open_fired)
-    env._gripper_open_fired = env._gripper_open_fired | (aligned & gripper_open)
-
-    # Reset on new episode
-    new_episode = (env.episode_length_buf <= 1)
-    env._gripper_open_fired[new_episode] = False
-
-    return fire_now.float()

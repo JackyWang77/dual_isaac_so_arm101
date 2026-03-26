@@ -64,16 +64,16 @@ def _check_position_success(obs: torch.Tensor, env_idx: int, cfg) -> bool:
         z_diff_b = torch.abs((c2[2] - c1[2]) - 0.012)
         xy_dist_b = torch.norm(c2[:2] - c1[:2])
         stacked = bool(
-            (z_diff_a < 0.003 and xy_dist_a < 0.009) or
-            (z_diff_b < 0.003 and xy_dist_b < 0.009)
+            (z_diff_a < 0.003 and xy_dist_a < 0.006) or
+            (z_diff_b < 0.003 and xy_dist_b < 0.006)
         )
         if not stacked:
             return False
-        # Check right gripper is open (obs space: >0.1 = clearly open)
+        # Check right gripper is open (open ≈ 0, closed ≈ -0.36, threshold -0.1)
         if "right_joint_pos" in s:
             right_end = s["right_joint_pos"][1]
             right_gripper = obs[env_idx, right_end - 1].item()  # last joint = gripper
-            if right_gripper <= 0.1:  # gripper not open enough
+            if right_gripper < -0.1:  # gripper still closed
                 return False
         return True
     return False
@@ -108,20 +108,14 @@ def _check_success_from_info(env, env_info, env_idx: int, obs_before_step: torch
             if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
                 c1 = obs_before_step[env_idx, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
                 c2 = obs_before_step[env_idx, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
-                z_diff_a = torch.abs((c1[2] - c2[2]) - 0.012)
+                z_diff_a = torch.abs((c1[2] - c2[2]) - 0.018)
                 xy_dist_a = torch.norm(c1[:2] - c2[:2])
-                z_diff_b = torch.abs((c2[2] - c1[2]) - 0.012)
+                z_diff_b = torch.abs((c2[2] - c1[2]) - 0.018)
                 xy_dist_b = torch.norm(c2[:2] - c1[:2])
                 stack_ok = (z_diff_a < 0.003 and xy_dist_a < 0.009) or \
                            (z_diff_b < 0.003 and xy_dist_b < 0.009)
-                if not stack_ok:
-                    return False
-                # Gripper check: obs space, >0.1 = clearly open
-                if "right_joint_pos" in s:
-                    right_joints = obs_before_step[env_idx, s["right_joint_pos"][0]:s["right_joint_pos"][1]]
-                    if float(right_joints[-1]) <= 0.1:
-                        return False
-                return True
+                if stack_ok:
+                    return True
     except Exception:
         pass
     return False
@@ -563,8 +557,7 @@ def play_graph_rl_policy(
                 for i in done_envs.tolist():
                     is_truncated = bool(truncated[i].item() if truncated.dim() > 0 else truncated.item())
                     if is_truncated:
-                        # Timeout = failure (matching BC play.py: stricter eval)
-                        is_success = False
+                        is_success = _check_position_success(obs, i, cfg)
                     else:
                         is_success = _check_success_from_info(env, env_info, i, obs_before_step=obs, cfg=cfg)
                     episode_success.append(is_success)
