@@ -1074,6 +1074,13 @@ class GraphDiTRLTrainer:
         if self.use_expert_intervention:
             stats["expert_ratio"] = self.expert_ratio
 
+        # Print per-term reward breakdown (average over all episodes this iteration)
+        if _reward_term_episodes and _reward_term_names:
+            stacked = torch.stack(_reward_term_episodes)  # [n_eps, n_terms]
+            mean_terms = stacked.mean(dim=0)
+            parts = [f"{n}={v.item():.1f}" for n, v in zip(_reward_term_names, mean_terms)]
+            print(f"  [Rew breakdown] {' | '.join(parts)}")
+
         return stats
 
     def update(self, iteration: int = 0) -> Dict[str, float]:
