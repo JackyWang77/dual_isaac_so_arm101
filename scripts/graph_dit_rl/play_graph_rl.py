@@ -363,6 +363,8 @@ def play_graph_rl_policy(
     episode_lengths = torch.zeros(num_envs, device=device)
     episode_success = []  # list of bool for SR(100ep)
     episode_rewards_list = []  # list of float for mean_reward
+    # Skip short 2nd episode after success (same fix as train + bc play)
+    _env_first_done = [False] * num_envs
 
     # Per-term reward breakdown tracking
     _reward_term_names = None
@@ -572,14 +574,19 @@ def play_graph_rl_policy(
                              if bool(led[i, j].item())]
                     print(f"  [EP] env={i} T={is_terminated} Tr={is_truncated} "
                           f"S={is_success} fired={fired}")
-                    episode_success.append(is_success)
-                    episode_rewards_list.append(episode_rewards[i].item())
-                    # Record per-term reward for this episode
-                    if _reward_term_accum is not None:
-                        _reward_term_episodes.append(_reward_term_accum[i].clone())
+                    # Skip short 2nd episode after success (unfairly short auto-reset)
+                    if _env_first_done[i]:
+                        _env_first_done[i] = False  # Re-enable for next episode
+                    else:
+                        episode_success.append(is_success)
+                        episode_rewards_list.append(episode_rewards[i].item())
+                        if _reward_term_accum is not None:
+                            _reward_term_episodes.append(_reward_term_accum[i].clone())
+                        if is_success:
+                            _env_first_done[i] = True  # Next episode will be skipped
                     episode_count = len(episode_success)
                     status = "✅" if is_success else "❌"
-                    sr = sum(episode_success) / len(episode_success) * 100.0
+                    sr = sum(episode_success) / len(episode_success) * 100.0 if episode_success else 0.0
                     print(f"[Play] Ep {episode_count:3d} {status} | SR={sr:.1f}%")
                 # Reset per-term accumulators for done envs
                 if _reward_term_accum is not None:

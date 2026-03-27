@@ -558,6 +558,9 @@ def play_graph_unet_policy(
     episode_success = []
     episode_pick_success = []  # Stack task: pick success (cube at target)
     episode_stack_success = []  # Stack task: stack success (two cubes stacked)
+    # Track per-env: once an env succeeds, skip counting subsequent episodes
+    # (fast-succeeding envs auto-reset and get unfairly short 2nd episodes)
+    _env_first_done = [False] * num_envs  # True once first episode counted for this env
     current_episode_rewards = torch.zeros(num_envs, device=device)
     is_stack_task = "Stack" in task_name or "Cube-Stack" in task_name
     is_table_task = "Table-Setting" in task_name
@@ -1747,10 +1750,19 @@ def play_graph_unet_policy(
                             obj_h = obs_tensor[i, OBJ_HEIGHT_IDX].item()
                             is_success = obj_h >= SUCCESS_HEIGHT
 
-                        episode_success.append(is_success)
-                        episode_count += 1
+                        # Skip short 2nd episode after success: if env just succeeded,
+                        # the auto-reset 2nd episode is unfairly short → don't count it.
+                        # After that skip, allow counting again for subsequent full episodes.
+                        if _env_first_done[i]:
+                            # This is the 2nd+ episode after a success → skip once, then re-enable
+                            _env_first_done[i] = False  # Re-enable for next episode
+                        else:
+                            episode_success.append(is_success)
+                            episode_count += 1
+                            if is_success:
+                                _env_first_done[i] = True  # Next episode will be skipped
                         status = "✅" if is_success else "❌"
-                        sr = sum(episode_success) / len(episode_success) * 100.0
+                        sr = sum(episode_success) / len(episode_success) * 100.0 if episode_success else 0.0
                         extra = ""
                         if pick_ok is not None and stack_ok is not None:
                             extra = f" | Pick={'✓' if pick_ok else '✗'} Stack={'✓' if stack_ok else '✗'}"
