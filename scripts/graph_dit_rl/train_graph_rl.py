@@ -1216,10 +1216,10 @@ class GraphDiTRLTrainer:
                 self.critic_warmup_iters > 0
                 and iteration <= self.critic_warmup_iters
             )
-            # Expert decay disabled – keep expert_ratio=1.0 for diagnostics
-            # if self.use_expert_intervention and iteration > 0 and not critic_warmup:
-            #     self.expert_ratio *= self.expert_decay
-            #     self.expert_ratio = max(self.expert_ratio, 0.0)
+            # Expert decay (only after critic warmup ends)
+            if self.use_expert_intervention and iteration > 0 and not critic_warmup:
+                self.expert_ratio *= self.expert_decay
+                self.expert_ratio = max(self.expert_ratio, 0.0)
 
             # Log
             self._log(iteration, rollout_stats, update_stats)
