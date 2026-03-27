@@ -1755,7 +1755,10 @@ class GraphUnetResidualRLPolicy(nn.Module):
         cfg = checkpoint["cfg"]
         
         policy = cls(cfg, backbone)
-        policy.load_state_dict(checkpoint["policy_state_dict"])
+        # Backward compat: old checkpoints may have "alpha" key that was removed
+        sd = checkpoint["policy_state_dict"]
+        sd = {k: v for k, v in sd.items() if k != "alpha"}
+        policy.load_state_dict(sd)
         
         # CRITICAL: Also load node_to_z weights from checkpoint if available
         # This ensures we load the trained node_to_z, not the original Graph-DiT node_to_z
