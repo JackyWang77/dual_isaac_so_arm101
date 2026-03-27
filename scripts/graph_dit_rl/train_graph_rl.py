@@ -774,8 +774,8 @@ class GraphDiTRLTrainer:
                         target_xy = torch.where((c1_z < c2_z).unsqueeze(-1), c1[:, :2], c2[:, :2])
                         xy_error_norm = (held_xy - target_xy).norm(dim=-1)
                         z_diff = torch.abs(c1_z - c2_z)
-                        # Match expert range: held above ground, xy < 10mm, z_diff > 5mm
-                        in_alignment = (held_z > 0.015) & (xy_error_norm < 0.01) & (z_diff > 0.005)
+                        # Match expert range: held above ground, xy < 20mm, z_diff > 5mm
+                        in_alignment = (held_z > 0.015) & (xy_error_norm < 0.02) & (z_diff > 0.005)
                         _alignment_steps += in_alignment.sum().item()
                         _total_env_steps += obs.shape[0]
                         not_aligned = ~in_alignment
