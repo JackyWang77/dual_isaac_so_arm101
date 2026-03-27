@@ -182,6 +182,9 @@ class RolloutBuffer:
         self.q_base = torch.zeros(T, N, device=device)
         # Expert target delta (for BC regularization: ||delta - expert_target||²)
         self.expert_target = torch.zeros(T, N, action_dim, device=device)
+        # Gripper labels: 1.0 = should open, 0.0 = should stay closed
+        num_grippers = max(1, action_dim // 6)  # 2 grippers for dual arm (12D action)
+        self.gripper_labels = torch.zeros(T, N, num_grippers, device=device)
 
         self._initialized = True
 
@@ -221,6 +224,8 @@ class RolloutBuffer:
             self.q_base[t] = info["q_base"].detach()
         if info.get("expert_target") is not None:
             self.expert_target[t] = info["expert_target"]
+        if info.get("gripper_labels") is not None:
+            self.gripper_labels[t] = info["gripper_labels"]
 
         self.ptr += 1
 
@@ -247,6 +252,7 @@ class RolloutBuffer:
         values_flat = self.values.reshape(total_samples)
         q_base_flat = self.q_base.reshape(total_samples)  # Q(s, a_base) for counterfactual
         expert_target_flat = self.expert_target.reshape(total_samples, -1)
+        gripper_labels_flat = self.gripper_labels.reshape(total_samples, -1)
 
         # Normalize advantages
         adv_flat = (adv_flat - adv_flat.mean()) / (adv_flat.std() + 1e-8)
@@ -279,6 +285,7 @@ class RolloutBuffer:
                     "q_total": values_flat[idx],  # values = Q(s, a_total) in Q mode
                     "q_base": q_base_flat[idx],   # Q(s, a_base) for counterfactual
                     "expert_target": expert_target_flat[idx],  # Expert delta target for BC reg
+                    "gripper_labels": gripper_labels_flat[idx],  # Gripper open/close labels
                 }
 
     def reset(self):
@@ -812,6 +819,22 @@ class GraphDiTRLTrainer:
                     # Store expert_target for BC regularization (all envs where expert has a correction)
                     # expert_delta is 0 for non-correction envs, so this is safe
                     info["expert_target"] = expert_delta.detach()
+
+                    # --- Gripper labels: open when cubes are stacked and aligned ---
+                    s = getattr(self.cfg, "obs_structure", None)
+                    num_grippers = max(1, action.shape[-1] // 6)
+                    gripper_labels = torch.zeros(B, num_grippers, device=self.device)
+                    if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
+                        c1 = obs[:, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
+                        c2 = obs[:, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
+                        z_diff = torch.abs(c1[:, 2] - c2[:, 2])
+                        xy_dist = torch.norm(c1[:, :2] - c2[:, :2], dim=1)
+                        # Stacked and well-aligned: z_diff ≈ 19mm (±3mm) and xy < 1mm
+                        should_open = (z_diff > 0.016) & (z_diff < 0.022) & (xy_dist < 0.001)
+                        # Label=1 for all grippers when should open (both hands release)
+                        gripper_labels[should_open] = 1.0
+                    info["gripper_labels"] = gripper_labels
+
                     # Stochastic DAgger: only intervene with probability expert_ratio
                     dagger_coin = torch.rand(B, device=self.device) < self.expert_ratio
                     intervene_mask = intervene_mask & dagger_coin
@@ -825,6 +848,13 @@ class GraphDiTRLTrainer:
                         # Update info so buffer stores expert's delta
                         info["delta"][intervene_mask] = expert_delta[intervene_mask]
                         _n_expert_intervened += intervene_mask.sum().item()
+
+                    # Also override gripper action when expert says open
+                    should_open_grip = gripper_labels.sum(dim=-1) > 0  # [B]
+                    grip_intervene = should_open_grip & dagger_coin
+                    if grip_intervene.any():
+                        for gi in self.policy.gripper_indices:
+                            action[grip_intervene, gi] = 1.0  # Force open
 
                 action_dim = action.shape[-1]
                 action_for_sim = action.clone()
@@ -1102,6 +1132,7 @@ class GraphDiTRLTrainer:
         total_actor_loss = 0
         total_critic_loss = 0
         total_loss_delta_reg = 0
+        total_loss_gripper = 0
         total_loss_critic_bar = 0
         total_entropy = 0
         total_alpha = 0.0
@@ -1139,6 +1170,7 @@ class GraphDiTRLTrainer:
             total_actor_loss += losses["loss_actor"].item()
             total_critic_loss += losses["loss_critic_layers"].item()
             total_loss_delta_reg += losses["loss_delta_reg"].item()
+            total_loss_gripper += losses.get("loss_gripper", torch.tensor(0.0)).item()
             total_loss_critic_bar += losses["loss_critic_bar"].item()
             total_entropy += losses["entropy"].item()
             alpha_val = losses.get("alpha")
@@ -1176,6 +1208,7 @@ class GraphDiTRLTrainer:
             "loss_critic": total_critic_loss / n,
             "loss_critic_bar": total_loss_critic_bar / n,
             "loss_delta_reg": total_loss_delta_reg / n,
+            "loss_gripper": total_loss_gripper / n,
             "entropy": total_entropy / n,
             "alpha": alpha_reported,
             "explained_variance": explained_variance,
@@ -1523,6 +1556,7 @@ class GraphDiTRLTrainer:
             f"cΔ={c_dreg:.1f} cH={c_ent_v:.4f} eff={eff_r:.2f} | "
             f"L={loss:.3f}"
             + (f" | Exp={rollout_stats.get('expert_ratio', 0):.2f}" if self.use_expert_intervention else "")
+            + (f" | Grip={update_stats.get('loss_gripper', 0):.3f}" if update_stats.get('loss_gripper', 0) > 0 else "")
         )
 
     def _save_best(self, iteration: int):

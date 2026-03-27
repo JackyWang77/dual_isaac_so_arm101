@@ -681,6 +681,20 @@ class GraphUnetResidualRLPolicy(nn.Module):
             action_dim=critic_action_dim,
         )
 
+        # Gripper head: separate binary classifier for gripper open/close
+        # Input: same as actor (obs + a_base + z_bar). Output: num_grippers logits.
+        num_grippers = max(1, cfg.action_dim // cfg.arm_action_dim)
+        gripper_head_in = actor_in_dim
+        self.gripper_head = nn.Sequential(
+            nn.Linear(gripper_head_in, 64),
+            nn.ReLU(),
+            nn.Linear(64, num_grippers),
+        )
+        # Zero-init so initial gripper head outputs ~0 (sigmoid=0.5, no strong bias)
+        nn.init.zeros_(self.gripper_head[-1].weight)
+        nn.init.zeros_(self.gripper_head[-1].bias)
+        self.num_grippers = num_grippers
+
         # Residual scaling: fixed alpha=1.0 for arm joints, 0.0 for grippers
         # (backbone handles grippers, RL delta only corrects arm positioning)
         self.alpha_net = None
@@ -1429,6 +1443,15 @@ class GraphUnetResidualRLPolicy(nn.Module):
         a = a_base + alpha_vec * delta  # [B, act_dim]
         alpha = alpha_mean  # for info
 
+        # Gripper head: predict open/close for each gripper
+        gripper_logits = self.gripper_head(x)  # [B, num_grippers]
+        gripper_prob = torch.sigmoid(gripper_logits)  # [B, num_grippers]
+        # Override gripper action when head predicts open (prob > 0.5)
+        for gi_idx, gi in enumerate(self.gripper_indices):
+            gripper_open = gripper_prob[:, gi_idx] > 0.5  # [B]
+            # Open = +1 in action space (backbone outputs ±1 for gripper)
+            a[gripper_open, gi] = 1.0
+
         # 7. Update history buffer (AFTER computing action)
         if self.history_buffer is not None:
             # Use normalized action for history (matches training data format)
@@ -1477,6 +1500,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             "gate_w": gate_w,  # [B, K]; placeholder when no gate (U-Net)
             "v_bar": v_bar,
             "q_base": q_base,  # Q(s, a_base) for counterfactual; None when V(s) mode
+            "gripper_logits": gripper_logits,  # [B, num_grippers] for BCE loss
             "alpha": torch.tensor(alpha, device=a_base.device),
         }
         return a, info
@@ -1678,6 +1702,14 @@ class GraphUnetResidualRLPolicy(nn.Module):
         else:
             loss_beta_dual = torch.tensor(0.0, device=obs.device)
 
+        # ===== Gripper BCE loss =====
+        # Train gripper head to predict open/close from expert labels
+        loss_gripper = torch.tensor(0.0, device=obs.device)
+        if "gripper_labels" in batch:
+            gripper_logits = self.gripper_head(x)  # [B, num_grippers]
+            gripper_labels = batch["gripper_labels"]  # [B, num_grippers], 0/1 float
+            loss_gripper = F.binary_cross_entropy_with_logits(gripper_logits, gripper_labels)
+
         # Total
         loss_total = (
             loss_actor
@@ -1688,6 +1720,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             + loss_ent_dual          # SAC-style entropy dual variable
             + loss_delta_dual        # SAC-style delta_reg dual variable
             + loss_beta_dual         # SAC-style beta dual variable
+            + loss_gripper           # Gripper open/close BCE loss
         )
 
         # Report adaptive coefficients
@@ -1710,6 +1743,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
             "c_ent": c_ent_val,
             "beta": beta_val_report,
             "eff_ratio": eff_ratio.detach(),
+            "loss_gripper": loss_gripper.detach(),
         }
     
     # -----------------------------
@@ -1755,10 +1789,10 @@ class GraphUnetResidualRLPolicy(nn.Module):
         cfg = checkpoint["cfg"]
         
         policy = cls(cfg, backbone)
-        # Backward compat: old checkpoints may have "alpha" key that was removed
+        # Backward compat: old checkpoints may have "alpha" key or missing "gripper_head"
         sd = checkpoint["policy_state_dict"]
         sd = {k: v for k, v in sd.items() if k != "alpha"}
-        policy.load_state_dict(sd)
+        policy.load_state_dict(sd, strict=False)
         
         # CRITICAL: Also load node_to_z weights from checkpoint if available
         # This ensures we load the trained node_to_z, not the original Graph-DiT node_to_z
