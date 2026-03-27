@@ -514,7 +514,7 @@ class GraphDiTRLTrainer:
             xy_aligned = xy_error_norm < 0.003  # 3mm = aligned enough to descend
             hover_height = 0.025  # hover 25mm above base cube (cube=18mm + 7mm margin)
 
-            max_ee_step = 0.001  # 1mm per step
+            max_step = 0.001  # 1mm per step, per axis (x, y, z independent)
             dx = torch.zeros(B, 3, device=self.device)
 
             # Phase 1: correct XY, maintain hover height
@@ -524,7 +524,7 @@ class GraphDiTRLTrainer:
             # If held cube is too low during XY correction, lift up
             target_hover_z = torch.min(c1_z, c2_z) + hover_height
             z_lift = target_hover_z - held_z  # positive = need to go up
-            dx[phase1, 2] = torch.clamp(z_lift[phase1], min=0.0, max=0.002)
+            dx[phase1, 2] = torch.clamp(z_lift[phase1], min=0.0, max=max_step)
 
             # Phase 2: XY aligned, descend to stack (target z_diff = 0.018)
             phase2 = needs_correction & xy_aligned
@@ -532,11 +532,10 @@ class GraphDiTRLTrainer:
             z_descend = target_stack_z - held_z  # negative = need to go down
             dx[phase2, 0] = -xy_error[phase2, 0]  # keep correcting XY during descent
             dx[phase2, 1] = -xy_error[phase2, 1]
-            dx[phase2, 2] = torch.clamp(z_descend[phase2], min=-0.001, max=0.001)
+            dx[phase2, 2] = torch.clamp(z_descend[phase2], min=-max_step, max=max_step)
 
-            # Clamp EE displacement to max_ee_step (direction preserved, magnitude limited)
-            dx_norm = dx.norm(dim=-1, keepdim=True)  # [B, 1]
-            dx = torch.where(dx_norm > max_ee_step, dx * max_ee_step / (dx_norm + 1e-8), dx)
+            # Clamp each axis independently: x, y, z each get ±1mm budget
+            dx = torch.clamp(dx, -max_step, max_step)
 
             # Pseudoinverse: dq = J_pinv @ dx
             J_pinv = torch.linalg.pinv(J_xyz)  # [B, 5, 3]
