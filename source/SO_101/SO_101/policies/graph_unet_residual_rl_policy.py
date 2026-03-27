@@ -1552,7 +1552,22 @@ class GraphUnetResidualRLPolicy(nn.Module):
         delta_norm = torch.clamp(delta_norm, -1.0, 1.0)
         log_prob = dist.log_prob(delta_norm).sum(dim=-1)
         entropy = dist.entropy().sum(dim=-1)
-        loss_delta_reg = (delta_norm ** 2).mean()
+        # BC regularization: pull delta toward expert_target (0 when no expert)
+        # This turns ||delta||² into ||delta - expert_target_norm||²
+        # (RLT-style: anchor RL to expert rather than to zero)
+        if "expert_target" in batch:
+            expert_target_raw = batch["expert_target"]
+            # Normalize expert target same way as delta
+            if self.residual_action_mask is not None:
+                expert_target_raw = expert_target_raw * self.residual_action_mask
+            if self.action_mean is not None and self.action_std is not None:
+                expert_target_norm = expert_target_raw / (self.action_std[:act_dim] + 1e-8)
+            else:
+                expert_target_norm = expert_target_raw
+            expert_target_norm = torch.clamp(expert_target_norm, -1.0, 1.0)
+            loss_delta_reg = ((delta_norm - expert_target_norm) ** 2).mean()
+        else:
+            loss_delta_reg = (delta_norm ** 2).mean()
         alpha = alpha_mean  # for return dict
 
         # AWR weights: use counterfactual advantage when Q(s,a) mode

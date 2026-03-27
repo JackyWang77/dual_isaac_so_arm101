@@ -180,6 +180,8 @@ class RolloutBuffer:
         self.gate_w = torch.zeros(T, N, num_layers, device=device)
         # Q(s, a_base) for counterfactual advantage (only used when use_counterfactual_q=True)
         self.q_base = torch.zeros(T, N, device=device)
+        # Expert target delta (for BC regularization: ||delta - expert_target||²)
+        self.expert_target = torch.zeros(T, N, action_dim, device=device)
 
         self._initialized = True
 
@@ -217,6 +219,8 @@ class RolloutBuffer:
         self.gate_w[t] = info["gate_w"]
         if info.get("q_base") is not None:
             self.q_base[t] = info["q_base"].detach()
+        if info.get("expert_target") is not None:
+            self.expert_target[t] = info["expert_target"]
 
         self.ptr += 1
 
@@ -242,6 +246,7 @@ class RolloutBuffer:
         z_bar_flat = self.z_bar.reshape(total_samples, -1)
         values_flat = self.values.reshape(total_samples)
         q_base_flat = self.q_base.reshape(total_samples)  # Q(s, a_base) for counterfactual
+        expert_target_flat = self.expert_target.reshape(total_samples, -1)
 
         # Normalize advantages
         adv_flat = (adv_flat - adv_flat.mean()) / (adv_flat.std() + 1e-8)
@@ -273,6 +278,7 @@ class RolloutBuffer:
                     "values": values_flat[idx],
                     "q_total": values_flat[idx],  # values = Q(s, a_total) in Q mode
                     "q_base": q_base_flat[idx],   # Q(s, a_base) for counterfactual
+                    "expert_target": expert_target_flat[idx],  # Expert delta target for BC reg
                 }
 
     def reset(self):
@@ -803,6 +809,9 @@ class GraphDiTRLTrainer:
                 if self.use_expert_intervention and self._expert_initialized and not zero_residual:
                     B = obs.shape[0]
                     expert_delta, intervene_mask = self._compute_expert_delta(obs)
+                    # Store expert_target for BC regularization (all envs where expert has a correction)
+                    # expert_delta is 0 for non-correction envs, so this is safe
+                    info["expert_target"] = expert_delta.detach()
                     # Stochastic DAgger: only intervene with probability expert_ratio
                     dagger_coin = torch.rand(B, device=self.device) < self.expert_ratio
                     intervene_mask = intervene_mask & dagger_coin
