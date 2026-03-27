@@ -115,13 +115,14 @@ def cube_stack_alignment(
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),  # kept for config compat, not used
     gripper_open_thresh: float = 0.1,  # kept for config compat, not used
 ) -> torch.Tensor:
-    """Alignment reward: cube_top above cube_base by target_height + xy close.
+    """Alignment improvement reward: only rewards when xy_dist is decreasing.
 
     NO gripper gate — alignment should be rewarded regardless of gripper state.
-    Gripper release is handled by separate `gripper_release_when_stacked` reward.
+    Only gives reward when alignment is actively improving (xy getting closer).
+    Holding still or getting worse gives 0.
 
     - Cube_top must be above cube_base by at least target_height
-    - Reward = 1 - tanh(xy_dist / std), closer = higher
+    - Reward = max(0, prev_quality - curr_quality) mapped through improvement
     """
     top: RigidObject = env.scene[cube_top_cfg.name]
     base: RigidObject = env.scene[cube_base_cfg.name]
@@ -133,11 +134,29 @@ def cube_stack_alignment(
     z_diff = top_pos[:, 2] - base_pos[:, 2]
     height_ok = (z_diff >= target_height).float()
 
-    # XY distance: closer = better
+    # XY distance
     xy_dist = torch.norm(top_pos[:, :2] - base_pos[:, :2], dim=1)
-    alignment_quality = 1 - torch.tanh(xy_dist / std)
 
-    return alignment_quality * height_ok
+    # Track previous xy_dist per env; only reward improvement
+    buf_name = "_align_prev_xy_dist"
+    if not hasattr(env, buf_name):
+        setattr(env, buf_name, xy_dist.clone())
+        return torch.zeros_like(xy_dist)
+
+    prev_xy_dist = getattr(env, buf_name)
+    improvement = prev_xy_dist - xy_dist  # positive = getting closer
+
+    # Reset tracking for envs that just reset (xy_dist jumped)
+    just_reset = (xy_dist - prev_xy_dist).abs() > 0.05  # 50mm jump = reset
+    improvement[just_reset] = 0.0
+
+    # Update buffer
+    setattr(env, buf_name, xy_dist.clone())
+
+    # Reward only positive improvement, scaled by 1/std
+    reward = torch.clamp(improvement / std, min=0.0)
+
+    return reward * height_ok
 
 
 def cube_near_target_xy(
