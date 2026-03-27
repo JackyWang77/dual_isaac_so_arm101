@@ -439,6 +439,22 @@ def play_graph_rl_policy(
                     deterministic=deterministic,
                 )
 
+            # Alignment gating: RL residual only active during final stacking alignment
+            # (same condition as training). Outside this phase, use pure backbone.
+            if is_dual_arm and obs_struct is not None and "cube_1_pos" in obs_struct and "cube_2_pos" in obs_struct:
+                c1 = obs[:, obs_struct["cube_1_pos"][0]:obs_struct["cube_1_pos"][1]]
+                c2 = obs[:, obs_struct["cube_2_pos"][0]:obs_struct["cube_2_pos"][1]]
+                c1_z, c2_z = c1[:, 2], c2[:, 2]
+                held_xy = torch.where((c1_z < c2_z).unsqueeze(-1), c2[:, :2], c1[:, :2])
+                held_z = torch.max(c1_z, c2_z)
+                target_xy = torch.where((c1_z < c2_z).unsqueeze(-1), c1[:, :2], c2[:, :2])
+                xy_error_norm = (held_xy - target_xy).norm(dim=-1)
+                z_diff = torch.abs(c1_z - c2_z)
+                in_alignment = (held_z > 0.015) & (xy_error_norm < 0.02) & (z_diff > 0.005)
+                not_aligned = ~in_alignment
+                if not_aligned.any() and "a_base" in policy_info:
+                    action[not_aligned] = policy_info["a_base"][not_aligned]
+
             # Clip action to action space bounds
             if hasattr(env, 'action_space'):
                 if hasattr(env.action_space, 'low') and hasattr(env.action_space, 'high'):
