@@ -494,10 +494,10 @@ class GraphDiTRLTrainer:
 
         # Only intervene when held cube is near target cube:
         # - held cube above table (z > 15mm)
-        # - xy_error in [0.5mm, 10mm]: close enough to be in final alignment,
-        #   but not already perfect. >10mm = still transporting, let backbone handle.
-        near_target = (held_z > 0.015) & (xy_error_norm > 0.0005) & (xy_error_norm < 0.01)
-        needs_correction = near_target | ((held_z > 0.015) & (xy_error_norm < 0.01) & (z_diff > 0.005))
+        # - xy_error in [3mm, 20mm]: close enough for final alignment,
+        #   but not already perfect. >20mm = still transporting, let backbone handle.
+        near_target = (held_z > 0.015) & (xy_error_norm > 0.003) & (xy_error_norm < 0.02)
+        needs_correction = near_target | ((held_z > 0.015) & (xy_error_norm < 0.02) & (z_diff > 0.005))
 
         if not needs_correction.any():
             return expert_delta, intervene_mask
@@ -511,7 +511,7 @@ class GraphDiTRLTrainer:
             # Two-phase strategy to avoid friction when cubes touch:
             # Phase 1: XY not aligned → move XY, lift Z slightly above target
             # Phase 2: XY aligned → descend Z to stack
-            xy_aligned = xy_error_norm < 0.002  # 2mm = aligned enough to descend
+            xy_aligned = xy_error_norm < 0.003  # 3mm = aligned enough to descend
             hover_height = 0.025  # hover 25mm above base cube (cube=18mm + 7mm margin)
 
             max_ee_step = 0.001  # 1mm per step
