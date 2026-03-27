@@ -1,146 +1,319 @@
-
-[Trainer] Starting training for 50 iterations...
-  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=15.9 | gripper_release=5.1 | success_bonus=32.3 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[1/50 | 2m | ETA 2h19m] [critic_warmup] SR= 64.3% (100:38.0% 200ep:30.0%) [512ep] | Rew=  53.6 | EV= 0.00 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.391
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr64_iter1.pt
-[Trainer] Peak SR saved (iter 1, SR=64.3%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr64_iter1.pt
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.3 | gripper_release=3.8 | success_bonus=14.1 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[2/50 | 5m | ETA 2h18m] [critic_warmup] SR= 65.8% (100:25.0% 200ep:23.0%) [512ep] | Rew=  32.4 | EV= 0.12 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.459
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr66_iter2.pt
-[Trainer] Peak SR saved (iter 2, SR=65.8%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr66_iter2.pt
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=12.5 | gripper_release=4.0 | success_bonus=23.6 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[3/50 | 8m | ETA 2h17m] [critic_warmup] SR= 61.9% (100:25.0% 200ep:24.5%) [512ep] | Rew=  40.5 | EV= 0.16 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.481
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.5 | gripper_release=3.5 | success_bonus=22.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[4/50 | 11m | ETA 2h17m] [critic_warmup] SR= 63.1% (100:19.0% 200ep:21.5%) [512ep] | Rew=  39.3 | EV= 0.15 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.478
-  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=14.6 | gripper_release=5.1 | success_bonus=40.6 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[5/50 | 15m | ETA 2h15m] [critic_warmup] SR= 61.7% (100:24.0% 200ep:23.5%) [512ep] | Rew=  60.7 | EV= 0.16 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.495
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_5.pt
-[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_5.pt
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.7 | gripper_release=4.4 | success_bonus=30.4 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[6/50 | 18m | ETA 2h12m] [critic_warmup] SR= 67.0% (100:34.0% 200ep:31.5%) [512ep] | Rew=  48.7 | EV= 0.13 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.496
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr67_iter6.pt
-[Trainer] Peak SR saved (iter 6, SR=67.0%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr67_iter6.pt
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.5 | gripper_release=4.8 | success_bonus=29.5 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[7/50 | 21m | ETA 2h10m] [critic_warmup] SR= 67.8% (100:31.0% 200ep:30.5%) [512ep] | Rew=  48.1 | EV= 0.12 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.500
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr68_iter7.pt
-[Trainer] Peak SR saved (iter 7, SR=67.8%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr68_iter7.pt
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.1 | gripper_release=3.9 | success_bonus=13.8 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[8/50 | 24m | ETA 2h08m] [critic_warmup] SR= 63.7% (100:25.0% 200ep:24.5%) [512ep] | Rew=  31.0 | EV= 0.15 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.485
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=16.0 | gripper_release=4.6 | success_bonus=20.9 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[9/50 | 27m | ETA 2h05m] [critic_warmup] SR= 64.8% (100:29.0% 200ep:29.5%) [512ep] | Rew=  41.8 | EV= 0.13 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.469
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.1 | gripper_release=4.4 | success_bonus=12.8 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[10/50 | 30m | ETA 2h02m] [critic_warmup] SR= 63.9% (100:28.0% 200ep:26.0%) [512ep] | Rew=  30.5 | EV= 0.14 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.499
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_10.pt
-[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_10.pt
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.4 | gripper_release=4.3 | success_bonus=19.7 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[11/50 | 33m | ETA 1h59m] SR= 63.7% (100:30.0% 200ep:28.0%) [512ep] | Rew=  38.6 | EV= 0.14 | Δ=0.085 | α=0.07 β=2.096 | cΔ=9.4 cH=0.0095 eff=0.14 | L=-12.818
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/best_model.pt
-[Trainer] Best model saved (SR_200ep=28.0%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/best_model.pt
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.3 | gripper_release=3.9 | success_bonus=21.6 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[12/50 | 36m | ETA 1h56m] SR= 62.9% (100:23.0% 200ep:24.0%) [512ep] | Rew=  40.0 | EV= 0.13 | Δ=0.084 | α=0.08 β=2.291 | cΔ=8.7 cH=0.0087 eff=0.06 | L=-12.854
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.4 | gripper_release=4.5 | success_bonus=30.3 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[13/50 | 39m | ETA 1h53m] SR= 63.3% (100:26.0% 200ep:29.0%) [512ep] | Rew=  48.4 | EV= 0.16 | Δ=0.084 | α=0.08 β=2.501 | cΔ=8.4 cH=0.0084 eff=0.07 | L=-13.435
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/best_model.pt
-[Trainer] Best model saved (SR_200ep=29.0%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/best_model.pt
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=12.4 | gripper_release=3.9 | success_bonus=32.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[14/50 | 43m | ETA 1h50m] SR= 62.7% (100:20.0% 200ep:22.0%) [512ep] | Rew=  48.5 | EV= 0.16 | Δ=0.083 | α=0.08 β=2.710 | cΔ=8.1 cH=0.0086 eff=0.11 | L=-13.914
-  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=14.0 | gripper_release=4.7 | success_bonus=20.7 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[15/50 | 46m | ETA 1h47m] SR= 67.0% (100:34.0% 200ep:36.0%) [512ep] | Rew=  39.7 | EV= 0.15 | Δ=0.082 | α=0.08 β=2.921 | cΔ=7.5 cH=0.0096 eff=0.13 | L=-14.369
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/best_model.pt
-[Trainer] Best model saved (SR_200ep=36.0%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/best_model.pt
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_15.pt
-[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_15.pt
-  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=14.7 | gripper_release=5.1 | success_bonus=31.1 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[16/50 | 49m | ETA 1h44m] SR= 65.0% (100:31.0% 200ep:29.0%) [512ep] | Rew=  51.2 | EV= 0.21 | Δ=0.081 | α=0.08 β=3.121 | cΔ=7.0 cH=0.0109 eff=0.20 | L=-14.593
-  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=14.1 | gripper_release=4.5 | success_bonus=21.2 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[17/50 | 52m | ETA 1h41m] SR= 65.8% (100:27.0% 200ep:28.0%) [512ep] | Rew=  40.1 | EV= 0.17 | Δ=0.079 | α=0.08 β=3.310 | cΔ=6.4 cH=0.0123 eff=0.23 | L=-14.908
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.8 | gripper_release=3.9 | success_bonus=14.3 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[18/50 | 55m | ETA 1h38m] SR= 65.6% (100:28.0% 200ep:27.5%) [512ep] | Rew=  33.3 | EV= 0.14 | Δ=0.077 | α=0.08 β=3.496 | cΔ=5.8 cH=0.0138 eff=0.25 | L=-15.222
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=10.9 | gripper_release=3.2 | success_bonus=8.6 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[19/50 | 58m | ETA 1h35m] SR= 59.6% (100:28.0% 200ep:23.0%) [512ep] | Rew=  23.0 | EV= 0.17 | Δ=0.075 | α=0.08 β=3.628 | cΔ=5.4 cH=0.0153 eff=0.34 | L=-15.314
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=11.9 | gripper_release=4.0 | success_bonus=28.5 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[20/50 | 61m | ETA 1h32m] SR= 65.4% (100:22.0% 200ep:21.0%) [512ep] | Rew=  44.6 | EV= 0.16 | Δ=0.073 | α=0.08 β=3.745 | cΔ=4.9 cH=0.0170 eff=0.31 | L=-15.766
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_20.pt
-[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_20.pt
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.6 | gripper_release=3.9 | success_bonus=37.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[21/50 | 64m | ETA 1h29m] SR= 61.1% (100:22.0% 200ep:21.0%) [512ep] | Rew=  54.8 | EV= 0.13 | Δ=0.071 | α=0.08 β=3.820 | cΔ=4.6 cH=0.0188 eff=0.39 | L=-15.790
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.9 | gripper_release=4.0 | success_bonus=17.6 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[22/50 | 68m | ETA 1h26m] SR= 67.2% (100:31.0% 200ep:27.0%) [512ep] | Rew=  35.7 | EV= 0.13 | Δ=0.070 | α=0.08 β=3.910 | cΔ=4.2 cH=0.0207 eff=0.30 | L=-16.375
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=12.0 | gripper_release=4.2 | success_bonus=19.9 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[23/50 | 71m | ETA 1h23m] SR= 65.6% (100:24.0% 200ep:28.0%) [512ep] | Rew=  36.3 | EV= 0.17 | Δ=0.068 | α=0.08 β=3.997 | cΔ=3.9 cH=0.0228 eff=0.39 | L=-16.299
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=12.9 | gripper_release=2.9 | success_bonus=6.2 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[24/50 | 74m | ETA 1h20m] SR= 66.4% (100:20.0% 200ep:25.0%) [512ep] | Rew=  22.3 | EV= 0.14 | Δ=0.067 | α=0.08 β=4.046 | cΔ=3.6 cH=0.0250 eff=0.35 | L=-16.701
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=15.2 | gripper_release=4.4 | success_bonus=26.8 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[25/50 | 77m | ETA 1h17m] SR= 68.4% (100:29.0% 200ep:33.5%) [512ep] | Rew=  46.6 | EV= 0.16 | Δ=0.066 | α=0.08 β=3.913 | cΔ=3.3 cH=0.0275 eff=0.60 | L=-15.938
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr68_iter25.pt
-[Trainer] Peak SR saved (iter 25, SR=68.4%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr68_iter25.pt
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_25.pt
-[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_25.pt
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.1 | gripper_release=3.7 | success_bonus=26.4 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[26/50 | 80m | ETA 1h14m] SR= 64.3% (100:18.0% 200ep:25.0%) [512ep] | Rew=  43.4 | EV= 0.13 | Δ=0.065 | α=0.08 β=3.747 | cΔ=3.1 cH=0.0302 eff=0.43 | L=-16.838
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.7 | gripper_release=4.0 | success_bonus=20.1 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[27/50 | 83m | ETA 1h11m] SR= 64.1% (100:24.0% 200ep:24.5%) [512ep] | Rew=  38.1 | EV= 0.12 | Δ=0.063 | α=0.08 β=3.707 | cΔ=2.9 cH=0.0331 eff=0.41 | L=-17.040
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=12.8 | gripper_release=4.1 | success_bonus=17.8 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[28/50 | 87m | ETA 1h08m] SR= 66.6% (100:26.0% 200ep:29.5%) [512ep] | Rew=  34.9 | EV= 0.14 | Δ=0.063 | α=0.08 β=3.746 | cΔ=2.7 cH=0.0362 eff=0.34 | L=-17.406
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=16.2 | gripper_release=4.9 | success_bonus=23.4 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[29/50 | 90m | ETA 1h05m] SR= 62.9% (100:30.0% 200ep:31.5%) [512ep] | Rew=  44.8 | EV= 0.15 | Δ=0.062 | α=0.08 β=3.755 | cΔ=2.5 cH=0.0397 eff=0.43 | L=-17.137
-  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=15.1 | gripper_release=4.3 | success_bonus=12.8 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[30/50 | 93m | ETA 1h02m] SR= 67.4% (100:33.0% 200ep:31.0%) [512ep] | Rew=  32.4 | EV= 0.13 | Δ=0.061 | α=0.08 β=3.828 | cΔ=2.3 cH=0.0435 eff=0.28 | L=-17.720
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_30.pt
-[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_30.pt
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.9 | gripper_release=4.1 | success_bonus=15.8 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[31/50 | 96m | ETA 59m11s] SR= 61.5% (100:22.0% 200ep:24.5%) [512ep] | Rew=  34.0 | EV= 0.16 | Δ=0.061 | α=0.08 β=3.864 | cΔ=2.1 cH=0.0476 eff=0.46 | L=-17.042
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.0 | gripper_release=4.4 | success_bonus=36.3 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[32/50 | 99m | ETA 56m04s] SR= 64.1% (100:25.0% 200ep:26.0%) [512ep] | Rew=  54.9 | EV= 0.14 | Δ=0.061 | α=0.08 β=3.735 | cΔ=2.0 cH=0.0522 eff=0.47 | L=-17.065
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=12.9 | gripper_release=4.4 | success_bonus=27.3 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[33/50 | 102m | ETA 52m59s] SR= 62.7% (100:29.0% 200ep:28.5%) [512ep] | Rew=  44.8 | EV= 0.16 | Δ=0.060 | α=0.08 β=3.648 | cΔ=1.8 cH=0.0572 eff=0.43 | L=-17.235
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.0 | gripper_release=4.0 | success_bonus=28.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[34/50 | 105m | ETA 49m51s] SR= 63.5% (100:28.0% 200ep:27.5%) [512ep] | Rew=  46.3 | EV= 0.14 | Δ=0.060 | α=0.08 β=3.652 | cΔ=1.7 cH=0.0626 eff=0.37 | L=-17.434
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.3 | gripper_release=3.9 | success_bonus=16.4 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[35/50 | 109m | ETA 46m44s] SR= 65.8% (100:28.0% 200ep:31.0%) [512ep] | Rew=  33.8 | EV= 0.14 | Δ=0.060 | α=0.08 β=3.619 | cΔ=1.6 cH=0.0685 eff=0.45 | L=-17.082
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_35.pt
-[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_35.pt
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.0 | gripper_release=5.0 | success_bonus=28.1 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[36/50 | 112m | ETA 43m36s] SR= 65.2% (100:31.0% 200ep:30.5%) [512ep] | Rew=  46.4 | EV= 0.14 | Δ=0.060 | α=0.08 β=3.583 | cΔ=1.5 cH=0.0751 eff=0.39 | L=-17.307
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.6 | gripper_release=4.3 | success_bonus=13.9 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[37/50 | 115m | ETA 40m30s] SR= 69.3% (100:36.0% 200ep:35.0%) [512ep] | Rew=  32.1 | EV= 0.15 | Δ=0.060 | α=0.08 β=3.630 | cΔ=1.4 cH=0.0821 eff=0.36 | L=-17.248
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr69_iter37.pt
-[Trainer] Peak SR saved (iter 37, SR=69.3%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr69_iter37.pt
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.7 | gripper_release=5.0 | success_bonus=26.3 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[38/50 | 118m | ETA 37m23s] SR= 67.8% (100:36.0% 200ep:32.0%) [512ep] | Rew=  45.3 | EV= 0.16 | Δ=0.061 | α=0.08 β=3.669 | cΔ=1.3 cH=0.0898 eff=0.39 | L=-17.021
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.9 | gripper_release=4.3 | success_bonus=25.7 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[39/50 | 121m | ETA 34m17s] SR= 67.8% (100:33.0% 200ep:33.0%) [512ep] | Rew=  45.1 | EV= 0.14 | Δ=0.061 | α=0.08 β=3.561 | cΔ=1.2 cH=0.0984 eff=0.52 | L=-16.344
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.6 | gripper_release=4.2 | success_bonus=17.2 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[40/50 | 124m | ETA 31m09s] SR= 66.2% (100:35.0% 200ep:29.5%) [512ep] | Rew=  35.4 | EV= 0.17 | Δ=0.062 | α=0.08 β=3.552 | cΔ=1.1 cH=0.1075 eff=0.29 | L=-16.926
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_40.pt
-[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_40.pt
-  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=13.8 | gripper_release=5.3 | success_bonus=34.1 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[41/50 | 127m | ETA 28m01s] SR= 65.8% (100:26.0% 200ep:28.5%) [512ep] | Rew=  53.5 | EV= 0.14 | Δ=0.063 | α=0.08 β=3.650 | cΔ=1.0 cH=0.1176 eff=0.38 | L=-16.364
-  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=12.8 | gripper_release=4.0 | success_bonus=11.5 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[42/50 | 130m | ETA 24m53s] SR= 60.7% (100:34.0% 200ep:28.5%) [512ep] | Rew=  28.6 | EV= 0.16 | Δ=0.064 | α=0.08 β=3.502 | cΔ=1.0 cH=0.1289 eff=0.62 | L=-15.162
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=16.0 | gripper_release=4.6 | success_bonus=21.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[43/50 | 133m | ETA 21m46s] SR= 63.3% (100:32.0% 200ep:27.0%) [512ep] | Rew=  41.9 | EV= 0.15 | Δ=0.066 | α=0.08 β=3.201 | cΔ=0.9 cH=0.1411 eff=0.74 | L=-14.521
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.8 | gripper_release=3.6 | success_bonus=11.8 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[44/50 | 136m | ETA 18m40s] SR= 61.5% (100:26.0% 200ep:23.5%) [512ep] | Rew=  30.4 | EV= 0.20 | Δ=0.067 | α=0.08 β=3.090 | cΔ=0.8 cH=0.1536 eff=0.31 | L=-15.521
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.8 | gripper_release=4.1 | success_bonus=47.3 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[45/50 | 140m | ETA 15m33s] SR= 62.3% (100:21.0% 200ep:20.5%) [512ep] | Rew=  66.5 | EV= 0.21 | Δ=0.069 | α=0.08 β=3.103 | cΔ=0.8 cH=0.1673 eff=0.43 | L=-14.760
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_45.pt
-[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_45.pt
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.2 | gripper_release=4.6 | success_bonus=19.8 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[46/50 | 143m | ETA 12m26s] SR= 64.6% (100:33.0% 200ep:30.5%) [512ep] | Rew=  38.8 | EV= 0.16 | Δ=0.071 | α=0.08 β=3.127 | cΔ=0.7 cH=0.1825 eff=0.33 | L=-14.574
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.0 | gripper_release=5.0 | success_bonus=21.9 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[47/50 | 146m | ETA 9m19s] SR= 65.6% (100:33.0% 200ep:28.5%) [512ep] | Rew=  41.2 | EV= 0.16 | Δ=0.073 | α=0.08 β=3.266 | cΔ=0.7 cH=0.1985 eff=0.25 | L=-14.312
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=14.1 | gripper_release=3.8 | success_bonus=13.2 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[48/50 | 149m | ETA 6m13s] SR= 63.1% (100:21.0% 200ep:22.5%) [512ep] | Rew=  31.4 | EV= 0.14 | Δ=0.076 | α=0.08 β=3.249 | cΔ=0.6 cH=0.2164 eff=0.56 | L=-12.638
-  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_2_on_1=14.6 | gripper_release=4.8 | success_bonus=34.5 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[49/50 | 152m | ETA 3m06s] SR= 69.5% (100:32.0% 200ep:30.5%) [512ep] | Rew=  54.2 | EV= 0.18 | Δ=0.079 | α=0.08 β=3.067 | cΔ=0.6 cH=0.2360 eff=0.57 | L=-12.052
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr70_iter49.pt
-[Trainer] Peak SR saved (iter 49, SR=69.5%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr70_iter49.pt
-  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_2_on_1=13.6 | gripper_release=4.2 | success_bonus=16.9 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
-[50/50 | 155m | ETA 0m00s] SR= 63.7% (100:33.0% 200ep:27.5%) [512ep] | Rew=  34.9 | EV= 0.21 | Δ=0.082 | α=0.08 β=3.013 | cΔ=0.6 cH=0.2560 eff=0.33 | L=-12.184
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_50.pt
-[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_50.pt
-[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_final.pt
-[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env512_epochs2_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_final.pt
-
-[Trainer] Training complete!
+ [TERM_SUCCESS] stacked=1 but result=0: R_jaw=0.030 L_jaw=0.398 (need>0.1)
+  [TERM_SUCCESS] stacked=1 but result=0: R_jaw=0.030 L_jaw=0.398 (need>0.1)
+  [TERM_SUCCESS] stacked=1 but result=0: R_jaw=0.030 L_jaw=0.398 (need>0.1)
+  [EP] env=0 T=True Tr=False S=True fired=['success'] len=260 rew=12.7 | z=18.8mm xy=6.3mm [z=OK xy=OK] Rg=0.029 Lg=0.398 [grip=FAIL] | rew_terms=[cube1_is_lifted=0.18, cube2_is_lifted=0.13, stack_1_on_2=2.44, success_bonus=10.00, joint_vel_right=-0.00, joint_vel_left=-0.00]
+  [EP] env=4 T=True Tr=False S=True fired=['success'] len=262 rew=13.3 | z=18.3mm xy=3.3mm [z=OK xy=OK] Rg=0.029 Lg=0.398 [grip=FAIL] | rew_terms=[cube1_is_lifted=0.19, cube2_is_lifted=0.23, stack_1_on_2=2.85, success_bonus=10.00, joint_vel_right=-0.00, joint_vel_left=-0.00]
+  [EP] env=1 T=True Tr=False S=True fired=['success'] len=288 rew=13.7 | z=18.5mm xy=6.5mm [z=OK xy=OK] Rg=0.029 Lg=0.398 [grip=FAIL] | rew_terms=[cube1_is_lifted=0.07, cube2_is_lifted=0.18, stack_1_on_2=3.46, success_bonus=10.00, joint_vel_right=-0.00, joint_vel_left=-0.00]
+  [EP] env=7 T=True Tr=False S=True fired=['success'] len=293 rew=15.5 | z=18.7mm xy=8.2mm [z=OK xy=OK] Rg=0.029 Lg=0.398 [grip=FAIL] | rew_terms=[cube1_is_lifted=0.30, cube2_is_lifted=0.15, stack_1_on_2=5.03, success_bonus=10.00, joint_vel_right=-0.00, joint_vel_left=-0.00]
+  [EP] env=8 T=True Tr=False S=True fired=['success'] len=345 rew=19.4 | z=18.1mm xy=6.0mm [z=OK xy=OK] Rg=0.029 Lg=0.398 [grip=FAIL] | rew_terms=[cube1_is_lifted=0.16, cube2_is_lifted=0.17, stack_1_on_2=9.07, success_bonus=10.00, joint_vel_right=-0.00, joint_vel_left=-0.00]
+  [EP] env=2 T=True Tr=False S=True fired=['success'] len=388 rew=14.4 | z=18.2mm xy=3.4mm [z=OK xy=OK] Rg=0.029 Lg=0.398 [grip=FAIL] | rew_terms=[cube1_is_lifted=0.37, cube2_is_lifted=0.13, stack_1_on_2=3.90, success_bonus=10.00, joint_vel_right=-0.00, joint_vel_left=-0.00]
+  [EP] env=3 T=False Tr=True S=False fired=['time_out'] len=400 rew=22.8 | z=18.4mm xy=1.5mm [z=OK xy=OK] Rg=0.029 Lg=0.398 [grip=FAIL] | rew_terms=[cube1_is_lifted=0.18, cube2_is_lifted=0.18, stack_1_on_2=12.46, success_bonus=10.00, joint_vel_right=-0.00, joint_vel_left=-0.00]
+  [EP] env=5 T=False Tr=True S=False fired=['time_out'] len=400 rew=14.3 | z=18.9mm xy=8.2mm [z=OK xy=OK] Rg=0.029 Lg=0.398 [grip=FAIL] | rew_terms=[cube1_is_lifted=0.19, cube2_is_lifted=0.18, stack_1_on_2=3.93, success_bonus=10.00, joint_vel_right=-0.00, joint_vel_left=-0.00]
+  [EP] env=6 T=False Tr=True S=False fired=['time_out'] len=400 rew=0.3 | z=-0.0mm xy=65.9mm [z=FAIL xy=FAIL] Rg=0.002 Lg=0.398 [grip=FAIL] | rew_terms=[cube1_is_lifted=0.13, cube2_is_lifted=0.16, stack_1_on_2=0.03, joint_vel_right=-0.00, joint_vel_left=-0.00]
+  [EP] env=9 T=False Tr=True S=False fired=['time_out'] len=400 rew=-0.0 | z=-0.0mm xy=330.7mm [z=FAIL xy=FAIL] Rg=0.400 Lg=0.002 [grip=FAIL] | rew_terms=[joint_vel_right=-0.00, joint_vel_left=-0.01]
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.2 | stack_1_on_2=4.3 | success_bonus=8.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[1/50 | 0m | ETA 32m34s] [critic_warmup] SR= 60.0% [10ep] | Rew=  12.6 | EV= 0.22 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.265 | Exp=1.00
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env10_epochs3_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr60_iter1.pt
+[Trainer] Peak SR saved (iter 1, SR=60.0%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env10_epochs3_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr60_iter1.pt
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.2 | stack_1_on_2=5.2 | success_bonus=9.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[2/50 | 1m | ETA 30m45s] [critic_warmup] SR= 70.0% [10ep] | Rew=  13.6 | EV= 0.27 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.289 | Exp=1.00
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env10_epochs3_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr70_iter2.pt
+[Trainer] Peak SR saved (iter 2, SR=70.0%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env10_epochs3_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr70_iter2.pt
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_1_on_2=4.0 | success_bonus=5.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[3/50 | 1m | ETA 30m27s] [critic_warmup] SR= 50.0% [10ep] | Rew=  12.1 | EV= 0.40 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.293 | Exp=1.00
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_1_on_2=6.1 | success_bonus=9.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[4/50 | 2m | ETA 30m00s] [critic_warmup] SR= 70.0% [10ep] | Rew=  13.0 | EV= 0.40 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.324 | Exp=1.00
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_1_on_2=4.5 | success_bonus=8.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[5/50 | 3m | ETA 29m12s] [critic_warmup] SR= 60.0% [10ep] | Rew=  13.0 | EV= 0.22 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.278 | Exp=1.00
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_1_on_2=5.8 | success_bonus=7.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[6/50 | 3m | ETA 28m29s] [critic_warmup] SR= 40.0% [10ep] | Rew=  13.0 | EV= 0.31 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.321 | Exp=1.00
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_1_on_2=3.5 | success_bonus=6.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[7/50 | 4m | ETA 27m27s] [critic_warmup] SR= 30.0% [10ep] | Rew=  12.5 | EV= 0.36 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.317 | Exp=1.00
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_1_on_2=7.1 | success_bonus=7.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[8/50 | 5m | ETA 26m46s] [critic_warmup] SR= 40.0% [10ep] | Rew=  12.8 | EV= 0.38 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.322 | Exp=1.00
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.2 | stack_1_on_2=5.2 | success_bonus=7.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[9/50 | 5m | ETA 25m55s] [critic_warmup] SR= 30.0% [10ep] | Rew=  12.7 | EV= 0.27 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.299 | Exp=1.00
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_1_on_2=3.5 | success_bonus=5.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[10/50 | 6m | ETA 25m18s] [critic_warmup] SR= 40.0% [10ep] | Rew=  12.3 | EV= 0.33 | Δ=0.000 | α=0.00 β=2.000 | cΔ=10.0 cH=0.0100 eff=1.00 | L=-11.318 | Exp=1.00
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env10_epochs3_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_10.pt
+[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env10_epochs3_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_10.pt
+  [Expert] step=10 correcting=2/10 (P1_xy=2 P2_descend=0) | env=3: xy_err=45.0mm z_diff=32.7mm dx=[-0.85,0.53,0.00]mm dq_norm=0.0092
+  [Expert] step=20 correcting=2/10 (P1_xy=2 P2_descend=0) | env=3: xy_err=16.6mm z_diff=21.6mm dx=[-0.98,0.15,0.12]mm dq_norm=0.0116
+  [Expert] step=30 correcting=5/10 (P1_xy=5 P2_descend=0) | env=2: xy_err=139.7mm z_diff=13.7mm dx=[-0.30,0.95,0.01]mm dq_norm=0.0128
+  [Expert] step=40 correcting=4/10 (P1_xy=4 P2_descend=0) | env=0: xy_err=25.6mm z_diff=22.1mm dx=[-0.79,0.61,0.08]mm dq_norm=0.0089
+  [Expert] step=50 correcting=2/10 (P1_xy=2 P2_descend=0) | env=0: xy_err=16.4mm z_diff=17.9mm dx=[-0.77,0.62,0.12]mm dq_norm=0.0089
+  [Expert] step=60 correcting=4/10 (P1_xy=4 P2_descend=0) | env=0: xy_err=13.7mm z_diff=18.1mm dx=[-0.70,0.69,0.14]mm dq_norm=0.0094
+  [Expert] step=70 correcting=4/10 (P1_xy=4 P2_descend=0) | env=0: xy_err=11.2mm z_diff=18.2mm dx=[-0.65,0.74,0.18]mm dq_norm=0.0098
+  [Expert] step=80 correcting=4/10 (P1_xy=4 P2_descend=0) | env=0: xy_err=8.4mm z_diff=18.2mm dx=[-0.56,0.80,0.23]mm dq_norm=0.0105
+  [Expert] step=90 correcting=4/10 (P1_xy=4 P2_descend=0) | env=0: xy_err=6.5mm z_diff=18.3mm dx=[-0.44,0.85,0.30]mm dq_norm=0.0113
+  [Expert] step=100 correcting=2/10 (P1_xy=2 P2_descend=0) | env=2: xy_err=6.5mm z_diff=18.2mm dx=[-0.61,0.74,0.29]mm dq_norm=0.0100
+  [Expert] step=110 correcting=1/10 (P1_xy=1 P2_descend=0) | env=6: xy_err=5.3mm z_diff=18.5mm dx=[-0.37,0.86,0.35]mm dq_norm=0.0117
+  [Align] RL residual active 8.0% (326/4050) | Expert intervened 8.6% (350/4050)
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_1_on_2=1.4 | success_bonus=6.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[11/50 | 7m | ETA 25m04s] SR= 60.0% [10ep] | Rew=  11.8 | EV= 0.39 | Δ=0.011 | α=0.40 β=1.872 | cΔ=9.3 cH=0.0094 eff=0.78 | L=-12.634 | Exp=1.00
+  [Expert] step=10 correcting=2/10 (P1_xy=2 P2_descend=0) | env=3: xy_err=28.0mm z_diff=19.8mm dx=[-0.84,0.53,0.07]mm dq_norm=0.0101
+  [Expert] step=20 correcting=1/10 (P1_xy=1 P2_descend=0) | env=3: xy_err=16.9mm z_diff=19.2mm dx=[-0.99,-0.05,0.12]mm dq_norm=0.0125
+  [Expert] step=30 correcting=2/10 (P1_xy=2 P2_descend=0) | env=3: xy_err=12.6mm z_diff=19.0mm dx=[-0.89,-0.43,0.16]mm dq_norm=0.0160
+  [Expert] step=40 correcting=6/10 (P1_xy=6 P2_descend=0) | env=1: xy_err=135.0mm z_diff=27.2mm dx=[-0.19,0.98,0.00]mm dq_norm=0.0129
+  [Expert] step=50 correcting=4/10 (P1_xy=4 P2_descend=0) | env=4: xy_err=19.6mm z_diff=16.9mm dx=[-0.99,0.04,0.10]mm dq_norm=0.0124
+  [Expert] step=60 correcting=5/10 (P1_xy=5 P2_descend=0) | env=1: xy_err=21.2mm z_diff=23.0mm dx=[-0.94,0.34,0.09]mm dq_norm=0.0101
+  [Expert] step=70 correcting=6/10 (P1_xy=6 P2_descend=0) | env=1: xy_err=6.4mm z_diff=19.1mm dx=[-0.95,0.09,0.30]mm dq_norm=0.0133
+  [Expert] step=80 correcting=8/10 (P1_xy=8 P2_descend=0) | env=1: xy_err=3.9mm z_diff=18.9mm dx=[-0.80,0.38,0.46]mm dq_norm=0.0098
+  [Expert] step=90 correcting=7/10 (P1_xy=5 P2_descend=2) | env=1: xy_err=0.9mm z_diff=18.1mm dx=[0.47,0.75,-0.12]mm dq_norm=0.0189
+  [Expert] step=100 correcting=7/10 (P1_xy=5 P2_descend=2) | env=1: xy_err=1.8mm z_diff=18.1mm dx=[0.92,0.38,-0.06]mm dq_norm=0.0175
+  [Expert] step=110 correcting=7/10 (P1_xy=7 P2_descend=0) | env=1: xy_err=2.7mm z_diff=18.5mm dx=[0.78,0.18,0.59]mm dq_norm=0.0103
+  [Expert] step=120 correcting=7/10 (P1_xy=6 P2_descend=1) | env=1: xy_err=2.9mm z_diff=18.4mm dx=[0.74,0.37,0.56]mm dq_norm=0.0121
+  [Expert] step=130 correcting=3/10 (P1_xy=3 P2_descend=0) | env=0: xy_err=22.5mm z_diff=25.0mm dx=[-0.89,0.46,0.00]mm dq_norm=0.0090
+  [Expert] step=140 correcting=4/10 (P1_xy=4 P2_descend=0) | env=0: xy_err=9.6mm z_diff=19.3mm dx=[-0.85,0.48,0.20]mm dq_norm=0.0090
+  [Expert] step=150 correcting=4/10 (P1_xy=3 P2_descend=1) | env=0: xy_err=5.1mm z_diff=18.3mm dx=[-0.79,0.49,0.37]mm dq_norm=0.0090
+  [Expert] step=160 correcting=3/10 (P1_xy=2 P2_descend=1) | env=5: xy_err=1.5mm z_diff=18.6mm dx=[-0.35,0.85,-0.40]mm dq_norm=0.0161
+  [Expert] step=170 correcting=3/10 (P1_xy=2 P2_descend=1) | env=5: xy_err=1.5mm z_diff=18.6mm dx=[-0.42,0.82,-0.40]mm dq_norm=0.0153
+  [Expert] step=180 correcting=2/10 (P1_xy=1 P2_descend=1) | env=5: xy_err=1.6mm z_diff=18.6mm dx=[-0.46,0.81,-0.36]mm dq_norm=0.0148
+  [Expert] step=190 correcting=3/10 (P1_xy=3 P2_descend=0) | env=3: xy_err=33.8mm z_diff=9.0mm dx=[-0.91,-0.41,0.06]mm dq_norm=0.0164
+  [Expert] step=200 correcting=2/10 (P1_xy=2 P2_descend=0) | env=5: xy_err=3.9mm z_diff=18.9mm dx=[-0.71,0.54,0.46]mm dq_norm=0.0090
+  [Align] RL residual active 23.5% (951/4050) | Expert intervened 22.5% (912/4050)
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_1_on_2=8.2 | success_bonus=8.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[12/50 | 7m | ETA 24m29s] SR= 60.0% [10ep] | Rew=  12.0 | EV= 0.48 | Δ=0.030 | α=0.40 β=1.678 | cΔ=8.3 cH=0.0087 eff=0.73 | L=-14.120 | Exp=0.95
+  [Expert] step=10 correcting=2/10 (P1_xy=2 P2_descend=0) | env=7: xy_err=133.5mm z_diff=19.9mm dx=[-0.15,0.99,0.01]mm dq_norm=0.0131
+  [Expert] step=20 correcting=2/10 (P1_xy=2 P2_descend=0) | env=6: xy_err=29.2mm z_diff=22.4mm dx=[-0.45,0.89,0.07]mm dq_norm=0.0116
+  [Expert] step=30 correcting=5/10 (P1_xy=5 P2_descend=0) | env=3: xy_err=14.1mm z_diff=23.8mm dx=[-0.45,0.89,0.08]mm dq_norm=0.0123
+  [Expert] step=40 correcting=5/10 (P1_xy=5 P2_descend=0) | env=3: xy_err=8.6mm z_diff=18.7mm dx=[-0.40,0.89,0.23]mm dq_norm=0.0119
+  [Expert] step=50 correcting=6/10 (P1_xy=6 P2_descend=0) | env=1: xy_err=18.0mm z_diff=33.5mm dx=[-0.68,0.73,0.00]mm dq_norm=0.0098
+  [Expert] step=60 correcting=7/10 (P1_xy=7 P2_descend=0) | env=1: xy_err=8.7mm z_diff=28.6mm dx=[-0.59,0.81,0.00]mm dq_norm=0.0113
+  [Expert] step=70 correcting=9/10 (P1_xy=8 P2_descend=1) | env=1: xy_err=6.1mm z_diff=19.4mm dx=[-0.11,0.94,0.31]mm dq_norm=0.0143
+  [Expert] step=80 correcting=6/10 (P1_xy=5 P2_descend=1) | env=2: xy_err=4.3mm z_diff=18.3mm dx=[-0.75,0.50,0.42]mm dq_norm=0.0091
+  [Expert] step=90 correcting=4/10 (P1_xy=3 P2_descend=1) | env=2: xy_err=4.0mm z_diff=18.0mm dx=[-0.78,0.43,0.45]mm dq_norm=0.0093
+  [Expert] step=100 correcting=4/10 (P1_xy=3 P2_descend=1) | env=2: xy_err=3.9mm z_diff=18.1mm dx=[-0.77,0.44,0.46]mm dq_norm=0.0093
+  [Expert] step=110 correcting=3/10 (P1_xy=2 P2_descend=1) | env=3: xy_err=1.4mm z_diff=18.4mm dx=[-0.96,-0.12,-0.26]mm dq_norm=0.0118
+  [Expert] step=120 correcting=3/10 (P1_xy=1 P2_descend=2) | env=3: xy_err=2.0mm z_diff=18.4mm dx=[-0.98,0.03,-0.22]mm dq_norm=0.0107
+  [Expert] step=130 correcting=4/10 (P1_xy=3 P2_descend=1) | env=0: xy_err=30.1mm z_diff=27.4mm dx=[-0.82,0.57,0.00]mm dq_norm=0.0088
+  [Expert] step=140 correcting=2/10 (P1_xy=2 P2_descend=0) | env=0: xy_err=17.9mm z_diff=21.6mm dx=[-0.79,0.60,0.11]mm dq_norm=0.0088
+  [Expert] step=150 correcting=1/10 (P1_xy=1 P2_descend=0) | env=0: xy_err=11.1mm z_diff=18.6mm dx=[-0.78,0.60,0.18]mm dq_norm=0.0088
+  [Expert] step=160 correcting=1/10 (P1_xy=1 P2_descend=0) | env=0: xy_err=5.3mm z_diff=18.4mm dx=[-0.63,0.70,0.35]mm dq_norm=0.0092
+  [Expert] step=170 correcting=1/10 (P1_xy=1 P2_descend=0) | env=0: xy_err=4.4mm z_diff=18.4mm dx=[-0.57,0.71,0.42]mm dq_norm=0.0093
+  [Align] RL residual active 15.7% (634/4050) | Expert intervened 14.8% (598/4050)
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.2 | stack_1_on_2=4.4 | success_bonus=10.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[13/50 | 8m | ETA 24m10s] SR=100.0% [10ep] | Rew=  12.6 | EV= 0.37 | Δ=0.018 | α=0.40 β=1.522 | cΔ=7.4 cH=0.0088 eff=0.68 | L=-15.638 | Exp=0.90
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env10_epochs3_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr100_iter13.pt
+[Trainer] Peak SR saved (iter 13, SR=100.0%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env10_epochs3_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_peak_sr100_iter13.pt
+  [Expert] step=10 correcting=1/10 (P1_xy=1 P2_descend=0) | env=1: xy_err=164.0mm z_diff=9.1mm dx=[-0.12,0.99,0.01]mm dq_norm=0.0138
+  [Expert] step=20 correcting=4/10 (P1_xy=4 P2_descend=0) | env=0: xy_err=40.8mm z_diff=23.2mm dx=[-0.85,0.52,0.04]mm dq_norm=0.0098
+  [Expert] step=30 correcting=5/10 (P1_xy=5 P2_descend=0) | env=0: xy_err=25.1mm z_diff=12.4mm dx=[-0.93,0.37,0.08]mm dq_norm=0.0096
+  [Expert] step=40 correcting=6/10 (P1_xy=6 P2_descend=0) | env=0: xy_err=19.4mm z_diff=13.1mm dx=[-0.79,0.60,0.10]mm dq_norm=0.0102
+  [Expert] step=50 correcting=7/10 (P1_xy=7 P2_descend=0) | env=0: xy_err=17.5mm z_diff=17.6mm dx=[-0.79,0.60,0.11]mm dq_norm=0.0103
+  [Expert] step=60 correcting=8/10 (P1_xy=8 P2_descend=0) | env=0: xy_err=9.5mm z_diff=21.3mm dx=[-0.76,0.62,0.21]mm dq_norm=0.0102
+  [Expert] step=70 correcting=6/10 (P1_xy=6 P2_descend=0) | env=0: xy_err=3.1mm z_diff=18.8mm dx=[-0.60,0.59,0.54]mm dq_norm=0.0092
+  [Expert] step=80 correcting=6/10 (P1_xy=6 P2_descend=0) | env=0: xy_err=4.9mm z_diff=18.8mm dx=[-0.57,0.73,0.38]mm dq_norm=0.0106
+  [Expert] step=90 correcting=5/10 (P1_xy=5 P2_descend=0) | env=0: xy_err=5.2mm z_diff=18.7mm dx=[-0.51,0.78,0.36]mm dq_norm=0.0112
+  [Expert] step=100 correcting=4/10 (P1_xy=3 P2_descend=1) | env=0: xy_err=5.4mm z_diff=18.5mm dx=[-0.40,0.85,0.35]mm dq_norm=0.0121
+  [Expert] step=110 correcting=5/10 (P1_xy=4 P2_descend=1) | env=0: xy_err=5.4mm z_diff=18.2mm dx=[-0.43,0.83,0.35]mm dq_norm=0.0119
+  [Expert] step=120 correcting=3/10 (P1_xy=3 P2_descend=0) | env=0: xy_err=4.6mm z_diff=18.2mm dx=[-0.28,0.87,0.40]mm dq_norm=0.0123
+  [Expert] step=130 correcting=3/10 (P1_xy=3 P2_descend=0) | env=0: xy_err=4.3mm z_diff=18.2mm dx=[0.13,0.90,0.43]mm dq_norm=0.0137
+  [Expert] step=140 correcting=3/10 (P1_xy=3 P2_descend=0) | env=0: xy_err=4.5mm z_diff=18.2mm dx=[0.00,0.91,0.41]mm dq_norm=0.0136
+  [Expert] step=150 correcting=3/10 (P1_xy=3 P2_descend=0) | env=0: xy_err=4.8mm z_diff=18.3mm dx=[-0.05,0.92,0.38]mm dq_norm=0.0137
+  [Expert] step=160 correcting=2/10 (P1_xy=1 P2_descend=1) | env=0: xy_err=6.0mm z_diff=18.2mm dx=[-0.22,0.92,0.32]mm dq_norm=0.0136
+  [Expert] step=170 correcting=1/10 (P1_xy=0 P2_descend=1) | env=7: xy_err=1.7mm z_diff=18.2mm dx=[0.95,0.29,-0.11]mm dq_norm=0.0163
+  [Expert] step=180 correcting=1/10 (P1_xy=0 P2_descend=1) | env=7: xy_err=1.8mm z_diff=18.2mm dx=[0.99,0.04,-0.11]mm dq_norm=0.0133
+  [Expert] step=190 correcting=1/10 (P1_xy=0 P2_descend=1) | env=7: xy_err=2.0mm z_diff=18.2mm dx=[0.98,-0.13,-0.12]mm dq_norm=0.0112
+  [Expert] step=200 correcting=1/10 (P1_xy=1 P2_descend=0) | env=7: xy_err=2.1mm z_diff=18.2mm dx=[0.67,-0.28,0.69]mm dq_norm=0.0088
+  [Align] RL residual active 17.9% (726/4050) | Expert intervened 16.4% (666/4050)
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_1_on_2=5.7 | success_bonus=10.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[14/50 | 9m | ETA 23m42s] SR= 80.0% [10ep] | Rew=  12.6 | EV= 0.45 | Δ=0.019 | α=0.40 β=1.389 | cΔ=6.6 cH=0.0102 eff=0.64 | L=-17.045 | Exp=0.86
+  [Expert] step=10 correcting=1/10 (P1_xy=1 P2_descend=0) | env=2: xy_err=219.9mm z_diff=27.1mm dx=[0.01,-1.00,0.00]mm dq_norm=0.0186
+  [Expert] step=20 correcting=1/10 (P1_xy=1 P2_descend=0) | env=0: xy_err=65.6mm z_diff=33.8mm dx=[-0.66,0.75,0.00]mm dq_norm=0.0102
+  [Expert] step=30 correcting=1/10 (P1_xy=1 P2_descend=0) | env=0: xy_err=23.1mm z_diff=22.2mm dx=[-0.82,0.57,0.09]mm dq_norm=0.0094
+  [Expert] step=40 correcting=1/10 (P1_xy=1 P2_descend=0) | env=0: xy_err=12.4mm z_diff=19.4mm dx=[-0.98,0.09,0.16]mm dq_norm=0.0118
+  [Expert] step=50 correcting=2/10 (P1_xy=2 P2_descend=0) | env=0: xy_err=7.6mm z_diff=18.5mm dx=[-0.82,-0.51,0.26]mm dq_norm=0.0180
+  [Expert] step=60 correcting=3/10 (P1_xy=3 P2_descend=0) | env=0: xy_err=5.7mm z_diff=18.3mm dx=[-0.34,-0.88,0.33]mm dq_norm=0.0203
+  [Expert] step=70 correcting=3/10 (P1_xy=3 P2_descend=0) | env=0: xy_err=6.6mm z_diff=17.9mm dx=[-0.05,-0.96,0.29]mm dq_norm=0.0193
+  [Expert] step=80 correcting=6/10 (P1_xy=6 P2_descend=0) | env=1: xy_err=10.9mm z_diff=18.3mm dx=[-0.47,0.86,0.18]mm dq_norm=0.0115
+  [Expert] step=90 correcting=4/10 (P1_xy=4 P2_descend=0) | env=1: xy_err=10.2mm z_diff=18.0mm dx=[-0.45,0.87,0.19]mm dq_norm=0.0116
+  [Expert] step=100 correcting=3/10 (P1_xy=3 P2_descend=0) | env=1: xy_err=6.6mm z_diff=18.0mm dx=[-0.17,0.94,0.29]mm dq_norm=0.0140
+  [Expert] step=110 correcting=6/10 (P1_xy=6 P2_descend=0) | env=1: xy_err=4.9mm z_diff=18.0mm dx=[0.38,0.84,0.38]mm dq_norm=0.0164
+  [Expert] step=120 correcting=5/10 (P1_xy=5 P2_descend=0) | env=1: xy_err=5.1mm z_diff=18.1mm dx=[0.57,0.74,0.37]mm dq_norm=0.0164
+  [Expert] step=130 correcting=5/10 (P1_xy=5 P2_descend=0) | env=1: xy_err=5.0mm z_diff=18.1mm dx=[0.49,0.79,0.37]mm dq_norm=0.0165
+  [Expert] step=140 correcting=5/10 (P1_xy=5 P2_descend=0) | env=1: xy_err=4.7mm z_diff=18.1mm dx=[0.53,0.75,0.39]mm dq_norm=0.0162
+  [Expert] step=150 correcting=4/10 (P1_xy=4 P2_descend=0) | env=1: xy_err=5.2mm z_diff=18.0mm dx=[0.57,0.74,0.36]mm dq_norm=0.0165
+  [Expert] step=160 correcting=4/10 (P1_xy=4 P2_descend=0) | env=1: xy_err=4.9mm z_diff=18.0mm dx=[0.47,0.80,0.38]mm dq_norm=0.0164
+  [Expert] step=170 correcting=4/10 (P1_xy=4 P2_descend=0) | env=1: xy_err=4.4mm z_diff=18.0mm dx=[0.60,0.69,0.41]mm dq_norm=0.0158
+  [Expert] step=180 correcting=3/10 (P1_xy=3 P2_descend=0) | env=1: xy_err=4.0mm z_diff=18.0mm dx=[0.44,0.78,0.45]mm dq_norm=0.0156
+  [Expert] step=190 correcting=3/10 (P1_xy=3 P2_descend=0) | env=1: xy_err=3.2mm z_diff=18.1mm dx=[0.32,0.78,0.53]mm dq_norm=0.0143
+  [Expert] step=200 correcting=2/10 (P1_xy=2 P2_descend=0) | env=1: xy_err=4.3mm z_diff=18.0mm dx=[0.01,0.91,0.42]mm dq_norm=0.0142
+  [Align] RL residual active 15.3% (621/4050) | Expert intervened 13.4% (544/4050)
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_1_on_2=4.1 | success_bonus=6.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[15/50 | 9m | ETA 23m04s] SR= 60.0% [10ep] | Rew=  12.4 | EV= 0.38 | Δ=0.014 | α=0.40 β=1.279 | cΔ=6.0 cH=0.0122 eff=0.62 | L=-18.330 | Exp=0.81
+  [Expert] step=10 correcting=3/10 (P1_xy=3 P2_descend=0) | env=0: xy_err=126.6mm z_diff=19.8mm dx=[-0.36,0.93,0.02]mm dq_norm=0.0125
+  [Expert] step=20 correcting=2/10 (P1_xy=2 P2_descend=0) | env=2: xy_err=112.8mm z_diff=19.6mm dx=[-0.24,0.97,0.02]mm dq_norm=0.0127
+  [Expert] step=30 correcting=2/10 (P1_xy=2 P2_descend=0) | env=5: xy_err=21.8mm z_diff=11.2mm dx=[-0.15,0.98,0.09]mm dq_norm=0.0156
+  [Expert] step=40 correcting=5/10 (P1_xy=5 P2_descend=0) | env=0: xy_err=13.8mm z_diff=32.7mm dx=[-0.20,0.98,0.00]mm dq_norm=0.0154
+  [Expert] step=50 correcting=4/10 (P1_xy=4 P2_descend=0) | env=0: xy_err=10.9mm z_diff=28.3mm dx=[0.43,0.90,0.00]mm dq_norm=0.0187
+  [Expert] step=60 correcting=5/10 (P1_xy=5 P2_descend=0) | env=0: xy_err=10.4mm z_diff=25.0mm dx=[0.58,0.82,0.00]mm dq_norm=0.0185
+  [Expert] step=70 correcting=6/10 (P1_xy=6 P2_descend=0) | env=0: xy_err=8.5mm z_diff=20.2mm dx=[0.72,0.66,0.23]mm dq_norm=0.0159
+  [Expert] step=80 correcting=5/10 (P1_xy=5 P2_descend=0) | env=0: xy_err=5.2mm z_diff=18.2mm dx=[0.55,0.75,0.36]mm dq_norm=0.0152
+  [Expert] step=90 correcting=5/10 (P1_xy=5 P2_descend=0) | env=0: xy_err=3.3mm z_diff=18.0mm dx=[0.11,0.85,0.52]mm dq_norm=0.0126
+  [Expert] step=100 correcting=3/10 (P1_xy=3 P2_descend=0) | env=3: xy_err=5.1mm z_diff=18.5mm dx=[-0.21,0.91,0.37]mm dq_norm=0.0129
+  [Expert] step=110 correcting=3/10 (P1_xy=3 P2_descend=0) | env=4: xy_err=25.0mm z_diff=28.8mm dx=[-0.84,0.54,0.00]mm dq_norm=0.0091
+  [Expert] step=120 correcting=3/10 (P1_xy=3 P2_descend=0) | env=4: xy_err=13.8mm z_diff=22.7mm dx=[-0.68,0.72,0.14]mm dq_norm=0.0100
+  [Expert] step=130 correcting=3/10 (P1_xy=3 P2_descend=0) | env=4: xy_err=8.2mm z_diff=22.5mm dx=[-0.34,0.91,0.24]mm dq_norm=0.0128
+  [Expert] step=140 correcting=4/10 (P1_xy=4 P2_descend=0) | env=4: xy_err=6.7mm z_diff=20.8mm dx=[0.60,0.75,0.28]mm dq_norm=0.0159
+  [Expert] step=150 correcting=4/10 (P1_xy=4 P2_descend=0) | env=4: xy_err=7.0mm z_diff=19.7mm dx=[0.66,0.70,0.28]mm dq_norm=0.0157
+  [Expert] step=160 correcting=4/10 (P1_xy=4 P2_descend=0) | env=4: xy_err=6.5mm z_diff=18.9mm dx=[0.48,0.83,0.29]mm dq_norm=0.0161
+  [Expert] step=170 correcting=4/10 (P1_xy=4 P2_descend=0) | env=4: xy_err=5.8mm z_diff=18.6mm dx=[0.53,0.78,0.33]mm dq_norm=0.0156
+  [Expert] step=180 correcting=4/10 (P1_xy=4 P2_descend=0) | env=4: xy_err=5.7mm z_diff=18.6mm dx=[0.44,0.83,0.33]mm dq_norm=0.0157
+  [Expert] step=190 correcting=4/10 (P1_xy=4 P2_descend=0) | env=4: xy_err=5.1mm z_diff=18.6mm dx=[0.71,0.60,0.36]mm dq_norm=0.0143
+  [Expert] step=200 correcting=4/10 (P1_xy=4 P2_descend=0) | env=4: xy_err=5.0mm z_diff=18.5mm dx=[0.78,0.51,0.37]mm dq_norm=0.0135
+  [Align] RL residual active 19.3% (783/4050) | Expert intervened 15.8% (638/4050)
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_1_on_2=3.8 | success_bonus=7.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[16/50 | 10m | ETA 22m21s] SR= 40.0% [10ep] | Rew=  12.2 | EV= 0.44 | Δ=0.016 | α=0.40 β=1.187 | cΔ=5.4 cH=0.0143 eff=0.57 | L=-19.527 | Exp=0.77
+  [Expert] step=10 correcting=1/10 (P1_xy=1 P2_descend=0) | env=0: xy_err=190.6mm z_diff=60.4mm dx=[-0.16,-0.99,0.00]mm dq_norm=0.0155
+  [Expert] step=20 correcting=1/10 (P1_xy=1 P2_descend=0) | env=0: xy_err=136.6mm z_diff=17.1mm dx=[0.06,-1.00,0.01]mm dq_norm=0.0143
+  [Expert] step=30 correcting=1/10 (P1_xy=1 P2_descend=0) | env=5: xy_err=138.7mm z_diff=23.7mm dx=[-0.35,0.94,0.01]mm dq_norm=0.0124
+  [Expert] step=40 correcting=2/10 (P1_xy=2 P2_descend=0) | env=0: xy_err=12.0mm z_diff=19.2mm dx=[-0.90,0.40,0.16]mm dq_norm=0.0093
+  [Expert] step=50 correcting=3/10 (P1_xy=3 P2_descend=0) | env=0: xy_err=7.3mm z_diff=19.2mm dx=[-0.88,0.40,0.27]mm dq_norm=0.0094
+  [Expert] step=60 correcting=3/10 (P1_xy=2 P2_descend=1) | env=0: xy_err=4.0mm z_diff=19.0mm dx=[-0.69,0.56,0.45]mm dq_norm=0.0084
+  [Expert] step=70 correcting=4/10 (P1_xy=2 P2_descend=2) | env=0: xy_err=1.7mm z_diff=18.3mm dx=[0.42,0.89,-0.19]mm dq_norm=0.0214
+  [Expert] step=80 correcting=4/10 (P1_xy=3 P2_descend=1) | env=0: xy_err=3.1mm z_diff=18.3mm dx=[0.83,0.15,0.54]mm dq_norm=0.0104
+  [Expert] step=90 correcting=5/10 (P1_xy=4 P2_descend=1) | env=0: xy_err=3.8mm z_diff=18.3mm dx=[0.87,0.15,0.47]mm dq_norm=0.0110
+  [Expert] step=100 correcting=2/10 (P1_xy=2 P2_descend=0) | env=2: xy_err=3.7mm z_diff=18.0mm dx=[-0.80,0.37,0.47]mm dq_norm=0.0097
+  [Expert] step=110 correcting=1/10 (P1_xy=0 P2_descend=1) | env=3: xy_err=0.3mm z_diff=18.8mm dx=[-0.22,-0.25,-0.83]mm dq_norm=0.0076
+  [Expert] step=120 correcting=2/10 (P1_xy=1 P2_descend=1) | env=3: xy_err=1.6mm z_diff=18.9mm dx=[-0.79,-0.36,-0.50]mm dq_norm=0.0109
+  [Expert] step=130 correcting=4/10 (P1_xy=3 P2_descend=1) | env=3: xy_err=0.5mm z_diff=18.7mm dx=[-0.36,-0.31,-0.69]mm dq_norm=0.0072
+  [Expert] step=140 correcting=5/10 (P1_xy=5 P2_descend=0) | env=3: xy_err=4.6mm z_diff=19.2mm dx=[-0.91,0.06,0.40]mm dq_norm=0.0123
+  [Expert] step=150 correcting=3/10 (P1_xy=3 P2_descend=0) | env=3: xy_err=3.8mm z_diff=19.0mm dx=[-0.72,0.51,0.47]mm dq_norm=0.0092
+  [Expert] step=160 correcting=3/10 (P1_xy=3 P2_descend=0) | env=3: xy_err=4.0mm z_diff=19.3mm dx=[-0.84,0.29,0.45]mm dq_norm=0.0104
+  [Expert] step=170 correcting=4/10 (P1_xy=4 P2_descend=0) | env=3: xy_err=3.7mm z_diff=19.5mm dx=[-0.77,0.42,0.48]mm dq_norm=0.0096
+  [Expert] step=180 correcting=4/10 (P1_xy=4 P2_descend=0) | env=3: xy_err=6.7mm z_diff=18.9mm dx=[-0.87,0.39,0.28]mm dq_norm=0.0096
+  [Expert] step=190 correcting=4/10 (P1_xy=4 P2_descend=0) | env=3: xy_err=6.4mm z_diff=18.8mm dx=[-0.83,0.47,0.30]mm dq_norm=0.0094
+  [Expert] step=200 correcting=5/10 (P1_xy=5 P2_descend=0) | env=3: xy_err=4.9mm z_diff=18.8mm dx=[-0.89,0.24,0.38]mm dq_norm=0.0106
+  [Align] RL residual active 16.1% (652/4050) | Expert intervened 13.1% (529/4050)
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.2 | stack_1_on_2=4.6 | success_bonus=7.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[17/50 | 11m | ETA 21m45s] SR= 40.0% [10ep] | Rew=  12.4 | EV= 0.43 | Δ=0.012 | α=0.40 β=1.107 | cΔ=4.9 cH=0.0166 eff=0.56 | L=-20.804 | Exp=0.74
+  [Expert] step=10 correcting=1/10 (P1_xy=1 P2_descend=0) | env=9: xy_err=25.8mm z_diff=23.1mm dx=[-0.80,0.60,0.07]mm dq_norm=0.0098
+  [Expert] step=20 correcting=1/10 (P1_xy=1 P2_descend=0) | env=9: xy_err=12.2mm z_diff=18.3mm dx=[-0.98,0.15,0.16]mm dq_norm=0.0113
+  [Expert] step=30 correcting=1/10 (P1_xy=1 P2_descend=0) | env=9: xy_err=10.4mm z_diff=18.2mm dx=[-0.88,-0.44,0.19]mm dq_norm=0.0168
+  [Expert] step=40 correcting=1/10 (P1_xy=1 P2_descend=0) | env=9: xy_err=10.1mm z_diff=18.1mm dx=[-0.59,-0.78,0.19]mm dq_norm=0.0194
+  [Expert] step=50 correcting=2/10 (P1_xy=2 P2_descend=0) | env=6: xy_err=29.0mm z_diff=21.8mm dx=[-0.81,0.58,0.07]mm dq_norm=0.0087
+  [Expert] step=60 correcting=3/10 (P1_xy=3 P2_descend=0) | env=5: xy_err=26.5mm z_diff=33.2mm dx=[-0.97,0.26,0.00]mm dq_norm=0.0102
+  [Expert] step=70 correcting=4/10 (P1_xy=4 P2_descend=0) | env=5: xy_err=10.5mm z_diff=24.7mm dx=[-0.96,-0.27,0.03]mm dq_norm=0.0140
+  [Expert] step=80 correcting=5/10 (P1_xy=5 P2_descend=0) | env=4: xy_err=128.0mm z_diff=21.9mm dx=[-0.27,0.96,0.02]mm dq_norm=0.0121
+  [Expert] step=90 correcting=6/10 (P1_xy=6 P2_descend=0) | env=4: xy_err=70.1mm z_diff=31.8mm dx=[-0.57,0.82,0.00]mm dq_norm=0.0098
+  [Expert] step=100 correcting=6/10 (P1_xy=6 P2_descend=0) | env=4: xy_err=26.1mm z_diff=20.2mm dx=[-0.69,0.72,0.08]mm dq_norm=0.0093
+  [Expert] step=110 correcting=6/10 (P1_xy=6 P2_descend=0) | env=4: xy_err=10.0mm z_diff=18.4mm dx=[-0.72,0.66,0.20]mm dq_norm=0.0089
+  [Expert] step=120 correcting=5/10 (P1_xy=5 P2_descend=0) | env=4: xy_err=7.4mm z_diff=18.2mm dx=[-0.87,0.41,0.26]mm dq_norm=0.0095
+  [Expert] step=130 correcting=5/10 (P1_xy=4 P2_descend=1) | env=1: xy_err=155.4mm z_diff=34.3mm dx=[-0.30,0.95,0.00]mm dq_norm=0.0124
+  [Expert] step=140 correcting=4/10 (P1_xy=3 P2_descend=1) | env=5: xy_err=9.4mm z_diff=18.3mm dx=[-0.78,-0.59,0.21]mm dq_norm=0.0178
+  [Expert] step=150 correcting=3/10 (P1_xy=3 P2_descend=0) | env=5: xy_err=11.2mm z_diff=18.2mm dx=[-0.88,-0.44,0.18]mm dq_norm=0.0164
+  [Expert] step=160 correcting=4/10 (P1_xy=4 P2_descend=0) | env=1: xy_err=21.4mm z_diff=23.1mm dx=[-0.90,0.42,0.09]mm dq_norm=0.0092
+  [Expert] step=170 correcting=4/10 (P1_xy=4 P2_descend=0) | env=1: xy_err=13.5mm z_diff=19.1mm dx=[-0.90,0.41,0.15]mm dq_norm=0.0092
+  [Expert] step=180 correcting=4/10 (P1_xy=4 P2_descend=0) | env=1: xy_err=10.6mm z_diff=18.0mm dx=[-0.91,0.37,0.19]mm dq_norm=0.0095
+  [Expert] step=190 correcting=4/10 (P1_xy=4 P2_descend=0) | env=1: xy_err=7.3mm z_diff=18.2mm dx=[-0.93,0.24,0.27]mm dq_norm=0.0107
+  [Expert] step=200 correcting=4/10 (P1_xy=3 P2_descend=1) | env=1: xy_err=3.1mm z_diff=18.3mm dx=[-0.81,0.23,0.54]mm dq_norm=0.0111
+  [Align] RL residual active 19.5% (790/4050) | Expert intervened 14.2% (575/4050)
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.1 | stack_1_on_2=6.1 | success_bonus=7.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[18/50 | 11m | ETA 21m09s] SR= 50.0% [10ep] | Rew=  12.3 | EV= 0.53 | Δ=0.013 | α=0.40 β=1.041 | cΔ=4.4 cH=0.0190 eff=0.51 | L=-21.767 | Exp=0.70
+  [Expert] step=10 correcting=1/10 (P1_xy=1 P2_descend=0) | env=3: xy_err=106.8mm z_diff=30.9mm dx=[-0.37,0.93,0.00]mm dq_norm=0.0116
+  [Expert] step=20 correcting=1/10 (P1_xy=1 P2_descend=0) | env=3: xy_err=37.3mm z_diff=30.5mm dx=[-0.80,0.60,0.00]mm dq_norm=0.0090
+  [Expert] step=30 correcting=3/10 (P1_xy=3 P2_descend=0) | env=0: xy_err=17.6mm z_diff=26.2mm dx=[-0.64,0.76,0.00]mm dq_norm=0.0112
+  [Expert] step=40 correcting=4/10 (P1_xy=4 P2_descend=0) | env=0: xy_err=10.2mm z_diff=24.2mm dx=[-0.49,0.87,0.07]mm dq_norm=0.0128
+  [Expert] step=50 correcting=5/10 (P1_xy=5 P2_descend=0) | env=0: xy_err=6.3mm z_diff=24.4mm dx=[-0.16,0.98,0.10]mm dq_norm=0.0157
+  [Expert] step=60 correcting=5/10 (P1_xy=5 P2_descend=0) | env=0: xy_err=5.2mm z_diff=23.5mm dx=[-0.02,0.96,0.28]mm dq_norm=0.0151
+  [Expert] step=70 correcting=6/10 (P1_xy=5 P2_descend=1) | env=0: xy_err=6.1mm z_diff=21.1mm dx=[-0.13,0.94,0.31]mm dq_norm=0.0140
+  [Expert] step=80 correcting=7/10 (P1_xy=7 P2_descend=0) | env=0: xy_err=3.6mm z_diff=18.9mm dx=[0.07,0.87,0.48]mm dq_norm=0.0132
+  [Expert] step=90 correcting=5/10 (P1_xy=5 P2_descend=0) | env=0: xy_err=3.8mm z_diff=18.7mm dx=[-0.24,0.85,0.46]mm dq_norm=0.0117
+  [Expert] step=100 correcting=5/10 (P1_xy=4 P2_descend=1) | env=0: xy_err=3.7mm z_diff=18.7mm dx=[-0.50,0.73,0.48]mm dq_norm=0.0097
+  [Expert] step=110 correcting=5/10 (P1_xy=5 P2_descend=0) | env=0: xy_err=2.8mm z_diff=18.6mm dx=[-0.29,0.77,0.58]mm dq_norm=0.0102
+  [Expert] step=120 correcting=6/10 (P1_xy=6 P2_descend=0) | env=0: xy_err=3.4mm z_diff=18.5mm dx=[-0.44,0.74,0.51]mm dq_norm=0.0099
+  [Expert] step=130 correcting=6/10 (P1_xy=6 P2_descend=0) | env=0: xy_err=3.0mm z_diff=18.6mm dx=[-0.43,0.71,0.56]mm dq_norm=0.0095
+  [Expert] step=140 correcting=6/10 (P1_xy=6 P2_descend=0) | env=0: xy_err=3.8mm z_diff=18.5mm dx=[-0.47,0.75,0.47]mm dq_norm=0.0100
+  [Expert] step=150 correcting=4/10 (P1_xy=4 P2_descend=0) | env=0: xy_err=3.2mm z_diff=18.5mm dx=[-0.61,0.59,0.53]mm dq_norm=0.0089
+  [Expert] step=160 correcting=4/10 (P1_xy=4 P2_descend=0) | env=0: xy_err=2.7mm z_diff=18.5mm dx=[-0.43,0.67,0.60]mm dq_norm=0.0092
+  [Expert] step=170 correcting=4/10 (P1_xy=4 P2_descend=0) | env=0: xy_err=2.8mm z_diff=18.5mm dx=[-0.62,0.53,0.58]mm dq_norm=0.0089
+  [Expert] step=180 correcting=4/10 (P1_xy=3 P2_descend=1) | env=0: xy_err=0.6mm z_diff=18.9mm dx=[-0.44,0.37,-0.82]mm dq_norm=0.0123
+  [Expert] step=190 correcting=3/10 (P1_xy=3 P2_descend=0) | env=0: xy_err=2.5mm z_diff=18.5mm dx=[-0.71,0.33,0.62]mm dq_norm=0.0099
+  [Expert] step=200 correcting=3/10 (P1_xy=3 P2_descend=0) | env=0: xy_err=4.6mm z_diff=18.5mm dx=[-0.77,0.50,0.40]mm dq_norm=0.0091
+  [Align] RL residual active 21.7% (880/4050) | Expert intervened 15.1% (612/4050)
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.2 | stack_1_on_2=6.4 | success_bonus=7.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[19/50 | 12m | ETA 20m29s] SR= 40.0% [10ep] | Rew=  12.4 | EV= 0.50 | Δ=0.014 | α=0.40 β=0.984 | cΔ=4.1 cH=0.0216 eff=0.51 | L=-22.718 | Exp=0.66
+  [Expert] step=10 correcting=3/10 (P1_xy=3 P2_descend=0) | env=2: xy_err=128.7mm z_diff=13.0mm dx=[-0.25,0.97,0.02]mm dq_norm=0.0136
+  [Expert] step=20 correcting=1/10 (P1_xy=1 P2_descend=0) | env=6: xy_err=12.5mm z_diff=18.3mm dx=[-0.91,0.39,0.16]mm dq_norm=0.0095
+  [Expert] step=30 correcting=4/10 (P1_xy=4 P2_descend=0) | env=3: xy_err=118.3mm z_diff=29.8mm dx=[-0.28,0.96,0.00]mm dq_norm=0.0126
+  [Expert] step=40 correcting=6/10 (P1_xy=6 P2_descend=0) | env=0: xy_err=142.0mm z_diff=23.3mm dx=[-0.21,0.98,0.01]mm dq_norm=0.0131
+  [Expert] step=50 correcting=5/10 (P1_xy=5 P2_descend=0) | env=2: xy_err=14.8mm z_diff=21.4mm dx=[-0.03,0.99,0.13]mm dq_norm=0.0159
+  [Expert] step=60 correcting=6/10 (P1_xy=6 P2_descend=0) | env=0: xy_err=32.3mm z_diff=18.3mm dx=[-0.92,0.40,0.06]mm dq_norm=0.0095
+  [Expert] step=70 correcting=5/10 (P1_xy=5 P2_descend=0) | env=0: xy_err=22.5mm z_diff=9.8mm dx=[-0.94,0.32,0.09]mm dq_norm=0.0101
+  [Expert] step=80 correcting=5/10 (P1_xy=5 P2_descend=0) | env=2: xy_err=10.3mm z_diff=18.7mm dx=[0.33,0.92,0.19]mm dq_norm=0.0172
+  [Expert] step=90 correcting=5/10 (P1_xy=5 P2_descend=0) | env=2: xy_err=9.3mm z_diff=18.5mm dx=[0.51,0.83,0.21]mm dq_norm=0.0171
+  [Expert] step=100 correcting=5/10 (P1_xy=5 P2_descend=0) | env=2: xy_err=9.0mm z_diff=18.5mm dx=[0.62,0.75,0.22]mm dq_norm=0.0167
+  [Expert] step=110 correcting=4/10 (P1_xy=4 P2_descend=0) | env=3: xy_err=12.0mm z_diff=20.9mm dx=[-0.83,0.53,0.16]mm dq_norm=0.0087
+  [Expert] step=120 correcting=4/10 (P1_xy=4 P2_descend=0) | env=3: xy_err=17.1mm z_diff=25.5mm dx=[-0.55,0.83,0.00]mm dq_norm=0.0124
+  [Expert] step=130 correcting=2/10 (P1_xy=2 P2_descend=0) | env=4: xy_err=10.1mm z_diff=18.0mm dx=[-0.06,0.98,0.19]mm dq_norm=0.0162
+  [Expert] step=140 correcting=2/10 (P1_xy=2 P2_descend=0) | env=4: xy_err=9.0mm z_diff=18.0mm dx=[-0.10,0.97,0.22]mm dq_norm=0.0158
+  [Expert] step=150 correcting=2/10 (P1_xy=2 P2_descend=0) | env=0: xy_err=18.1mm z_diff=10.6mm dx=[-0.97,0.23,0.11]mm dq_norm=0.0110
+  [Expert] step=160 correcting=4/10 (P1_xy=4 P2_descend=0) | env=0: xy_err=17.4mm z_diff=9.9mm dx=[-0.95,0.29,0.11]mm dq_norm=0.0102
+  [Expert] step=170 correcting=3/10 (P1_xy=3 P2_descend=0) | env=0: xy_err=17.8mm z_diff=9.1mm dx=[-0.90,0.42,0.11]mm dq_norm=0.0091
+  [Expert] step=180 correcting=4/10 (P1_xy=4 P2_descend=0) | env=0: xy_err=17.3mm z_diff=11.7mm dx=[-0.94,0.33,0.11]mm dq_norm=0.0099
+  [Expert] step=190 correcting=3/10 (P1_xy=3 P2_descend=0) | env=0: xy_err=16.6mm z_diff=10.2mm dx=[-0.96,0.27,0.12]mm dq_norm=0.0103
+  [Expert] step=200 correcting=3/10 (P1_xy=3 P2_descend=0) | env=0: xy_err=16.2mm z_diff=12.9mm dx=[-0.96,0.27,0.12]mm dq_norm=0.0103
+  [Align] RL residual active 20.0% (809/4050) | Expert intervened 12.1% (489/4050)
+  [Rew breakdown] cube1_is_lifted=0.2 | cube2_is_lifted=0.1 | stack_1_on_2=2.1 | success_bonus=6.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[20/50 | 13m | ETA 19m52s] SR= 60.0% [10ep] | Rew=  12.4 | EV= 0.44 | Δ=0.011 | α=0.40 β=0.942 | cΔ=3.7 cH=0.0245 eff=0.42 | L=-23.201 | Exp=0.63
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env10_epochs3_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/best_model.pt
+[Trainer] Best model saved (SR_200ep=54.0%): ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env10_epochs3_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/best_model.pt
+[GraphUnetResidualRLPolicy] Saved to: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env10_epochs3_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_20.pt
+[Trainer] Saved checkpoint: ./logs/dual_arm_rl/SO-ARM101-Dual-Cube-Stack-RL-v0/env10_epochs3_beta2.0_cEnt0.01_cDelta10.0_adaptEntTrue/policy_iter_20.pt
+  [Expert] step=10 correcting=1/10 (P1_xy=1 P2_descend=0) | env=6: xy_err=69.3mm z_diff=33.5mm dx=[-0.69,0.73,0.00]mm dq_norm=0.0094
+  [Expert] step=20 correcting=1/10 (P1_xy=1 P2_descend=0) | env=6: xy_err=24.9mm z_diff=18.1mm dx=[-0.90,0.43,0.08]mm dq_norm=0.0095
+  [Expert] step=30 correcting=5/10 (P1_xy=5 P2_descend=0) | env=0: xy_err=35.7mm z_diff=33.1mm dx=[-0.82,0.57,0.00]mm dq_norm=0.0090
+  [Expert] step=40 correcting=6/10 (P1_xy=6 P2_descend=0) | env=0: xy_err=13.8mm z_diff=18.0mm dx=[-0.91,0.38,0.14]mm dq_norm=0.0096
+  [Expert] step=50 correcting=7/10 (P1_xy=7 P2_descend=0) | env=0: xy_err=9.6mm z_diff=18.2mm dx=[-0.91,0.36,0.20]mm dq_norm=0.0098
+  [Expert] step=60 correcting=7/10 (P1_xy=6 P2_descend=1) | env=0: xy_err=5.8mm z_diff=18.3mm dx=[-0.91,0.25,0.33]mm dq_norm=0.0109
+  [Expert] step=70 correcting=8/10 (P1_xy=7 P2_descend=1) | env=0: xy_err=3.7mm z_diff=18.2mm dx=[-0.88,-0.02,0.48]mm dq_norm=0.0143
+  [Expert] step=80 correcting=7/10 (P1_xy=6 P2_descend=1) | env=1: xy_err=10.4mm z_diff=19.7mm dx=[-0.93,-0.30,0.19]mm dq_norm=0.0149
+  [Expert] step=90 correcting=6/10 (P1_xy=5 P2_descend=1) | env=1: xy_err=10.9mm z_diff=18.4mm dx=[-0.93,-0.33,0.18]mm dq_norm=0.0151
+  [Expert] step=100 correcting=5/10 (P1_xy=5 P2_descend=0) | env=1: xy_err=11.2mm z_diff=18.5mm dx=[-0.91,-0.37,0.18]mm dq_norm=0.0154
+  [Expert] step=110 correcting=3/10 (P1_xy=2 P2_descend=1) | env=1: xy_err=11.5mm z_diff=18.6mm dx=[-0.87,-0.47,0.17]mm dq_norm=0.0163
+  [Expert] step=120 correcting=3/10 (P1_xy=2 P2_descend=1) | env=1: xy_err=11.3mm z_diff=18.9mm dx=[-0.84,-0.51,0.17]mm dq_norm=0.0167
+  [Expert] step=130 correcting=3/10 (P1_xy=3 P2_descend=0) | env=1: xy_err=10.7mm z_diff=18.4mm dx=[-0.86,-0.47,0.18]mm dq_norm=0.0164
+  [Expert] step=140 correcting=2/10 (P1_xy=2 P2_descend=0) | env=1: xy_err=11.8mm z_diff=19.1mm dx=[-0.81,-0.57,0.17]mm dq_norm=0.0172
+  [Expert] step=150 correcting=2/10 (P1_xy=2 P2_descend=0) | env=1: xy_err=10.3mm z_diff=18.4mm dx=[-0.82,-0.54,0.19]mm dq_norm=0.0171
+  [Expert] step=160 correcting=2/10 (P1_xy=2 P2_descend=0) | env=1: xy_err=11.1mm z_diff=18.3mm dx=[-0.85,-0.49,0.18]mm dq_norm=0.0166
+  [Expert] step=170 correcting=2/10 (P1_xy=1 P2_descend=1) | env=1: xy_err=10.3mm z_diff=18.5mm dx=[-0.86,-0.47,0.19]mm dq_norm=0.0164
+  [Expert] step=180 correcting=2/10 (P1_xy=1 P2_descend=1) | env=1: xy_err=11.3mm z_diff=18.4mm dx=[-0.89,-0.43,0.17]mm dq_norm=0.0160
+  [Expert] step=190 correcting=2/10 (P1_xy=1 P2_descend=1) | env=1: xy_err=11.4mm z_diff=18.3mm dx=[-0.86,-0.48,0.17]mm dq_norm=0.0165
+  [Expert] step=200 correcting=2/10 (P1_xy=1 P2_descend=1) | env=1: xy_err=11.3mm z_diff=18.3mm dx=[-0.80,-0.58,0.17]mm dq_norm=0.0173
+  [Align] RL residual active 18.8% (761/4050) | Expert intervened 11.1% (448/4050)
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.2 | stack_1_on_2=4.5 | success_bonus=7.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[21/50 | 13m | ETA 19m14s] SR= 60.0% [10ep] | Rew=  12.8 | EV= 0.41 | Δ=0.010 | α=0.40 β=0.905 | cΔ=3.3 cH=0.0276 eff=0.42 | L=-23.616 | Exp=0.60
+  [Expert] step=10 correcting=1/10 (P1_xy=1 P2_descend=0) | env=8: xy_err=124.3mm z_diff=26.3mm dx=[-0.32,0.95,0.00]mm dq_norm=0.0115
+  [Expert] step=20 correcting=3/10 (P1_xy=3 P2_descend=0) | env=1: xy_err=18.0mm z_diff=24.2mm dx=[-0.58,0.82,0.04]mm dq_norm=0.0113
+  [Expert] step=30 correcting=3/10 (P1_xy=3 P2_descend=0) | env=1: xy_err=7.8mm z_diff=23.2mm dx=[-0.53,0.82,0.22]mm dq_norm=0.0109
+  [Expert] step=40 correcting=5/10 (P1_xy=5 P2_descend=0) | env=1: xy_err=6.2mm z_diff=18.9mm dx=[-0.49,0.82,0.31]mm dq_norm=0.0106
+  [Expert] step=50 correcting=5/10 (P1_xy=5 P2_descend=0) | env=0: xy_err=16.0mm z_diff=20.9mm dx=[-0.93,0.33,0.12]mm dq_norm=0.0101
+  [Expert] step=60 correcting=6/10 (P1_xy=5 P2_descend=1) | env=0: xy_err=8.9mm z_diff=18.5mm dx=[-0.97,0.13,0.22]mm dq_norm=0.0123
+  [Expert] step=70 correcting=6/10 (P1_xy=5 P2_descend=1) | env=0: xy_err=6.9mm z_diff=18.4mm dx=[-0.95,0.14,0.28]mm dq_norm=0.0123
+  [Expert] step=80 correcting=6/10 (P1_xy=5 P2_descend=1) | env=0: xy_err=3.0mm z_diff=18.4mm dx=[-0.82,-0.14,0.55]mm dq_norm=0.0160
+  [Expert] step=90 correcting=7/10 (P1_xy=5 P2_descend=2) | env=0: xy_err=1.7mm z_diff=18.1mm dx=[-0.90,-0.43,-0.07]mm dq_norm=0.0165
+  [Expert] step=100 correcting=5/10 (P1_xy=3 P2_descend=2) | env=0: xy_err=1.2mm z_diff=18.1mm dx=[-0.17,-0.98,-0.11]mm dq_norm=0.0179
+  [Expert] step=110 correcting=4/10 (P1_xy=3 P2_descend=1) | env=0: xy_err=1.9mm z_diff=18.0mm dx=[0.23,-0.97,-0.01]mm dq_norm=0.0155
+  [Expert] step=120 correcting=3/10 (P1_xy=3 P2_descend=0) | env=2: xy_err=29.5mm z_diff=23.8mm dx=[-0.68,0.74,0.04]mm dq_norm=0.0100
+  [Expert] step=130 correcting=3/10 (P1_xy=3 P2_descend=0) | env=2: xy_err=22.7mm z_diff=20.8mm dx=[-0.56,0.82,0.09]mm dq_norm=0.0114
+  [Expert] step=140 correcting=2/10 (P1_xy=2 P2_descend=0) | env=2: xy_err=17.3mm z_diff=19.2mm dx=[-0.43,0.90,0.12]mm dq_norm=0.0130
+  [Expert] step=150 correcting=2/10 (P1_xy=2 P2_descend=0) | env=2: xy_err=13.7mm z_diff=18.4mm dx=[-0.20,0.97,0.14]mm dq_norm=0.0152
+  [Expert] step=160 correcting=2/10 (P1_xy=2 P2_descend=0) | env=2: xy_err=10.3mm z_diff=18.4mm dx=[0.04,0.98,0.19]mm dq_norm=0.0168
+  [Expert] step=170 correcting=2/10 (P1_xy=2 P2_descend=0) | env=2: xy_err=10.0mm z_diff=18.2mm dx=[-0.03,0.98,0.20]mm dq_norm=0.0163
+  [Expert] step=180 correcting=2/10 (P1_xy=2 P2_descend=0) | env=2: xy_err=9.5mm z_diff=18.3mm dx=[-0.00,0.98,0.21]mm dq_norm=0.0165
+  [Expert] step=190 correcting=2/10 (P1_xy=2 P2_descend=0) | env=2: xy_err=9.6mm z_diff=18.1mm dx=[-0.32,0.92,0.20]mm dq_norm=0.0137
+  [Expert] step=200 correcting=2/10 (P1_xy=2 P2_descend=0) | env=2: xy_err=9.7mm z_diff=18.2mm dx=[-0.23,0.95,0.20]mm dq_norm=0.0146
+  [Align] RL residual active 17.9% (723/4050) | Expert intervened 10.4% (423/4050)
+  [Rew breakdown] cube1_is_lifted=0.1 | cube2_is_lifted=0.2 | stack_1_on_2=4.4 | success_bonus=7.0 | action_rate=-0.0 | joint_vel_right=-0.0 | joint_vel_left=-0.0
+[22/50 | 14m | ETA 18m43s] SR= 60.0% [10ep] | Rew=  12.3 | EV= 0.32 | Δ=0.010 | α=0.40 β=0.867 | cΔ=3.0 cH=0.0308 eff=0.42 | L=-23.524 | Exp=0.57
+  [Expert] step=10 correcting=1/10 (P1_xy=1 P2_descend=0) | env=6: xy_err=132.9mm z_diff=18.7mm dx=[-0.51,0.86,0.02]mm dq_norm=0.0127
+  [Expert] step=20 correcting=1/10 (P1_xy=1 P2_descend=0) | env=6: xy_err=18.5mm z_diff=30.8mm dx=[-0.77,0.64,0.00]mm dq_norm=0.0108
+  [Expert] step=30 correcting=2/10 (P1_xy=2 P2_descend=0) | env=1: xy_err=19.4mm z_diff=29.0mm dx=[-0.54,0.84,0.00]mm dq_norm=0.0114
+  [Expert] step=40 correcting=2/10 (P1_xy=2 P2_descend=0) | env=1: xy_err=12.8mm z_diff=22.8mm dx=[-0.65,0.74,0.15]mm dq_norm=0.0097
+  [Expert] step=50 correcting=5/10 (P1_xy=5 P2_descend=0) | env=1: xy_err=19.1mm z_diff=16.1mm dx=[-0.52,0.85,0.10]mm dq_norm=0.0110
+  [Expert] step=60 correcting=5/10 (P1_xy=5 P2_descend=0) | env=0: xy_err=133.5mm z_diff=9.8mm dx=[-0.26,0.96,0.01]mm dq_norm=0.0119
+  [Expert] step=70 correcting=7/10 (P1_xy=7 P2_descend=0) | env=0: xy_err=79.9mm z_diff=26.0mm dx=[-0.55,0.84,0.00]mm dq_norm=0.0097
+  [Expert] step=80 correcting=9/10 (P1_xy=9 P2_descend=0) | env=0: xy_err=31.8mm z_diff=14.8mm dx=[-0.65,0.76,0.06]mm dq_norm=0.0093
+  [Expert] step=90 correcting=8/10 (P1_xy=8 P2_descend=0) | env=0: xy_err=20.1mm z_diff=11.9mm dx=[-0.74,0.67,0.10]mm dq_norm=0.0088
+  [Expert] step=100 correcting=8/10 (P1_xy=7 P2_descend=1) | env=0: xy_err=18.7mm z_diff=12.4mm dx=[-0.82,0.57,0.11]mm dq_norm=0.0086
