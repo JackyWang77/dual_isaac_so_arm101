@@ -237,14 +237,16 @@ def stack_success_bonus(
     expected_height: float = 0.018,
     eps_z: float = 0.003,
     eps_xy: float = 0.009,
+    xy_std: float = 0.005,
     cube_1_cfg: SceneEntityCfg = SceneEntityCfg("cube_1"),
     cube_2_cfg: SceneEntityCfg = SceneEntityCfg("cube_2"),
     gripper_open_thresh: float = 0.1,  # kept for config compat, not used
     right_arm_cfg: SceneEntityCfg = SceneEntityCfg("right_arm"),  # kept for config compat, not used
 ) -> torch.Tensor:
-    """Large one-time bonus when cubes are stacked (no gripper check).
+    """One-time bonus when cubes are stacked, scaled by xy alignment quality.
 
-    RL cannot control gripper (alpha_vec=0), so gripper gate is removed.
+    bonus = (1 - tanh(xy_dist / xy_std))
+    xy=0mm → 1.0, xy=5mm → ~0.0. Only fires once per episode.
     """
     c1: RigidObject = env.scene[cube_1_cfg.name]
     c2: RigidObject = env.scene[cube_2_cfg.name]
@@ -272,4 +274,6 @@ def stack_success_bonus(
     new_episode = (env.episode_length_buf <= 1)
     env._success_fired[new_episode] = False
 
-    return success_now.float()
+    # Scale by xy alignment quality: xy=0 → 1.0, xy=5mm → ~0.0
+    alignment_quality = 1.0 - torch.tanh(xy_dist / xy_std)
+    return (success_now.float() * alignment_quality)

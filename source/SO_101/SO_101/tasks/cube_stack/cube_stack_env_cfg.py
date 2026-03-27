@@ -411,49 +411,22 @@ class CubeStackEnvCfg(ManagerBasedRLEnvCfg):
 class CubeStackRLRewardsCfg:
     """Rewards for RL fine-tuning on top of a pretrained BC policy.
 
-    Design principles:
-    - Low weight for already-learned skills (reach, grasp, lift) to prevent regression
-    - Stack alignment precision reward (BC's main weakness)
-    - Large success bonus to create high-advantage samples for AWR
-    - NO gripper release reward (RL cannot control gripper: alpha_vec=0)
+    Design: ONLY success bonus (scaled by xy alignment quality).
+    No dense shaping rewards — prevents RL from "reward hacking" by lingering
+    near stacking position without completing the task.
+    bonus = weight * (1 - tanh(xy_dist / 0.005)), xy=0 → full, xy=5mm → ~0.
     """
 
-    # === Dense shaping rewards (tiny weights, purely for critic V(s) learning) ===
-    # Pick phase: cube lifted above table
-    cube1_is_lifted = RewTerm(
-        func=mdp.object_is_lifted,
-        params={"minimal_height": 0.04, "object_cfg": SceneEntityCfg("cube_1")},
-        weight=0.5,
-    )
-    cube2_is_lifted = RewTerm(
-        func=mdp.object_is_lifted,
-        params={"minimal_height": 0.04, "object_cfg": SceneEntityCfg("cube_2")},
-        weight=0.5,
-    )
-
-    # === Main RL rewards (stack phase) ===
-    # Stack alignment: cube_1 on top of cube_2 (right arm places cube_1)
-    stack_1_on_2 = RewTerm(
-        func=mdp.cube_stack_alignment,
-        params={
-            "cube_top_cfg": SceneEntityCfg("cube_1"),
-            "cube_base_cfg": SceneEntityCfg("cube_2"),
-            "right_arm_cfg": SceneEntityCfg("right_arm"),
-        },
-        weight=10.0,
-    )
-
-    # Large success bonus (one-shot, right arm only)
+    # One-shot success bonus scaled by xy alignment quality
     success_bonus = RewTerm(
         func=mdp.stack_success_bonus,
         params={
             "expected_height": 0.018,
             "eps_z": 0.003,
             "eps_xy": 0.009,
-            "gripper_open_thresh": 0.1,
+            "xy_std": 0.005,
             "cube_1_cfg": SceneEntityCfg("cube_1"),
             "cube_2_cfg": SceneEntityCfg("cube_2"),
-            "right_arm_cfg": SceneEntityCfg("right_arm"),
         },
         weight=500.0,
     )
