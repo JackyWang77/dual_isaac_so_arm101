@@ -6,10 +6,10 @@ set -e
 
 PRETRAINED_CHECKPOINT="${1:-}"
 RESUME_CHECKPOINT="${2:-}"
-NUM_ENVS="${3:-12}"
+NUM_ENVS="${3:-512}"
 MAX_ITERATIONS="${4:-30}"
-STEPS_PER_ENV="${5:-325}"
-MINI_BATCH_SIZE="${6:-12}"
+STEPS_PER_ENV="${5:-405}"
+MINI_BATCH_SIZE="${6:-512}"
 NUM_EPOCHS="${7:-3}"
 MAX_DELTA_NORM="${MAX_DELTA_NORM:-0.25}"
 EXPECTILE_TAU="${9:-0.5}"
@@ -39,7 +39,7 @@ BETA_INIT="${BETA_INIT:-2.0}"
 # Expert Intervention (Jacobian correction + DAgger schedule)
 USE_EXPERT_INTERVENTION="${USE_EXPERT_INTERVENTION:-true}"
 EXPERT_INTERVENTION_RATIO="${EXPERT_INTERVENTION_RATIO:-1.0}"
-EXPERT_INTERVENTION_DECAY="${EXPERT_INTERVENTION_DECAY:-1.0}"
+EXPERT_INTERVENTION_DECAY="${EXPERT_INTERVENTION_DECAY:-0.95}"
 
 if [ -z "$PRETRAINED_CHECKPOINT" ] || [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
     echo "Usage: $0 <pretrained_checkpoint> [resume_checkpoint] [num_envs] [max_iter] ..."
@@ -138,5 +138,5 @@ python scripts/graph_dit_rl/train_graph_rl.py \
     --critic_warmup_iters "$CRITIC_WARMUP_ITERS" \
     --log_dir "$LOG_DIR" \
     --save_interval "$SAVE_INTERVAL" \
-    $RUN_NAME_ARGS
-    # $HEADLESS_FLAG
+    $RUN_NAME_ARGS \
+    $HEADLESS_FLAG
