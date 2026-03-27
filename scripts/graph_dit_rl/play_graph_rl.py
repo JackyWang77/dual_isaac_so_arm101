@@ -363,8 +363,6 @@ def play_graph_rl_policy(
     episode_lengths = torch.zeros(num_envs, device=device)
     episode_success = []  # list of bool for SR(100ep)
     episode_rewards_list = []  # list of float for mean_reward
-    # Skip short 2nd episode after success (same fix as train + bc play)
-    _env_first_done = [False] * num_envs
 
     # Per-term reward breakdown tracking
     _reward_term_names = None
@@ -466,6 +464,13 @@ def play_graph_rl_policy(
                         torch.tensor(env.action_space.high, device=action.device, dtype=action.dtype)
                     )
 
+            # Gripper head override: use gripper_logits from RL policy if available
+            gripper_open_override = None
+            if "gripper_logits" in policy_info:
+                gripper_logits = policy_info["gripper_logits"]  # [B, num_grippers]
+                gripper_prob = torch.sigmoid(gripper_logits)  # [B, num_grippers]
+                gripper_open_override = gripper_prob > 0.5  # True = open
+
             # Process action for env (matching train_graph_rl.py)
             action_for_sim = action.clone()
             if action_dim == 12:
@@ -483,7 +488,6 @@ def play_graph_rl_policy(
                 )
                 action_for_sim[:, joints_slice] = ema_smoothed_joints[:, joints_slice]
                 # Gripper: direct -1/1 mapping (policy outputs continuous, env expects +1/-1)
-                # Stack: -0.25 (train_disentangled_graph_gated); Table: -0.12
                 gripper_idx = base + 5
                 gripper_threshold = -0.25
                 action_for_sim[:, gripper_idx] = torch.where(
@@ -491,6 +495,11 @@ def play_graph_rl_policy(
                     torch.tensor(1.0, device=action.device, dtype=action.dtype),
                     torch.tensor(-1.0, device=action.device, dtype=action.dtype),
                 )
+                # Override with gripper head prediction if available
+                # After swap: arm_i=0 is right arm (gripper_head idx=0), arm_i=1 is left arm (gripper_head idx=1)
+                if gripper_open_override is not None and arm_i < gripper_open_override.shape[1]:
+                    open_mask = gripper_open_override[:, arm_i]
+                    action_for_sim[open_mask, gripper_idx] = 1.0  # force open
 
             # Step environment
             next_obs, reward, terminated, truncated, env_info = env.step(action_for_sim)
@@ -574,16 +583,10 @@ def play_graph_rl_policy(
                              if bool(led[i, j].item())]
                     print(f"  [EP] env={i} T={is_terminated} Tr={is_truncated} "
                           f"S={is_success} fired={fired}")
-                    # Skip short 2nd episode after success (unfairly short auto-reset)
-                    if _env_first_done[i]:
-                        _env_first_done[i] = False  # Re-enable for next episode
-                    else:
-                        episode_success.append(is_success)
-                        episode_rewards_list.append(episode_rewards[i].item())
-                        if _reward_term_accum is not None:
-                            _reward_term_episodes.append(_reward_term_accum[i].clone())
-                        if is_success:
-                            _env_first_done[i] = True  # Next episode will be skipped
+                    episode_success.append(is_success)
+                    episode_rewards_list.append(episode_rewards[i].item())
+                    if _reward_term_accum is not None:
+                        _reward_term_episodes.append(_reward_term_accum[i].clone())
                     episode_count = len(episode_success)
                     status = "✅" if is_success else "❌"
                     sr = sum(episode_success) / len(episode_success) * 100.0 if episode_success else 0.0
