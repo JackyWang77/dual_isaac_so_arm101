@@ -718,8 +718,6 @@ class GraphDiTRLTrainer:
         ep_rewards = torch.zeros(self.num_envs, device=self.device)
         ep_lengths = torch.zeros(self.num_envs, device=self.device)
         rollout_successes = []
-        # Track per-env: once an env succeeds, skip counting subsequent episodes
-        _env_already_succeeded = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         delta_norms_all = []
         _alignment_steps = 0  # count steps where RL residual was active
         _total_env_steps = 0  # total env-steps for ratio
@@ -1001,14 +999,10 @@ class GraphDiTRLTrainer:
                             terms = _reward_term_accum[i]
                             _rew_parts = [f"{n}={v.item():.2f}" for n, v in zip(_reward_term_names, terms) if abs(v.item()) > 0.001]
                             _rew_str = f" | rew_terms=[{', '.join(_rew_parts)}]"
-                    # Only count first episode per env per iteration
-                    # (fast-succeeding envs auto-reset and get unfairly short 2nd episodes)
-                    if not _env_already_succeeded[i]:
-                        if is_success:
-                            n_success += 1
-                            _env_already_succeeded[i] = True
-                        rollout_successes.append(float(is_success))
-                        self.episode_successes.append(float(is_success))
+                    if is_success:
+                        n_success += 1
+                    rollout_successes.append(float(is_success))
+                    self.episode_successes.append(float(is_success))
 
                 # Record per-term episode rewards
                 if _reward_term_accum is not None:
