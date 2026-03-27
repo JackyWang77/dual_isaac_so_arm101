@@ -526,9 +526,9 @@ class GraphDiTRLTrainer:
             z_lift = target_hover_z - held_z  # positive = need to go up
             dx[phase1, 2] = torch.clamp(z_lift[phase1], min=0.0, max=max_step)
 
-            # Phase 2: XY aligned, descend to stack (target z_diff = 0.018)
+            # Phase 2: XY aligned, descend to stack (target z_diff = 0.019)
             phase2 = needs_correction & xy_aligned
-            target_stack_z = torch.min(c1_z, c2_z) + 0.018  # exact stacking height
+            target_stack_z = torch.min(c1_z, c2_z) + 0.019  # exact stacking height
             z_descend = target_stack_z - held_z  # negative = need to go down
             dx[phase2, 0] = -xy_error[phase2, 0]  # keep correcting XY during descent
             dx[phase2, 1] = -xy_error[phase2, 1]
