@@ -463,7 +463,7 @@ class GraphDiTRLTrainer:
         # We want last body (-1), xyz rows (:3), arm joint cols (:5)
         self._expert_initialized = True
         if self.use_expert_intervention:
-            print(f"[Trainer] Expert intervention initialized (ratio={self.expert_ratio:.2f}, decay={self.expert_decay})")
+            print(f"[Trainer] Expert intervention initialized (ratio={self.expert_ratio:.2f}, decay={self.expert_decay}, floor=0.80)")
 
     def _compute_expert_delta(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute expert delta via Jacobian pseudoinverse when xy misalignment detected.
@@ -1252,7 +1252,7 @@ class GraphDiTRLTrainer:
             # Expert decay (only after critic warmup ends)
             if self.use_expert_intervention and iteration > 0 and not critic_warmup:
                 self.expert_ratio *= self.expert_decay
-                self.expert_ratio = max(self.expert_ratio, 0.0)
+                self.expert_ratio = max(self.expert_ratio, 0.8)  # floor: 80% expert, 20% RL exploration
 
             # Log
             self._log(iteration, rollout_stats, update_stats)
