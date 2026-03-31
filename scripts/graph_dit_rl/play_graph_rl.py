@@ -25,6 +25,7 @@ simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
+import math
 import numpy as np
 
 import gymnasium as gym
@@ -38,6 +39,7 @@ from SO_101.policies.graph_unet_residual_rl_policy import (
     GraphUnetBackboneAdapter,
     GraphUnetResidualRLPolicy,
 )
+from stacking_funnel import stacking_funnel_mask_from_cubes
 
 
 def _detect_checkpoint_type(path: str) -> str:
@@ -147,8 +149,17 @@ def play_graph_rl_policy(
     deterministic: bool = True,
     policy_type: str = "unet",
     episode_length_s: float = None,
+    backbone_only: bool = False,
+    no_gripper_head: bool = False,
 ):
-    """Play trained Graph-Unet + Residual RL policy (aligned with train_graph_rl.py)."""
+    """Play trained Graph-Unet + Residual RL policy (aligned with train_graph_rl.py).
+
+    If backbone_only=True, runs policy.act(..., zero_residual=True): Graph-Unet base action only
+    (no residual δ, no RL gripper head), for fair comparison with full RL.
+
+    If no_gripper_head=True (and not backbone_only): keep residual RL on arms, but use a_base for
+    gripper dims (strip RL gripper head + play logits override). Use to eval alignment-only / no-gripper-BCE runs.
+    """
     # Auto-detect and swap if user passed (IL, RL) instead of (RL, IL)
     t1, t2 = _detect_checkpoint_type(checkpoint_path), _detect_checkpoint_type(pretrained_checkpoint)
     if t1 == "il" and t2 == "rl":
@@ -157,6 +168,10 @@ def play_graph_rl_policy(
 
     print(f"[Play] ===== Residual RL Policy Playback (Graph-Unet) =====")
     print(f"[Play] Task: {task_name}")
+    _mode = "backbone only (zero residual)" if backbone_only else (
+        "residual RL, no gripper head (gripper=a_base)" if no_gripper_head else "full residual RL"
+    )
+    print(f"[Play] Mode: {_mode}")
     print(f"[Play] RL Checkpoint: {checkpoint_path}")
     print(f"[Play] Graph-Unet Checkpoint: {pretrained_checkpoint}")
     print(f"[Play] Num envs: {num_envs}")
@@ -197,6 +212,20 @@ def play_graph_rl_policy(
     policy.num_diffusion_steps = 15  # must match train
     policy.eval()
     print(f"[Play] RL policy loaded (diffusion_steps=15)")
+    # Training-time expert settings (saved in checkpoint cfg; play itself does not run expert)
+    _pcfg = policy.cfg
+    _uei = getattr(_pcfg, "use_expert_intervention", False)
+    _nego = getattr(_pcfg, "no_expert_gripper_override", False)
+    _ratio = getattr(_pcfg, "expert_intervention_ratio", None)
+    _decay = getattr(_pcfg, "expert_intervention_decay", None)
+    print(
+        f"[Play] Checkpoint (train) expert: use_expert_intervention={_uei}, "
+        f"no_expert_gripper_override={_nego} "
+        f"(if True: arms expert only; no env gripper override, no expert gripper BCE)"
+    )
+    if _ratio is not None and _decay is not None:
+        print(f"[Play] Checkpoint (train) expert ratio/decay: {_ratio}, {_decay}")
+    print(f"[Play] Eval never runs expert — only the policy; line above is for logging/comparison.")
 
     # Load normalization stats from Graph-Unet checkpoint (same as train script)
     checkpoint = torch.load(pretrained_checkpoint, map_location=device, weights_only=False)
@@ -363,6 +392,13 @@ def play_graph_rl_policy(
     episode_lengths = torch.zeros(num_envs, device=device)
     episode_success = []  # list of bool for SR(100ep)
     episode_rewards_list = []  # list of float for mean_reward
+    episode_lengths_list = []  # list of int, steps per completed episode (aligned with episode_success)
+    # Stacking-funnel alignment stats (dual-arm + cube obs only): 1-based step index when first in_alignment
+    first_align_step_ep = torch.full((num_envs,), -1, dtype=torch.long, device=device)
+    succ_pre_align_steps_list = []  # steps before first in_alignment (success only)
+    succ_align_phase_steps_list = []  # steps from first in_alignment to episode end, inclusive (success only)
+    # Episode-end ||cube1_xy - cube2_xy|| (meters), one per completed episode (aligned with episode_success)
+    episode_end_cube_xy_m_list = []
 
     # Per-term reward breakdown tracking
     _reward_term_names = None
@@ -437,20 +473,23 @@ def play_graph_rl_policy(
                     joint_states_history=joint_state_history_norm,  # [num_envs, history_len, joint_dim] - normalized
                     subtask_condition=subtask_cond,
                     deterministic=deterministic,
+                    zero_residual=backbone_only,
                 )
 
-            # Alignment gating: RL residual only active during final stacking alignment
-            # (same condition as training). Outside this phase, use pure backbone.
+            # Strip RL gripper head: use backbone gripper (a_base); residual α=0 on grippers so this matches train IL
+            if no_gripper_head and not backbone_only and "a_base" in policy_info:
+                for _gi in policy.gripper_indices:
+                    action[:, _gi] = policy_info["a_base"][:, _gi]
+
+            # Stacking funnel: same mask as train_graph_rl (stacking_funnel.py)
             if is_dual_arm and obs_struct is not None and "cube_1_pos" in obs_struct and "cube_2_pos" in obs_struct:
                 c1 = obs[:, obs_struct["cube_1_pos"][0]:obs_struct["cube_1_pos"][1]]
                 c2 = obs[:, obs_struct["cube_2_pos"][0]:obs_struct["cube_2_pos"][1]]
-                c1_z, c2_z = c1[:, 2], c2[:, 2]
-                held_xy = torch.where((c1_z < c2_z).unsqueeze(-1), c2[:, :2], c1[:, :2])
-                held_z = torch.max(c1_z, c2_z)
-                target_xy = torch.where((c1_z < c2_z).unsqueeze(-1), c1[:, :2], c2[:, :2])
-                xy_error_norm = (held_xy - target_xy).norm(dim=-1)
-                z_diff = torch.abs(c1_z - c2_z)
-                in_alignment = (held_z > 0.015) & (xy_error_norm < 0.02) & (z_diff > 0.005)
+                in_alignment = stacking_funnel_mask_from_cubes(c1, c2)
+                # Record first step (1-based) entering alignment for this episode (before episode_lengths += 1)
+                step_1based = episode_lengths.long() + 1
+                _enter = (first_align_step_ep < 0) & in_alignment
+                first_align_step_ep = torch.where(_enter, step_1based, first_align_step_ep)
                 not_aligned = ~in_alignment
                 if not_aligned.any() and "a_base" in policy_info:
                     action[not_aligned] = policy_info["a_base"][not_aligned]
@@ -464,9 +503,9 @@ def play_graph_rl_policy(
                         torch.tensor(env.action_space.high, device=action.device, dtype=action.dtype)
                     )
 
-            # Gripper head override: use gripper_logits from RL policy if available
+            # Gripper head override: use gripper_logits from RL policy if available (skip if no_gripper_head)
             gripper_open_override = None
-            if "gripper_logits" in policy_info:
+            if not no_gripper_head and "gripper_logits" in policy_info:
                 gripper_logits = policy_info["gripper_logits"]  # [B, num_grippers]
                 gripper_prob = torch.sigmoid(gripper_logits)  # [B, num_grippers]
                 gripper_open_override = gripper_prob > 0.5  # True = open
@@ -585,6 +624,24 @@ def play_graph_rl_policy(
                           f"S={is_success} fired={fired}")
                     episode_success.append(is_success)
                     episode_rewards_list.append(episode_rewards[i].item())
+                    _T = int(episode_lengths[i].item())
+                    episode_lengths_list.append(_T)
+                    # Termination-frame obs: horizontal gap between cube centers (local frame, meters)
+                    _end_xy_m = float("nan")
+                    if obs_struct is not None and "cube_1_pos" in obs_struct and "cube_2_pos" in obs_struct:
+                        _s = obs_struct
+                        _c1 = obs[i, _s["cube_1_pos"][0]:_s["cube_1_pos"][1]]
+                        _c2 = obs[i, _s["cube_2_pos"][0]:_s["cube_2_pos"][1]]
+                        _end_xy_m = torch.norm(_c1[:2] - _c2[:2]).item()
+                    episode_end_cube_xy_m_list.append(_end_xy_m)
+                    if is_success and is_dual_arm and obs_struct is not None and "cube_1_pos" in obs_struct:
+                        _fas = int(first_align_step_ep[i].item())
+                        if _fas >= 1:
+                            succ_pre_align_steps_list.append(_fas - 1)
+                            succ_align_phase_steps_list.append(_T - _fas + 1)
+                        else:
+                            succ_pre_align_steps_list.append(_T)
+                            succ_align_phase_steps_list.append(0)
                     if _reward_term_accum is not None:
                         _reward_term_episodes.append(_reward_term_accum[i].clone())
                     episode_count = len(episode_success)
@@ -618,6 +675,7 @@ def play_graph_rl_policy(
                 policy.prefill_node_history(next_obs, env_ids=done_envs)
                 episode_rewards[done_envs] = 0
                 episode_lengths[done_envs] = 0
+                first_align_step_ep[done_envs] = -1
                 if ema_smoothed_joints is not None:
                     ema_smoothed_joints[done_envs] = 0
 
@@ -642,11 +700,48 @@ def play_graph_rl_policy(
         last_100 = episode_success[-100:] if n >= 100 else episode_success
         sr_100_final = sum(last_100) / len(last_100) * 100.0 if last_100 else 0.0
         mean_reward = sum(episode_rewards_list) / len(episode_rewards_list)
+        succ_lens = [L for L, s in zip(episode_lengths_list, episode_success) if s]
+        mean_succ_len = sum(succ_lens) / len(succ_lens) if succ_lens else None
         print(f"\n[Play] ===== Final Statistics =====")
+        succ_len_str = (
+            f"succ_len_mean={mean_succ_len:.1f} steps (n={len(succ_lens)})"
+            if mean_succ_len is not None
+            else "succ_len_mean=n/a (0 successes)"
+        )
         print(
             f"[Play] SR={sr_final:.1f}% (100ep:{sr_100_final:.1f}%) [{n}ep] | "
-            f"Rew_mean={mean_reward:.1f} | {sum(episode_success)}/{n} success"
+            f"Rew_mean={mean_reward:.1f} | {sum(episode_success)}/{n} success | {succ_len_str}"
         )
+        if succ_align_phase_steps_list:
+            _n_ap = len(succ_align_phase_steps_list)
+            _m_pre = sum(succ_pre_align_steps_list) / _n_ap
+            _m_ap = sum(succ_align_phase_steps_list) / _n_ap
+            _nz = sum(1 for x in succ_align_phase_steps_list if x > 0)
+            print(
+                f"[Play] Success alignment (stacking funnel): "
+                f"pre_align_mean={_m_pre:.1f} steps | "
+                f"align_phase_mean={_m_ap:.1f} steps (first in_alignment→end, incl.) | "
+                f"n={_n_ap} ({_nz} with align_phase>0)"
+            )
+        elif succ_lens:
+            print(
+                "[Play] Success alignment: n/a (need dual-arm + cube_1/2 obs for stacking funnel mask)"
+            )
+        # Episode-end cube XY gap (same obs as success check; meters → mm)
+        _xy_pairs = [
+            (xy_m, s)
+            for xy_m, s in zip(episode_end_cube_xy_m_list, episode_success)
+            if not math.isnan(xy_m)
+        ]
+        if _xy_pairs:
+            _succ_xy = [xy for xy, s in _xy_pairs if s]
+            _fail_xy = [xy for xy, s in _xy_pairs if not s]
+            _fmt = lambda xs: f"{1000.0 * sum(xs) / len(xs):.2f} mm (n={len(xs)})" if xs else "n/a"
+            print(
+                f"[Play] Episode-end cube XY gap (‖Δxy‖, local frame): "
+                f"succ_mean={_fmt(_succ_xy)} | fail_mean={_fmt(_fail_xy)} | "
+                f"all_mean={1000.0 * sum(x for x, _ in _xy_pairs) / len(_xy_pairs):.2f} mm (n={len(_xy_pairs)})"
+            )
         # Print per-term reward breakdown
         if _reward_term_names and _reward_term_episodes:
             stacked = torch.stack(_reward_term_episodes)
@@ -763,6 +858,16 @@ def main():
         "--episode_length_s", type=float, default=None,
         help="Override episode length in seconds (default: use env config)",
     )
+    parser.add_argument(
+        "--backbone_only",
+        action="store_true",
+        help="Run Graph-Unet backbone only (policy.act zero_residual): no residual δ, no RL gripper head — compare against full RL",
+    )
+    parser.add_argument(
+        "--no_gripper_head",
+        action="store_true",
+        help="Keep residual RL on arms; replace gripper dims with a_base (no RL gripper head, no logits override). Implied by --backbone_only.",
+    )
 
     args = parser.parse_args()
 
@@ -776,6 +881,8 @@ def main():
         deterministic=args.deterministic,
         policy_type=args.policy_type,
         episode_length_s=args.episode_length_s,
+        backbone_only=args.backbone_only,
+        no_gripper_head=args.no_gripper_head,
     )
 
 

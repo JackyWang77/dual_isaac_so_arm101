@@ -299,6 +299,8 @@ class GraphUnetResidualRLCfg:
     use_expert_intervention: bool = False
     expert_intervention_ratio: float = 1.0  # initial ratio [0,1]
     expert_intervention_decay: float = 0.95  # per-iteration decay
+    # If True: Jacobian+DAgger on arms only; no env force-open; no expert gripper_labels / gripper BCE.
+    no_expert_gripper_override: bool = False
 
     # EMA smoothing for base_action (joints only, gripper excluded)
     ema_alpha: float = 1.0  # EMA weight: 1.0 = no smoothing (raw model output)
@@ -366,7 +368,7 @@ class GraphUnetResidualRLCfg:
     # β too small → weights too sharp → only extreme actions learn → increase β
     # β too large → weights too uniform → no learning signal → decrease β
     use_adaptive_beta: bool = True
-    target_eff_ratio: float = 0.4  # Target effective sample ratio ∈ (0,1); 0.4 = use ~40% of batch
+    target_eff_ratio: float = 0.7  # AWR weight uniformity target; ↑ = allow higher eff before β tightens
     beta_init: float = 0.3         # Initial β (log-space learnable)
 
 
@@ -731,7 +733,7 @@ class GraphUnetResidualRLPolicy(nn.Module):
         if self.use_adaptive_beta:
             _beta_init = getattr(cfg, "beta_init", 0.3)
             self.log_beta = nn.Parameter(torch.tensor(np.log(_beta_init), dtype=torch.float32))
-            self.target_eff_ratio = getattr(cfg, "target_eff_ratio", 0.4)
+            self.target_eff_ratio = getattr(cfg, "target_eff_ratio", 0.7)
             print(f"[GraphUnetResidualRLPolicy] Adaptive beta: init={_beta_init}, target_eff_ratio={self.target_eff_ratio}")
         else:
             self.log_beta = None
@@ -1703,9 +1705,9 @@ class GraphUnetResidualRLPolicy(nn.Module):
             loss_beta_dual = torch.tensor(0.0, device=obs.device)
 
         # ===== Gripper BCE loss =====
-        # Train gripper head to predict open/close from expert labels
+        # Expert geometry labels; disabled when cfg.no_expert_gripper_override (ablation: gripper from backbone + RL only)
         loss_gripper = torch.tensor(0.0, device=obs.device)
-        if "gripper_labels" in batch:
+        if "gripper_labels" in batch and not getattr(self.cfg, "no_expert_gripper_override", False):
             gripper_logits = self.gripper_head(x)  # [B, num_grippers]
             gripper_labels = batch["gripper_labels"]  # [B, num_grippers], 0/1 float
             loss_gripper = F.binary_cross_entropy_with_logits(gripper_logits, gripper_labels)

@@ -10,7 +10,7 @@ NUM_ENVS="${3:-512}"
 MAX_ITERATIONS="${4:-30}"
 STEPS_PER_ENV="${5:-405}"
 MINI_BATCH_SIZE="${6:-512}"
-NUM_EPOCHS="${7:-5}"
+NUM_EPOCHS="${7:-3}"
 MAX_DELTA_NORM="${MAX_DELTA_NORM:-0.25}"
 EXPECTILE_TAU="${9:-0.5}"
 LR="${10:-1e-4}"
@@ -18,8 +18,8 @@ SEED="${11:-42}"
 HEADLESS="${12:-true}"
 
 TASK="${TASK:-SO-ARM101-Dual-Cube-Stack-RL-v0}"
-SAVE_INTERVAL="${SAVE_INTERVAL:-10}"
-CRITIC_WARMUP_ITERS="${CRITIC_WARMUP_ITERS:-0}"
+SAVE_INTERVAL="${SAVE_INTERVAL:-5}"
+CRITIC_WARMUP_ITERS="${CRITIC_WARMUP_ITERS:-5}"
 USE_COUNTERFACTUAL_Q="${USE_COUNTERFACTUAL_Q:-true}"
 COUNTERFACTUAL_LOG_TAU="${COUNTERFACTUAL_LOG_TAU:-0.5}"
 LOG_DIR="${LOG_DIR:-./logs/dual_arm_rl}"
@@ -33,13 +33,19 @@ USE_AUTO_ENTROPY="${USE_AUTO_ENTROPY:-true}"
 TARGET_ENTROPY="${TARGET_ENTROPY:--10.0}"
 C_ENT_INIT="${C_ENT_INIT:-0.01}"
 USE_ADAPTIVE_BETA="${USE_ADAPTIVE_BETA:-true}"
-TARGET_EFF_RATIO="${TARGET_EFF_RATIO:-0.4}"
+TARGET_EFF_RATIO="${TARGET_EFF_RATIO:-0.7}"
 BETA_INIT="${BETA_INIT:-2.0}"
 
 # Expert Intervention (Jacobian correction + DAgger schedule)
 USE_EXPERT_INTERVENTION="${USE_EXPERT_INTERVENTION:-true}"
 EXPERT_INTERVENTION_RATIO="${EXPERT_INTERVENTION_RATIO:-1.0}"
-EXPERT_INTERVENTION_DECAY="${EXPERT_INTERVENTION_DECAY:-0.95}"
+EXPERT_INTERVENTION_DECAY="${EXPERT_INTERVENTION_DECAY:-1.0}"
+# true = Jacobian+DAgger on arms only; no env gripper force-open; no expert gripper BCE (gripper: backbone+RL)
+NO_EXPERT_GRIPPER_OVERRIDE="${NO_EXPERT_GRIPPER_OVERRIDE:-true}"
+NO_EXPERT_GRIPPER_OVERRIDE_FLAG=""
+if [ "$NO_EXPERT_GRIPPER_OVERRIDE" = "true" ] || [ "$NO_EXPERT_GRIPPER_OVERRIDE" = "1" ]; then
+    NO_EXPERT_GRIPPER_OVERRIDE_FLAG="--no_expert_gripper_override"
+fi
 
 if [ -z "$PRETRAINED_CHECKPOINT" ] || [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
     echo "Usage: $0 <pretrained_checkpoint> [resume_checkpoint] [num_envs] [max_iter] ..."
@@ -58,6 +64,7 @@ if [ -z "$PRETRAINED_CHECKPOINT" ] || [ ! -f "$PRETRAINED_CHECKPOINT" ]; then
     echo "  CRITIC_WARMUP_ITERS=10                 (first N iters: only train critic)"
     echo "  TARGET_DELTA_NORM=0.25                 (target ||δ|| for adaptive delta_reg)"
     echo "  TARGET_ENTROPY=-6.0                    (target entropy for auto entropy)"
+    echo "  NO_EXPERT_GRIPPER_OVERRIDE=true       (expert alignment only; no gripper force-open in env)"
     exit 1
 fi
 
@@ -104,7 +111,7 @@ echo "[Adaptive] delta_reg=$USE_ADAPTIVE_DELTA_REG (target_δ=$TARGET_DELTA_NORM
 echo "[Adaptive] entropy=$USE_AUTO_ENTROPY (target_H=$TARGET_ENTROPY c_init=$C_ENT_INIT)"
 echo "[Adaptive] beta=$USE_ADAPTIVE_BETA (target_eff=$TARGET_EFF_RATIO β_init=$BETA_INIT)"
 echo "[Fixed] alpha=1.0 (arm joints), max_delta_norm=$MAX_DELTA_NORM"
-echo "[Expert] intervention=$USE_EXPERT_INTERVENTION ratio=$EXPERT_INTERVENTION_RATIO decay=$EXPERT_INTERVENTION_DECAY"
+echo "[Expert] intervention=$USE_EXPERT_INTERVENTION ratio=$EXPERT_INTERVENTION_RATIO decay=$EXPERT_INTERVENTION_DECAY no_grip_override=$NO_EXPERT_GRIPPER_OVERRIDE"
 echo "Log: $LOG_DIR"
 echo "========================================"
 
@@ -133,6 +140,7 @@ python scripts/graph_dit_rl/train_graph_rl.py \
     $AUTO_ENTROPY_FLAG \
     $ADAPTIVE_BETA_FLAG \
     $EXPERT_FLAG \
+    $NO_EXPERT_GRIPPER_OVERRIDE_FLAG \
     --lr "$LR" \
     --seed "$SEED" \
     --critic_warmup_iters "$CRITIC_WARMUP_ITERS" \

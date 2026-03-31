@@ -87,7 +87,7 @@ parser.add_argument("--use_adaptive_beta", action="store_true", default=True,
     help="SAC-style learnable AWR beta: auto-adjusts to target effective sample ratio (default: True)")
 parser.add_argument("--no_adaptive_beta", action="store_false", dest="use_adaptive_beta",
     help="Use fixed beta instead of adaptive")
-parser.add_argument("--target_eff_ratio", type=float, default=0.4,
+parser.add_argument("--target_eff_ratio", type=float, default=0.7,
     help="Target effective sample ratio for adaptive beta (0.4 = ~40%% of batch effectively used)")
 parser.add_argument("--beta_init", type=float, default=0.3,
     help="Initial AWR beta for adaptive mode (log-space learnable)")
@@ -99,6 +99,9 @@ parser.add_argument("--expert_intervention_ratio", type=float, default=1.0,
     help="Initial expert intervention probability [0,1]; decays per iteration")
 parser.add_argument("--expert_intervention_decay", type=float, default=0.95,
     help="Per-iteration decay rate for expert intervention ratio")
+parser.add_argument("--no_expert_gripper_override", action="store_true", default=False,
+    help="Expert alignment only: Jacobian+DAgger on arms; no env gripper force-open; no expert gripper_labels / BCE. "
+         "Gripper: backbone + RL signal only vs full expert.")
 
 # AppLauncher
 AppLauncher.add_app_launcher_args(parser)
@@ -134,6 +137,10 @@ from SO_101.policies.graph_unet_residual_rl_policy import (
     GraphUnetResidualRLPolicy,
     compute_gae,
 )
+from stacking_funnel import FUNNEL_XY_ALIGN_M, stacking_funnel_mask_from_cubes
+
+# Expert gripper override: xy distance between cube centers must be below this to allow force-open (m).
+EXPERT_GRIPPER_OPEN_XY_M = 0.003  # 3 mm (xy alignment tolerance for open label + gripper intervene)
 
 # ============================================================
 # Rollout Buffer
@@ -226,6 +233,8 @@ class RolloutBuffer:
             self.expert_target[t] = info["expert_target"]
         if info.get("gripper_labels") is not None:
             self.gripper_labels[t] = info["gripper_labels"]
+        else:
+            self.gripper_labels[t].zero_()
 
         self.ptr += 1
 
@@ -408,6 +417,7 @@ class GraphDiTRLTrainer:
         self.use_expert_intervention = getattr(cfg, 'use_expert_intervention', False)
         self.expert_ratio = getattr(cfg, 'expert_intervention_ratio', 1.0)
         self.expert_decay = getattr(cfg, 'expert_intervention_decay', 0.95)
+        self.no_expert_gripper_override = getattr(cfg, "no_expert_gripper_override", False)
         self._expert_initialized = False
 
         # Initialize env buffers
@@ -463,7 +473,15 @@ class GraphDiTRLTrainer:
         # We want last body (-1), xyz rows (:3), arm joint cols (:5)
         self._expert_initialized = True
         if self.use_expert_intervention:
-            print(f"[Trainer] Expert intervention initialized (ratio={self.expert_ratio:.2f}, decay={self.expert_decay}, floor=0.80)")
+            _grip = "OFF (align-only, no gripper BCE)" if self.no_expert_gripper_override else "ON"
+            print(
+                f"[Trainer] Expert intervention initialized (ratio={self.expert_ratio:.2f}, decay={self.expert_decay}, floor=0.90) "
+                f"| expert_gripper_override={_grip}"
+            )
+
+    def _stacking_funnel_mask_from_cubes(self, c1: torch.Tensor, c2: torch.Tensor) -> torch.Tensor:
+        """Delegates to stacking_funnel.py (must match play_graph_rl alignment gating)."""
+        return stacking_funnel_mask_from_cubes(c1, c2)
 
     def _compute_expert_delta(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute expert delta via Jacobian pseudoinverse when xy misalignment detected.
@@ -502,15 +520,7 @@ class GraphDiTRLTrainer:
         xy_error = held_xy - target_xy  # [B, 2]
         xy_error_norm = xy_error.norm(dim=-1)
 
-        # Z diff between held cube and target cube
-        z_diff = torch.abs(held_z - torch.min(c1_z, c2_z))
-
-        # Only intervene when held cube is near target cube:
-        # - held cube above table (z > 15mm)
-        # - xy_error in [3mm, 20mm]: close enough for final alignment,
-        #   but not already perfect. >20mm = still transporting, let backbone handle.
-        near_target = (held_z > 0.015) & (xy_error_norm > 0.003) & (xy_error_norm < 0.02)
-        needs_correction = near_target | ((held_z > 0.015) & (xy_error_norm < 0.02) & (z_diff > 0.005))
+        needs_correction = self._stacking_funnel_mask_from_cubes(c1, c2)
 
         if not needs_correction.any():
             return expert_delta, intervene_mask
@@ -524,7 +534,7 @@ class GraphDiTRLTrainer:
             # Two-phase strategy to avoid friction when cubes touch:
             # Phase 1: XY not aligned → move XY, lift Z slightly above target
             # Phase 2: XY aligned → descend Z to stack
-            xy_aligned = xy_error_norm < 0.003  # 3mm = aligned enough to descend
+            xy_aligned = xy_error_norm <= FUNNEL_XY_ALIGN_M  # same inner bound as funnel
             hover_height = 0.025  # hover 25mm above base cube (cube=18mm + 7mm margin)
 
             max_step = 0.001  # 1mm per step, per axis (x, y, z independent)
@@ -770,25 +780,13 @@ class GraphDiTRLTrainer:
                     zero_residual=zero_residual,
                 )
 
-                # --- Alignment phase gating ---
-                # RL residual only active during final stacking alignment,
-                # same range as expert: held cube above ground, xy_error < 10mm.
-                # Outside this phase, use pure backbone (delta=0).
+                # --- Alignment phase gating (must match _stacking_funnel_mask_from_cubes / expert) ---
                 if not zero_residual and self._is_dual_arm:
                     s = getattr(self.cfg, "obs_structure", None)
                     if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
                         c1 = obs[:, s["cube_1_pos"][0]:s["cube_1_pos"][1]]  # [B, 3]
                         c2 = obs[:, s["cube_2_pos"][0]:s["cube_2_pos"][1]]  # [B, 3]
-                        c1_z, c2_z = c1[:, 2], c2[:, 2]
-                        # held cube = the higher one; target = the lower one
-                        held_xy = torch.where((c1_z < c2_z).unsqueeze(-1), c2[:, :2], c1[:, :2])
-                        held_z = torch.max(c1_z, c2_z)
-                        # target_xy = lower cube's XY (same as expert)
-                        target_xy = torch.where((c1_z < c2_z).unsqueeze(-1), c1[:, :2], c2[:, :2])
-                        xy_error_norm = (held_xy - target_xy).norm(dim=-1)
-                        z_diff = torch.abs(c1_z - c2_z)
-                        # Match expert range: held above ground, xy < 20mm, z_diff > 5mm
-                        in_alignment = (held_z > 0.015) & (xy_error_norm < 0.02) & (z_diff > 0.005)
+                        in_alignment = self._stacking_funnel_mask_from_cubes(c1, c2)
                         _alignment_steps += in_alignment.sum().item()
                         _total_env_steps += obs.shape[0]
                         not_aligned = ~in_alignment
@@ -820,20 +818,19 @@ class GraphDiTRLTrainer:
                     # expert_delta is 0 for non-correction envs, so this is safe
                     info["expert_target"] = expert_delta.detach()
 
-                    # --- Gripper labels: open when cubes are stacked and aligned ---
-                    s = getattr(self.cfg, "obs_structure", None)
-                    num_grippers = max(1, action.shape[-1] // 6)
-                    gripper_labels = torch.zeros(B, num_grippers, device=self.device)
-                    if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
-                        c1 = obs[:, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
-                        c2 = obs[:, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
-                        z_diff = torch.abs(c1[:, 2] - c2[:, 2])
-                        xy_dist = torch.norm(c1[:, :2] - c2[:, :2], dim=1)
-                        # Stacked and well-aligned: z_diff ≈ 19mm (±3mm) and xy < 1mm
-                        should_open = (z_diff > 0.016) & (z_diff < 0.022) & (xy_dist < 0.001)
-                        # Label=1 for all grippers when should open (both hands release)
-                        gripper_labels[should_open] = 1.0
-                    info["gripper_labels"] = gripper_labels
+                    # --- Gripper BCE labels (expert geometry): skip when no_expert_gripper_override ---
+                    if not self.no_expert_gripper_override:
+                        s = getattr(self.cfg, "obs_structure", None)
+                        num_grippers = max(1, action.shape[-1] // 6)
+                        gripper_labels = torch.zeros(B, num_grippers, device=self.device)
+                        if s is not None and "cube_1_pos" in s and "cube_2_pos" in s:
+                            c1 = obs[:, s["cube_1_pos"][0]:s["cube_1_pos"][1]]
+                            c2 = obs[:, s["cube_2_pos"][0]:s["cube_2_pos"][1]]
+                            z_diff = torch.abs(c1[:, 2] - c2[:, 2])
+                            xy_dist = torch.norm(c1[:, :2] - c2[:, :2], dim=1)
+                            should_open = (z_diff > 0.016) & (z_diff < 0.022) & (xy_dist < EXPERT_GRIPPER_OPEN_XY_M)
+                            gripper_labels[should_open] = 1.0
+                        info["gripper_labels"] = gripper_labels
 
                     # Stochastic DAgger: only intervene with probability expert_ratio
                     dagger_coin = torch.rand(B, device=self.device) < self.expert_ratio
@@ -849,12 +846,13 @@ class GraphDiTRLTrainer:
                         info["delta"][intervene_mask] = expert_delta[intervene_mask]
                         _n_expert_intervened += intervene_mask.sum().item()
 
-                    # Also override gripper action when expert says open
-                    should_open_grip = gripper_labels.sum(dim=-1) > 0  # [B]
-                    grip_intervene = should_open_grip & dagger_coin
-                    if grip_intervene.any():
-                        for gi in self.policy.gripper_indices:
-                            action[grip_intervene, gi] = 1.0  # Force open
+                    # Also override gripper action when expert says open (optional ablation)
+                    if not self.no_expert_gripper_override:
+                        should_open_grip = gripper_labels.sum(dim=-1) > 0  # [B]
+                        grip_intervene = should_open_grip & dagger_coin
+                        if grip_intervene.any():
+                            for gi in self.policy.gripper_indices:
+                                action[grip_intervene, gi] = 1.0  # Force open
 
                 action_dim = action.shape[-1]
                 action_for_sim = action.clone()
@@ -1252,7 +1250,7 @@ class GraphDiTRLTrainer:
             # Expert decay (only after critic warmup ends)
             if self.use_expert_intervention and iteration > 0 and not critic_warmup:
                 self.expert_ratio *= self.expert_decay
-                self.expert_ratio = max(self.expert_ratio, 0.8)  # floor: 80% expert, 20% RL exploration
+                self.expert_ratio = max(self.expert_ratio, 0.9)  # floor: 90% expert, 10% RL exploration
 
             # Log
             self._log(iteration, rollout_stats, update_stats)
@@ -1731,6 +1729,7 @@ def main():
         use_expert_intervention=getattr(args, "use_expert_intervention", False),
         expert_intervention_ratio=getattr(args, "expert_intervention_ratio", 1.0),
         expert_intervention_decay=getattr(args, "expert_intervention_decay", 0.95),
+        no_expert_gripper_override=getattr(args, "no_expert_gripper_override", False),
         use_adaptive_entropy=not getattr(args, "no_adaptive_entropy", False),
         c_ent_bad=args.c_ent_bad,
         c_ent_good=args.c_ent_good,
@@ -1744,7 +1743,7 @@ def main():
         target_entropy=getattr(args, "target_entropy", -6.0),
         c_ent_init=getattr(args, "c_ent_init", 0.01),
         use_adaptive_beta=getattr(args, "use_adaptive_beta", True),
-        target_eff_ratio=getattr(args, "target_eff_ratio", 0.4),
+        target_eff_ratio=getattr(args, "target_eff_ratio", 0.7),
         beta_init=getattr(args, "beta_init", 0.3),
     )
     print(f"[Main] residual_action_mask: {residual_action_mask.tolist()} (all 1s, no mask)")
@@ -1770,13 +1769,18 @@ def main():
     print(f"[Main] Delta Reg: {dreg_mode}")
     # Beta mode
     if getattr(policy_cfg, "use_adaptive_beta", False):
-        beta_mode = f"Adaptive beta (SAC-style, init={getattr(policy_cfg,'beta_init',0.3)}, target_eff={getattr(policy_cfg,'target_eff_ratio',0.4)})"
+        beta_mode = f"Adaptive beta (SAC-style, init={getattr(policy_cfg,'beta_init',0.3)}, target_eff={getattr(policy_cfg,'target_eff_ratio',0.7)})"
     else:
         beta_mode = f"Fixed beta={policy_cfg.beta}"
     print(f"[Main] AWR Beta: {beta_mode}")
     # Expert intervention mode
     if getattr(policy_cfg, "use_expert_intervention", False):
-        print(f"[Main] Expert Intervention: ENABLED (ratio={policy_cfg.expert_intervention_ratio}, decay={policy_cfg.expert_intervention_decay})")
+        _ego = getattr(policy_cfg, "no_expert_gripper_override", False)
+        print(
+            f"[Main] Expert Intervention: ENABLED (ratio={policy_cfg.expert_intervention_ratio}, "
+            f"decay={policy_cfg.expert_intervention_decay}) | "
+            f"no_expert_gripper_override={_ego} (if True: arms expert only; no env gripper override, no expert gripper BCE)"
+        )
     else:
         print(f"[Main] Expert Intervention: disabled")
     if policy_cfg.use_counterfactual_q:
