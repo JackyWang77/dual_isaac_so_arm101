@@ -131,12 +131,12 @@ Comparison of backbone-only policy vs. full system with residual RL on the **Dua
 <tr>
 <td align="center">
 
-https://github.com/user-attachments/assets/2c530ec2-3ae7-4e81-a0d9-c317e264ae20
+https://github.com/user-attachments/assets/4a1ec94a-08d7-440d-ba80-b9c7c2bb7544
 
 </td>
 <td align="center">
 
-https://github.com/user-attachments/assets/4a1ec94a-08d7-440d-ba80-b9c7c2bb7544
+https://github.com/user-attachments/assets/2c530ec2-3ae7-4e81-a0d9-c317e264ae20
 
 </td>
 </tr>
