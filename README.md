@@ -115,7 +115,7 @@ Evaluated across 1000 episodes with 5 random seeds on two SO-ARM101 robots (5-DO
 
 ## Demo Videos
 
-Comparison of backbone-only policy vs. full system with gripper expert intervention on the **Dual Stack** task:
+Comparison of backbone-only policy vs. full system with residual RL on the **Dual Stack** task:
 
 <table>
 <tr>
@@ -131,18 +131,16 @@ Comparison of backbone-only policy vs. full system with gripper expert intervent
 <tr>
 <td align="center">
 
-https://github.com/user-attachments/assets/backbone_only.mp4
+https://github.com/JackyWang77/dual_isaac_so_arm101/raw/main/assets/backbone_only.mp4
 
 </td>
 <td align="center">
 
-https://github.com/user-attachments/assets/gripper_expert.mp4
+https://github.com/JackyWang77/dual_isaac_so_arm101/raw/main/assets/rl_full_system.mp4
 
 </td>
 </tr>
 </table>
-
-> **Note**: If videos don't render above, see [`assets/backbone_only.mp4`](assets/backbone_only.mp4) and [`assets/gripper_expert.mp4`](assets/gripper_expert.mp4).
 
 ## Tasks
 
